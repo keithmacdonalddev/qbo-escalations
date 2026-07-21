@@ -9,6 +9,7 @@ const {
 } = require('../lib/agent-prompt-store');
 const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
 const { normalizeModelOverride } = require('./chat-orchestrator');
+const { assertProviderModelAllowed } = require('./ai-management');
 const {
   getAlternateProvider,
   getDefaultProvider,
@@ -1008,6 +1009,10 @@ async function updateAgentRuntime(agentId, runtimeUpdate, { actor = 'user', summ
   if (!(await canMutateIdentity(agentId))) return null;
   const updatedAt = new Date();
   const runtime = normalizeAgentRuntimeState(agentId, runtimeUpdate);
+  if (runtime.provider) assertProviderModelAllowed(runtime.provider, runtime.model || '');
+  if (runtime.fallbackProvider) {
+    assertProviderModelAllowed(runtime.fallbackProvider, runtime.fallbackModel || '');
+  }
 
   await updateIdentityWithRetry(agentId, async (doc) => {
     doc.runtime = {

@@ -19,6 +19,7 @@ import useAppShellRuntime from './hooks/useAppShellRuntime.js';
 import { useChat } from './hooks/useChat.js';
 import { WorkspaceMonitorProvider } from './context/WorkspaceMonitorContext.jsx';
 import { AgentRegistryProvider } from './context/AgentRegistryContext.jsx';
+import { useProviderCatalog } from './context/ProviderCatalogContext.jsx';
 import { AgentTestModalProvider } from './components/agent-tests/AgentTestModalProvider.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
@@ -60,6 +61,9 @@ const AGENT_MODAL_TITLES = {
 };
 
 function App() {
+  // Consuming the catalog version makes every mounted provider/model picker
+  // re-render immediately after AI Management changes the governed inventory.
+  useProviderCatalog();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {

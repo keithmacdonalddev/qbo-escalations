@@ -18,14 +18,11 @@ import {
   writeAgentRuntimeState,
 } from '../../lib/agentRuntimeSettings.js';
 import { isProviderMissingApiKey } from '../../lib/providerKeyStatus.js';
+import { isProviderModelEnabled } from '../../lib/providerCatalog.js';
 import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
 import { summarizeImageParserValidationFailure } from '../../lib/imageParserValidation.js';
 import { transitions } from '../../utils/motion.js';
 
-const IMAGE_PARSER_PROVIDERS = [
-  { value: '', label: 'Select provider...' },
-  ...IMAGE_PARSER_PROVIDER_OPTIONS,
-];
 const PARSER_MODE_OPTIONS = [
   { value: 'escalation-template-parser', label: 'Escalation Template' },
   { value: 'follow-up-chat-parser', label: 'Follow-Up Chat' },
@@ -137,6 +134,8 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   const modelSuggestions = provider
     ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === provider)
     : IMAGE_PARSER_MODEL_SUGGESTIONS;
+  const providerOptions = [{ value: '', label: 'Select provider...' }, ...IMAGE_PARSER_PROVIDER_OPTIONS];
+  const providerDisabled = providerOptions.some((option) => option.value === provider && option.disabled);
   const reasoningEffortOptions = getImageParserReasoningEffortOptions(provider);
 
   // Check provider availability when popup opens
@@ -281,6 +280,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   }, []);
 
   const providerMissingApiKey = isProviderMissingApiKey(provider, availability?.providers);
+  const providerUnavailable = providerMissingApiKey || providerDisabled;
 
   const handleParserStageEvent = useCallback((event) => {
     if (!event || typeof event !== 'object') return;
@@ -299,7 +299,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
   }, [toast]);
 
   const handleParse = useCallback(async () => {
-    if (!imageBase64 || !provider || providerMissingApiKey) return;
+    if (!imageBase64 || !provider || providerUnavailable) return;
     toastedStageKeysRef.current.clear();
     setValidationFailure(null);
     handleParserStageEvent({
@@ -417,7 +417,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
       setValidationFailure(null);
       onClose();
     }
-  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parserMode, parse, handleParserStageEvent, onParsed, onClose]);
+  }, [imageBase64, provider, providerUnavailable, model, reasoningEffort, parserMode, parse, handleParserStageEvent, onParsed, onClose]);
 
   const handleClear = useCallback(() => {
     setValidationFailure(null);
@@ -448,7 +448,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
 
   const providerStatus = provider && availability?.providers?.[provider];
   const isProviderOnline = providerStatus?.available;
-  const canParse = imageBase64 && provider && !providerMissingApiKey && !parsing;
+  const canParse = imageBase64 && provider && !providerUnavailable && !parsing;
   const validationError = validationFailure?.message || '';
   const packageStoreNotice = availability?.packageStore?.available === false
     ? `Provider package storage is unavailable: ${availability.packageStore.reason || availability.packageStore.code || 'Mongo read/write check failed'}.`
@@ -514,11 +514,11 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
                   setReasoningEffort('');
                 }}
               >
-                {IMAGE_PARSER_PROVIDERS.map((opt) => (
+                {providerOptions.map((opt) => (
                   <option
                     key={opt.value}
                     value={opt.value}
-                    disabled={isProviderMissingApiKey(opt.value, availability?.providers)}
+                    disabled={opt.disabled || isProviderMissingApiKey(opt.value, availability?.providers)}
                   >
                     {opt.label}
                   </option>
@@ -527,22 +527,26 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
             </label>
             <label className="ip-popup-field">
               <span>Model</span>
-              <input
-                type="text"
+              <select
                 value={model}
-                placeholder={getImageParserModelPlaceholder(provider)}
-                list={IMAGE_PARSER_POPUP_MODEL_LIST_ID}
+                id={IMAGE_PARSER_POPUP_MODEL_LIST_ID}
+                title={getImageParserModelPlaceholder(provider)}
                 onChange={(e) => {
                   setValidationFailure(null);
                   setModel(e.target.value);
                 }}
-                disabled={providerMissingApiKey}
-              />
-              <datalist id={IMAGE_PARSER_POPUP_MODEL_LIST_ID}>
+                disabled={providerUnavailable}
+              >
+                <option value="" disabled={provider ? !isProviderModelEnabled(provider, '') : false}>Provider default</option>
+                {model && !modelSuggestions.some((option) => option.value === model) && (
+                  <option value={model} disabled>{model} (not approved)</option>
+                )}
                 {modelSuggestions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value} disabled={option.disabled}>
+                    {option.label}{option.disabled ? ' (disabled)' : ''}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </label>
             {reasoningEffortOptions.length > 0 && (
               <label className="ip-popup-field">
@@ -553,7 +557,7 @@ export default function ImageParserPopup({ open, onClose, onParsed, seedImage = 
                     setValidationFailure(null);
                     setReasoningEffort(e.target.value);
                   }}
-                  disabled={providerMissingApiKey}
+                  disabled={providerUnavailable}
                 >
                   <option value="">Default</option>
                   {reasoningEffortOptions.map((option) => (

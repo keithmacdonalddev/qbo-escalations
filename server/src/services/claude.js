@@ -421,6 +421,7 @@ function createClaudeCliCapture({
  * @returns {function} cleanup - Call to kill the subprocess
  */
 function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, captureContext, onChunk, onThinkingChunk, onDone, onError }) {
+  require('./ai-management').assertProviderModelAllowed('claude', model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('claude', 'chat');
     if (!stub) throw new MissingProviderStubError('claude', 'chat');
@@ -759,6 +760,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
  * @returns {Promise<{fields: Object, usage: Object|null}>} Wrapper with parsed fields and usage metadata
  */
 async function parseEscalation(imageBase64OrText, options = {}) {
+  require('./ai-management').assertProviderModelAllowed('claude', options.model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('claude', 'parseEscalation');
     if (!stub) throw new MissingProviderStubError('claude', 'parseEscalation');
@@ -1525,6 +1527,7 @@ function extractFinalText(msg) {
 const TRANSCRIBE_TIMEOUT_MS = parsePositiveInt(process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS, 60000);
 
 async function transcribeImage(imageBase64OrPath, options = {}) {
+  require('./ai-management').assertProviderModelAllowed('claude', options.model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('claude', 'transcribeImage');
     if (!stub) throw new MissingProviderStubError('claude', 'transcribeImage');

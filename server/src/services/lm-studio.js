@@ -396,6 +396,7 @@ function buildUsageObject(json, fallbackModel) {
 // Returns:   cleanup()  →  { usage, partialResponse }
 // ---------------------------------------------------------------------------
 function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutMs, captureContext: callerCaptureContext, onChunk, onDone, onError }) {
+  require('./ai-management').assertProviderModelAllowed('lm-studio', model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('lm-studio', 'chat');
     if (!stub) throw new MissingProviderStubError('lm-studio', 'chat');
@@ -742,6 +743,7 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
 // parseEscalation() — non-streaming JSON extraction from image or text
 // ---------------------------------------------------------------------------
 async function parseEscalation(imageBase64OrText, options = {}) {
+  require('./ai-management').assertProviderModelAllowed('lm-studio', options.model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('lm-studio', 'parseEscalation');
     if (!stub) throw new MissingProviderStubError('lm-studio', 'parseEscalation');
@@ -828,6 +830,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
 // transcribeImage() — extract visible text from an image
 // ---------------------------------------------------------------------------
 async function transcribeImage(imageBase64OrPath, options = {}) {
+  require('./ai-management').assertProviderModelAllowed('lm-studio', options.model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('lm-studio', 'transcribeImage');
     if (!stub) throw new MissingProviderStubError('lm-studio', 'transcribeImage');

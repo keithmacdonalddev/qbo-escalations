@@ -53,6 +53,7 @@ import {
   PROVIDER_OPTIONS,
   getProviderMeta,
   getReasoningEffortOptions,
+  isProviderModelEnabled,
   providerSupportsCodexServiceTier,
 } from '../lib/providerCatalog.js';
 import useProviderKeyStatus from '../hooks/useProviderKeyStatus.js';
@@ -5350,7 +5351,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
               <option
                 key={option.value}
                 value={option.value}
-                disabled={isMissingKey(option.value)}
+                disabled={option.disabled || isMissingKey(option.value)}
               >
                 {option.label}
               </option>
@@ -5360,20 +5361,23 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
 
         <label>
           <span>{supportsFallback ? 'Primary model' : 'Model'}</span>
-          <input
+          <select
+            id={modelListId}
             value={model}
-            list={modelListId}
-            placeholder={getAgentRuntimeModelPlaceholder(definition, currentRuntime)}
+            title={getAgentRuntimeModelPlaceholder(definition, currentRuntime)}
             onChange={(event) => setModel(event.target.value)}
             disabled={isMissingKey(provider)}
-          />
-          <datalist id={modelListId}>
+          >
+            <option value="" disabled={!isProviderModelEnabled(provider, '')}>Provider default</option>
+            {model && !modelSuggestions.some((option) => option.value === model) && (
+              <option value={model} disabled>{model} (not approved)</option>
+            )}
             {modelSuggestions.map((option) => (
-              <option key={`${option.provider || provider}:${option.value}`} value={option.value}>
-                {option.label || option.value}
+              <option key={`${option.provider || provider}:${option.value}`} value={option.value} disabled={option.disabled}>
+                {option.label || option.value}{option.disabled ? ' (disabled)' : ''}
               </option>
             ))}
-          </datalist>
+          </select>
         </label>
 
         {supportsFallback && (
@@ -5387,7 +5391,7 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
                 <option
                   key={option.value}
                   value={option.value}
-                  disabled={isMissingKey(option.value)}
+                  disabled={option.disabled || isMissingKey(option.value)}
                 >
                   {option.label}
                 </option>
@@ -5399,25 +5403,27 @@ function RuntimeSettingsPanel({ agent, definition, runtimeState, saveStatus, rec
         {supportsFallback && (
           <label>
             <span>Fallback model</span>
-            <input
+            <select
+              id={fallbackModelListId}
               value={fallbackModel}
-              list={fallbackModelListId}
-              placeholder={getAgentRuntimeModelPlaceholder(definition, currentRuntime, {
-                fallback: true,
-              })}
+              title={getAgentRuntimeModelPlaceholder(definition, currentRuntime, { fallback: true })}
               onChange={(event) => setFallbackModel(event.target.value)}
               disabled={isMissingKey(fallbackProvider)}
-            />
-            <datalist id={fallbackModelListId}>
+            >
+              <option value="" disabled={!isProviderModelEnabled(fallbackProvider, '')}>Provider default</option>
+              {fallbackModel && !fallbackModelSuggestions.some((option) => option.value === fallbackModel) && (
+                <option value={fallbackModel} disabled>{fallbackModel} (not approved)</option>
+              )}
               {fallbackModelSuggestions.map((option) => (
                 <option
                   key={`${option.provider || fallbackProvider}:${option.value}`}
                   value={option.value}
+                  disabled={option.disabled}
                 >
-                  {option.label || option.value}
+                  {option.label || option.value}{option.disabled ? ' (disabled)' : ''}
                 </option>
               ))}
-            </datalist>
+            </select>
           </label>
         )}
 

@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
+const { assertProviderModelAllowed } = require('./ai-management');
 
 const CLAUDE_ISOLATED_ROOT = path.join(os.tmpdir(), 'qbo-escalations-claude-isolated');
 
@@ -122,6 +123,7 @@ function parseProactiveResponse(rawText) {
 // ---------------------------------------------------------------------------
 
 async function evaluateProactiveAction(trigger) {
+  assertProviderModelAllowed('claude');
   // trigger: { type: 'alert'|'pattern'|'entity', data: {...}, context: string }
   const prompt = `${getProactiveSystemPrompt()}\n\n---\nSituation:\n${trigger.context || JSON.stringify(trigger.data, null, 2)}`;
 

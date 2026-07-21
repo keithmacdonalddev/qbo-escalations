@@ -3,6 +3,7 @@ import {
   getProviderDefaultModel,
   getProviderModelPlaceholder,
   hasCustomModelOverride,
+  isProviderModelEnabled,
   normalizeModelOverride,
 } from '../lib/providerCatalog.js';
 
@@ -29,8 +30,10 @@ export default function ModelOverrideControl({
   const defaultModel = getProviderDefaultModel(provider);
   const isCustom = hasCustomModelOverride(provider, normalizedModel);
   const effectiveModel = isCustom ? normalizedModel : formatDefaultModel(provider);
+  const isKnownModel = !normalizedModel || suggestions.some((option) => option.value === normalizedModel);
+  const defaultModelEnabled = isProviderModelEnabled(provider, '');
   const quickPicks = suggestions
-    .filter((option) => option && option.value && option.value !== defaultModel)
+    .filter((option) => option && option.value && option.value !== defaultModel && !option.disabled)
     .slice(0, 4);
 
   return (
@@ -65,7 +68,7 @@ export default function ModelOverrideControl({
               className={`model-override-control__quick-pick${normalizedModel === option.value ? ' is-active' : ''}`}
               onClick={() => onChange(option.value)}
               title={option.value}
-              disabled={disabled}
+              disabled={disabled || option.disabled}
             >
               {option.label}
             </button>
@@ -74,24 +77,28 @@ export default function ModelOverrideControl({
       )}
 
       <label className="settings-ai-field model-override-control__field">
-        <span>Custom model ID</span>
-        <input
-          type="text"
+        <span>Approved model</span>
+        <select
+          id={listId}
           value={model || ''}
-          list={listId}
-          placeholder={getProviderModelPlaceholder(provider)}
           onChange={(event) => onChange(event.target.value)}
           disabled={disabled}
-        />
-        <datalist id={listId}>
+          title={getProviderModelPlaceholder(provider)}
+        >
+          <option value="" disabled={!defaultModelEnabled}>{formatDefaultModel(provider)} (provider default)</option>
+          {!isKnownModel && (
+            <option value={normalizedModel} disabled>{normalizedModel} (not approved)</option>
+          )}
           {suggestions.map((option) => (
-            <option key={`${label}:list:${option.value}`} value={option.value}>{option.label}</option>
+            <option key={`${label}:list:${option.value}`} value={option.value} disabled={option.disabled}>
+              {option.label}{option.disabled ? ' (disabled)' : ''}
+            </option>
           ))}
-        </datalist>
+        </select>
       </label>
 
       <div className="model-override-control__help">
-        Pick a suggested model or paste the exact model ID. Leave this blank to stay on the provider default.
+        Models are governed in Settings &gt; AI Management. Leave this on the provider default to follow its approved default model.
       </div>
     </div>
   );

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "providers": {
+    "claude": {
+      "discovery": "manual",
+      "models": [
+        { "id": "claude-fable-5", "label": "Claude Fable 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true }
+      ]
+    },
+    "anthropic": {
+      "discovery": "api",
+      "models": [
+        { "id": "claude-fable-5", "label": "Claude Fable 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true }
+      ]
+    },
+    "codex": {
+      "discovery": "manual",
+      "models": [
+        { "id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.5", "label": "GPT-5.5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.4", "label": "GPT-5.4", "releaseChannel": "compatibility", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.4-mini", "label": "GPT-5.4 Mini", "releaseChannel": "compatibility", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.4-nano", "label": "GPT-5.4 Nano", "releaseChannel": "compatibility", "supportsImageInput": false, "supportsThinking": true }
+      ]
+    },
+    "openai": {
+      "discovery": "api",
+      "models": [
+        { "id": "gpt-5.6-sol", "label": "GPT-5.6 Sol", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.6-terra", "label": "GPT-5.6 Terra", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.5", "label": "GPT-5.5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.4", "label": "GPT-5.4", "releaseChannel": "compatibility", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.4-mini", "label": "GPT-5.4 Mini", "releaseChannel": "compatibility", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gpt-5.4-nano", "label": "GPT-5.4 Nano", "releaseChannel": "compatibility", "supportsImageInput": false, "supportsThinking": true }
+      ]
+    },
+    "llm-gateway": {
+      "discovery": "api",
+      "models": [
+        { "id": "auto", "label": "Automatic routing", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": false }
+      ]
+    },
+    "gemini": {
+      "discovery": "api",
+      "models": [
+        { "id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash-Lite", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true }
+      ]
+    },
+    "kimi": {
+      "discovery": "api",
+      "models": [
+        { "id": "kimi-k2.7-code", "label": "Kimi K2.7 Code", "releaseChannel": "coding", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "kimi-k2.7-code-highspeed", "label": "Kimi K2.7 Code Highspeed", "releaseChannel": "coding", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "kimi-k2.6", "label": "Kimi K2.6", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true }
+      ]
+    },
+    "lm-studio": {
+      "discovery": "api",
+      "models": [
+        { "id": "local", "label": "Currently loaded local model", "releaseChannel": "local", "supportsImageInput": true, "supportsThinking": false }
+      ]
+    }
+  }
+}

@@ -16,6 +16,7 @@ import {
   getProviderDefaultModel,
   getProviderLabel,
   getProviderModelSuggestions,
+  isProviderModelEnabled,
 } from '../../lib/providerCatalog.js';
 import { buildDotTooltip } from '../../lib/agentStatus.js';
 // The orange Anthropic starburst badge — extracted to a shared icon so other
@@ -262,12 +263,13 @@ function ProviderLogo({ provider }) {
 function getProviderModelOptions(providerId) {
   const defaultModel = getProviderDefaultModel(providerId);
   const base = defaultModel
-    ? [{ value: '', label: `${defaultModel} (provider default)`, model: defaultModel }]
-    : [{ value: '', label: 'Provider default', model: 'auto' }];
+    ? [{ value: '', label: `${defaultModel} (provider default)`, model: defaultModel, disabled: !isProviderModelEnabled(providerId, defaultModel) }]
+    : [{ value: '', label: 'Provider default', model: 'auto', disabled: false }];
   const suggestions = getProviderModelSuggestions(providerId).map((option) => ({
     value: option.value,
     label: option.label || option.value,
     model: option.value,
+    disabled: option.disabled === true,
   }));
   const seen = new Set();
   return [...base, ...suggestions].filter((option) => {
@@ -305,14 +307,12 @@ function getProviderPickerOptions() {
   }));
 }
 
-const PROVIDER_PICKER_OPTIONS = getProviderPickerOptions();
-
 function stripDefaultSuffix(value) {
   return String(value || '').replace(/\s+\(Default\)$/i, '').trim();
 }
 
 function getProviderSummaryLabel(providerId, model = '') {
-  const provider = PROVIDER_PICKER_OPTIONS.find((option) => option.value === providerId)
+  const provider = getProviderPickerOptions().find((option) => option.value === providerId)
     || PROVIDER_OPTIONS.find((option) => option.value === providerId);
   const providerName = provider?.pickerName || getProviderLabel(providerId);
   return model ? `${providerName} / ${model}` : providerName;
@@ -323,7 +323,7 @@ function ProviderPickerPanel({ role, label, selectedProvider, onOpenModels }) {
     <div className="app-header-provider-picker-panel">
       <div className="app-header-provider-choice-heading">{label}</div>
       <div className="app-header-provider-choice-list">
-        {PROVIDER_PICKER_OPTIONS.map((option) => {
+        {getProviderPickerOptions().map((option) => {
           const selected = selectedProvider === option.value;
           return (
             <button
@@ -331,6 +331,7 @@ function ProviderPickerPanel({ role, label, selectedProvider, onOpenModels }) {
               type="button"
               className={`app-header-provider-choice is-${option.family || 'provider'}${selected ? ' is-selected' : ''}`}
               onClick={() => onOpenModels(role, option.value)}
+              disabled={option.disabled}
               aria-pressed={selected}
             >
               <ProviderLogo provider={option} />
@@ -412,6 +413,7 @@ function ProviderModelPanel({ role, providerId, draft, onBack, onSelectModel, on
               className={`app-header-provider-model-option${selected ? ' is-selected' : ''}`}
               onClick={() => onSelectModel(role, providerId, option.value)}
               aria-pressed={selected}
+              disabled={option.disabled}
             >
               <span className="app-header-provider-choice-mark" aria-hidden="true">
                 {selected ? (

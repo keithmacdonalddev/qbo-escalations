@@ -153,11 +153,14 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
       // (the authoritative AgentIdentity.runtime store), so we no longer send an
       // `agents` map from here — doing so would write the orphaned
       // UserPreferences agent store the runtime path ignores.
-      const savedSettings = setAiSettings ? setAiSettings(draft) : draft;
-
-      await syncAiAssistantDefaultsToServer({
-        settings: savedSettings,
+      const savedDefaults = await syncAiAssistantDefaultsToServer({
+        settings: draft,
       });
+      const savedSettings = savedDefaults?.settings || draft;
+
+      // Apply the server-confirmed value locally only after persistence
+      // succeeds. A failed save no longer changes live browser behavior.
+      if (setAiSettings) setAiSettings(savedSettings);
 
       setSavedGlobalState(cloneSettings(savedSettings));
       setSaveState('success');
@@ -176,7 +179,6 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
   const costSummary = [
     draft.guardrails.maxEstimatedRequestCostUsd === 0 ? 'No per-request cap' : `$${draft.guardrails.maxEstimatedRequestCostUsd} request cap`,
     draft.guardrails.dailyBudgetUsd === 0 ? 'No daily cap' : `$${draft.guardrails.dailyBudgetUsd} daily budget`,
-    draft.sessionBudget.costLimitUsd === 0 ? 'Unlimited session' : `$${draft.sessionBudget.costLimitUsd} session limit`,
   ];
 
   const contextSummary = [
@@ -206,7 +208,7 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
       {/* ── Header ── */}
       <motion.div className="agent-settings-header" {...itemMotion}>
         <div className="agent-settings-header-text">
-          <h2 className="agent-settings-title">AI Settings</h2>
+          <h2 className="agent-settings-title">AI Safety &amp; Context</h2>
           <p className="agent-settings-subtitle">
             Cross-cutting cost, context, memory, and debug controls for the AI agents.
             Each agent&apos;s provider and model are configured on its profile in the
@@ -265,20 +267,6 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
                       <option value="fallback">fallback</option>
                       <option value="block">block</option>
                     </select>
-                  </label>
-                  <label className="settings-ai-field">
-                    <span>Session Token Limit</span>
-                    <input type="number" min={0} max={10000000} step={10000}
-                      value={draft.sessionBudget.tokenLimit}
-                      onChange={(e) => updateField('sessionBudget.tokenLimit', Number(e.target.value))}
-                    />
-                  </label>
-                  <label className="settings-ai-field settings-ai-field--full">
-                    <span>Session Cost Limit (USD)</span>
-                    <input type="number" min={0} max={1000} step={0.1}
-                      value={draft.sessionBudget.costLimitUsd}
-                      onChange={(e) => updateField('sessionBudget.costLimitUsd', Number(e.target.value))}
-                    />
                   </label>
                 </div>
               </motion.div>

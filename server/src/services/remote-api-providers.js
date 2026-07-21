@@ -19,6 +19,7 @@ const {
   buildAnthropicEffortParam,
   buildAnthropicThinkingParam,
 } = require('../lib/anthropic-thinking');
+const { assertProviderModelAllowed } = require('./ai-management');
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_TOKENS = 4096;
@@ -758,6 +759,7 @@ function requestGeminiChat({
 
 function createBufferedChatProvider(providerId, requestHandler) {
   return function chat(args) {
+    assertProviderModelAllowed(providerId, args?.model || '');
     if (isProvidersStubbed()) {
       const stub = getProviderStub(providerId, 'chat');
       if (!stub) throw new MissingProviderStubError(providerId, 'chat');

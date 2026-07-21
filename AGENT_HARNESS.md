@@ -45,3 +45,4 @@ Unused observation capture, background AI memory, session-finalization, folder-c
 - [Hook registry](docs/agent-harness/HOOK_REGISTRY.md)
 - [Memory policy](docs/agent-harness/MEMORY_POLICY.md)
 - [Skill and specialist catalog](docs/agent-harness/SKILL_CATALOG.md)
+- [AI provider and model management](docs/agent-harness/AI_PROVIDER_MODEL_MANAGEMENT.md)

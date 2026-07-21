@@ -68,7 +68,7 @@ function WorkspaceCompactProviderMenu({
 
       <div className="workspace-agent-provider-choice-grid" aria-label="Recommended providers">
         {quickProviderOptions.map((option) => {
-          const disabled = isMissingKey(option.value);
+          const disabled = option.disabled || isMissingKey(option.value);
           return (
             <button
               key={option.value}
@@ -122,7 +122,7 @@ function WorkspaceCompactProviderMenu({
         <summary>Advanced provider and model settings</summary>
         <div className="workspace-agent-provider-choice-grid is-advanced" aria-label="All providers">
           {advancedProviderOptions.map((option) => {
-            const disabled = isMissingKey(option.value);
+            const disabled = option.disabled || isMissingKey(option.value);
             return (
               <button
                 key={option.value}
@@ -395,7 +395,7 @@ export default function WorkspacePanelHeader({
           >
             <div className="provider-popover-label">Provider</div>
             {PROVIDER_OPTIONS.map((option) => {
-              const disabled = isMissingKey(option.value);
+              const disabled = option.disabled || isMissingKey(option.value);
               return (
                 <button
                   key={option.value}
@@ -444,7 +444,7 @@ export default function WorkspacePanelHeader({
                 <div className="provider-popover-divider" />
                 <div className="provider-popover-label">Fallback Provider</div>
                 {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => {
-                  const disabled = isMissingKey(option.value);
+                  const disabled = option.disabled || isMissingKey(option.value);
                   return (
                     <button
                       key={option.value}

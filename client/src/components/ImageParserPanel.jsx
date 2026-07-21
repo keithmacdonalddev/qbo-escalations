@@ -16,13 +16,10 @@ import {
 import { showImageParserStageToast } from '../lib/imageParserStageToasts.js';
 import { summarizeImageParserValidationFailure } from '../lib/imageParserValidation.js';
 import { isProviderMissingApiKey } from '../lib/providerKeyStatus.js';
+import { isProviderModelEnabled } from '../lib/providerCatalog.js';
 import { renderMarkdown, CopyButton } from '../utils/markdown.jsx';
 import './ImageParserPanel.css';
 
-const IMAGE_PARSER_PROVIDERS = [
-  { value: '', label: 'Select a provider...' },
-  ...IMAGE_PARSER_PROVIDER_OPTIONS,
-];
 const IMAGE_PARSER_PANEL_MODEL_LIST_ID = 'image-parser-panel-model-options';
 const IMAGE_PARSER_REASONING_EFFORT_KEY = 'qbo-image-parser-reasoning-effort';
 
@@ -163,6 +160,8 @@ export default function ImageParserPanel() {
   const modelSuggestions = provider
     ? IMAGE_PARSER_MODEL_SUGGESTIONS.filter((option) => option.provider === provider)
     : IMAGE_PARSER_MODEL_SUGGESTIONS;
+  const providerOptions = [{ value: '', label: 'Select a provider...' }, ...IMAGE_PARSER_PROVIDER_OPTIONS];
+  const providerDisabled = providerOptions.some((option) => option.value === provider && option.disabled);
   const reasoningEffortOptions = getImageParserReasoningEffortOptions(provider);
 
   // Check provider availability on mount
@@ -255,6 +254,7 @@ export default function ImageParserPanel() {
   }, [processFile]);
 
   const providerMissingApiKey = isProviderMissingApiKey(provider, availability?.providers);
+  const providerUnavailable = providerMissingApiKey || providerDisabled;
 
   const handleParserStageEvent = useCallback((event) => {
     if (!event || typeof event !== 'object') return;
@@ -273,7 +273,7 @@ export default function ImageParserPanel() {
   }, [toast]);
 
   const handleParse = useCallback(async () => {
-    if (!imageBase64 || !provider || providerMissingApiKey) return;
+    if (!imageBase64 || !provider || providerUnavailable) return;
     toastedStageKeysRef.current.clear();
     setValidationFailure(null);
     handleParserStageEvent({
@@ -365,7 +365,7 @@ export default function ImageParserPanel() {
         },
       });
     }
-  }, [imageBase64, provider, providerMissingApiKey, model, reasoningEffort, parse, handleParserStageEvent]);
+  }, [imageBase64, provider, providerUnavailable, model, reasoningEffort, parse, handleParserStageEvent]);
 
   const handleClear = useCallback(() => {
     setValidationFailure(null);
@@ -428,14 +428,16 @@ export default function ImageParserPanel() {
 
   const providerStatus = provider && availability?.providers?.[provider];
   const isProviderOnline = providerStatus?.available;
-  const providerLabel = IMAGE_PARSER_PROVIDERS.find((opt) => opt.value === provider)?.label || provider;
-  const providerStatusLabel = provider
+  const providerLabel = providerOptions.find((opt) => opt.value === provider)?.label || provider;
+  const providerStatusLabel = providerDisabled
+    ? `${providerLabel} is disabled in Settings > AI Management`
+    : provider
     ? getImageParserStatusLabel(provider, providerStatus, providerLabel)
     : 'No provider selected';
   const providerStatusBadgeText = provider
     ? getImageParserStatusBadgeText(provider, providerStatus)
     : 'Unknown';
-  const canParse = imageBase64 && provider && !providerMissingApiKey && !parsing;
+  const canParse = imageBase64 && provider && !providerUnavailable && !parsing;
   const packageStoreNotice = availability?.packageStore?.available === false
     ? `Provider package storage is unavailable: ${availability.packageStore.reason || availability.packageStore.code || 'Mongo read/write check failed'}.`
     : '';
@@ -484,11 +486,11 @@ export default function ImageParserPanel() {
                 setReasoningEffort('');
               }}
             >
-              {IMAGE_PARSER_PROVIDERS.map((opt) => (
+              {providerOptions.map((opt) => (
                 <option
                   key={opt.value}
                   value={opt.value}
-                  disabled={isProviderMissingApiKey(opt.value, availability?.providers)}
+                  disabled={opt.disabled || isProviderMissingApiKey(opt.value, availability?.providers)}
                 >
                   {opt.label}
                 </option>
@@ -497,22 +499,26 @@ export default function ImageParserPanel() {
           </label>
           <label className="image-parser-field">
             <span>Model</span>
-            <input
-              type="text"
+            <select
               value={model}
-              placeholder={getImageParserModelPlaceholder(provider)}
-              list={IMAGE_PARSER_PANEL_MODEL_LIST_ID}
+              id={IMAGE_PARSER_PANEL_MODEL_LIST_ID}
+              title={getImageParserModelPlaceholder(provider)}
               onChange={(e) => {
                 setValidationFailure(null);
                 setModel(e.target.value);
               }}
-              disabled={providerMissingApiKey}
-            />
-            <datalist id={IMAGE_PARSER_PANEL_MODEL_LIST_ID}>
+              disabled={providerUnavailable}
+            >
+              <option value="" disabled={provider ? !isProviderModelEnabled(provider, '') : false}>Provider default</option>
+              {model && !modelSuggestions.some((option) => option.value === model) && (
+                <option value={model} disabled>{model} (not approved)</option>
+              )}
               {modelSuggestions.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+                <option key={option.value} value={option.value} disabled={option.disabled}>
+                  {option.label}{option.disabled ? ' (disabled)' : ''}
+                </option>
               ))}
-            </datalist>
+            </select>
           </label>
           {reasoningEffortOptions.length > 0 && (
             <label className="image-parser-field">
@@ -523,7 +529,7 @@ export default function ImageParserPanel() {
                   setValidationFailure(null);
                   setReasoningEffort(e.target.value);
                 }}
-                disabled={providerMissingApiKey}
+                disabled={providerUnavailable}
               >
                 <option value="">Default</option>
                 {reasoningEffortOptions.map((option) => (

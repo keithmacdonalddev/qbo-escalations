@@ -493,6 +493,7 @@ async function runDirectTriageProviderCall({
   eventBus,
   signal,
 } = {}) {
+  require('./ai-management').assertProviderModelAllowed(provider, model || '');
   const captureContext = buildCaptureContext({ provider, model, promptTrace, overrides: captureOverrides });
   const onProviderEvent = (eventType, payload) => eventBus?.emit(eventType, payload);
 

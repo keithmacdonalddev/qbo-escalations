@@ -1323,7 +1323,7 @@ function WorkflowCard({
     <section
       ref={cardRef}
       data-stage-card={step.key}
-      inert={!interactive ? '' : undefined}
+      inert={!interactive ? true : undefined}
       aria-hidden={!interactive ? true : undefined}
       className={`v5-workflow-card v5-workflow-card--${status}${clickable ? ' is-clickable' : ''}`}
       role={clickable ? 'button' : undefined}
@@ -1487,7 +1487,7 @@ function WorkflowLane({
           className="v5-workflow-lane__group"
           data-reveal-index={index + 1}
           key={step.key}
-          inert={!cardsInteractive ? '' : undefined}
+          inert={!cardsInteractive ? true : undefined}
           aria-hidden={!cardsInteractive ? true : undefined}
           initial={false}
           animate={preflight ? 'stacked' : 'row'}

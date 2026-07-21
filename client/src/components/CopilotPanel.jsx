@@ -279,7 +279,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
             <div className="workspace-agent-provider-popover" style={{ left: 'auto', right: 0, width: 340 }}>
               <div className="provider-popover-label">Provider</div>
               {PROVIDER_OPTIONS.map((option) => {
-                const disabled = isMissingKey(option.value);
+                const disabled = option.disabled || isMissingKey(option.value);
                 return (
                   <button
                     key={option.value}
@@ -337,7 +337,7 @@ export default function CopilotPanel({ escalationId = null, title = 'Co-pilot' }
                   <div className="provider-popover-divider" />
                   <div className="provider-popover-label">Fallback Provider</div>
                   {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => {
-                    const disabled = isMissingKey(option.value);
+                    const disabled = option.disabled || isMissingKey(option.value);
                     return (
                       <button
                         key={option.value}

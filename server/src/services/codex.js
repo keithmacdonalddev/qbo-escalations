@@ -437,6 +437,7 @@ function chat({
   onDone,
   onError,
 }) {
+  require('./ai-management').assertProviderModelAllowed('codex', model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('codex', 'chat');
     if (!stub) throw new MissingProviderStubError('codex', 'chat');
@@ -699,6 +700,7 @@ async function warmUp() {
  * @returns {Promise<{fields: Object, usage: Object|null}>} Wrapper with parsed fields and usage metadata
  */
 async function parseEscalation(imageBase64OrText, options = {}) {
+  require('./ai-management').assertProviderModelAllowed('codex', options.model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('codex', 'parseEscalation');
     if (!stub) throw new MissingProviderStubError('codex', 'parseEscalation');
@@ -937,6 +939,7 @@ async function parseEscalation(imageBase64OrText, options = {}) {
  * @returns {Promise<{text: string, usage: Object|null}>}
  */
 async function transcribeImage(imageBase64OrPath, options = {}) {
+  require('./ai-management').assertProviderModelAllowed('codex', options.model || '');
   if (isProvidersStubbed()) {
     const stub = getProviderStub('codex', 'transcribeImage');
     if (!stub) throw new MissingProviderStubError('codex', 'transcribeImage');

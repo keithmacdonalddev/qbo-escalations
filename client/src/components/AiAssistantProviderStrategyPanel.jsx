@@ -62,7 +62,7 @@ export default function AiAssistantProviderStrategyPanel({
             const isSelected = currentPrimary === option.value;
             const tone = PROVIDER_FAMILY[option.value] || option.family || 'claude';
             const effortOptions = getReasoningEffortOptions(tone);
-            const disabled = isProviderMissingApiKey(option.value, providerStatus);
+            const disabled = option.disabled || isProviderMissingApiKey(option.value, providerStatus);
             return (
               <motion.button
                 key={option.value}
@@ -136,7 +136,7 @@ export default function AiAssistantProviderStrategyPanel({
                 <option
                   key={option.value}
                   value={option.value}
-                  disabled={isProviderMissingApiKey(option.value, providerStatus)}
+                  disabled={option.disabled || isProviderMissingApiKey(option.value, providerStatus)}
                 >
                   {option.label}
                 </option>

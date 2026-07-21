@@ -155,7 +155,7 @@ export default function useWorkspaceAgentPanelActions({
           const modeLabel = mode === 'fallback'
             ? `${getProviderShortLabel(provider)} + ${getProviderShortLabel(fallbackProvider)} (fallback)`
             : getProviderShortLabel(provider);
-          const available = PROVIDER_OPTIONS.map((o) => `\`${o.value}\``).join(', ');
+          const available = PROVIDER_OPTIONS.filter((o) => !o.disabled).map((o) => `\`${o.value}\``).join(', ');
           addSystemMessage([
             `**Current provider:** ${modeLabel}`,
             `**Model override:** ${model || 'provider default'}`,
@@ -169,6 +169,10 @@ export default function useWorkspaceAgentPanelActions({
             (o) => o.value.toLowerCase() === arg.toLowerCase() || o.label.toLowerCase() === arg.toLowerCase()
           );
           if (match) {
+            if (match.disabled) {
+              addSystemMessage(`${match.label} is disabled in Settings > AI Management.`);
+              return true;
+            }
             if (isProviderMissingApiKey(match.value, providerStatus)) {
               addSystemMessage(`${match.label} needs an API key before it can be selected.`);
               return true;
@@ -176,7 +180,7 @@ export default function useWorkspaceAgentPanelActions({
             patchSession({ provider: match.value, model: '' });
             addSystemMessage(`Provider switched to **${match.label}** (\`${match.value}\`).`);
           } else {
-            const available = PROVIDER_OPTIONS.map((o) => `\`${o.value}\``).join(', ');
+            const available = PROVIDER_OPTIONS.filter((o) => !o.disabled).map((o) => `\`${o.value}\``).join(', ');
             addSystemMessage(`Unknown provider: \`${arg}\`\n\nAvailable: ${available}`);
           }
         }

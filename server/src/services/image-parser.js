@@ -2917,6 +2917,9 @@ async function parseImage(imageBase64, options = {}) {
   // attempt actually in flight. Returns the raw provider result object.
   async function dispatchProviderParse(provider, model) {
     let result;
+    // The agent profile chooses the provider/model. AI Management governs
+    // whether that configured choice is currently allowed to run.
+    require('./ai-management').assertProviderModelAllowed(provider, model || '');
     eventBus?.emit('parser.generation_started', {
       provider,
       model: model || '',
@@ -3318,6 +3321,12 @@ async function parseImage(imageBase64, options = {}) {
 const PROVIDER_AVAILABILITY_BATCH_TIMEOUT_MS = 5_000;
 
 async function resolveProviderAvailability(trace = null) {
+  const { isProviderEnabled } = require('./ai-management');
+  const disabledStatus = (provider) => ({
+    available: false,
+    code: 'AI_PROVIDER_DISABLED',
+    reason: `${getRemoteProviderLabel(provider)} is disabled in Settings > AI Management.`,
+  });
   const remoteProviderNames = ['anthropic', 'openai', 'kimi', 'gemini'];
   const claudeProviderIds = [...CLAUDE_IMAGE_PARSER_PROVIDER_IDS];
   const codexProviderIds = [...CODEX_IMAGE_PARSER_PROVIDER_IDS];
@@ -3327,6 +3336,7 @@ async function resolveProviderAvailability(trace = null) {
   // without coordinating index positions across heterogeneous probe types.
 
   const llmGatewayProbe = (async () => {
+    if (!isProviderEnabled('llm-gateway')) return ['llm-gateway', disabledStatus('llm-gateway')];
     const gatewayKey = await traceAvailabilityCall(trace, {
       name: 'Resolve LLM Gateway API key',
       functionName: 'resolveApiKey',
@@ -3365,6 +3375,7 @@ async function resolveProviderAvailability(trace = null) {
   })();
 
   const lmStudioProbe = (async () => {
+    if (!isProviderEnabled('lm-studio')) return ['lm-studio', disabledStatus('lm-studio')];
     if (isProvidersStubbed()) {
       const stub = getProviderStub('lm-studio', 'providerAvailability');
       if (!stub) throw new MissingProviderStubError('lm-studio', 'providerAvailability');
@@ -3408,6 +3419,7 @@ async function resolveProviderAvailability(trace = null) {
   })();
 
   const remoteProbes = remoteProviderNames.map((provider) => (async () => {
+    if (!isProviderEnabled(provider)) return [provider, disabledStatus(provider)];
     const providerKey = await traceAvailabilityCall(trace, {
       name: `Resolve ${getRemoteProviderLabel(provider)} API key`,
       functionName: 'resolveApiKey',
@@ -3439,6 +3451,7 @@ async function resolveProviderAvailability(trace = null) {
   // model preset ids. Run them once, concurrently with everything else.
   const claudeProbe = claudeProviderIds.length
     ? (async () => {
+      if (!isProviderEnabled('claude')) return ['__claude__', disabledStatus('claude')];
       const claudeAvailability = await traceAvailabilityCall(trace, {
         name: 'Check Claude image-provider CLI availability',
         functionName: 'checkClaudeCliAvailability',
@@ -3452,6 +3465,7 @@ async function resolveProviderAvailability(trace = null) {
 
   const codexProbe = codexProviderIds.length
     ? (async () => {
+      if (!isProviderEnabled('codex')) return ['__codex__', disabledStatus('codex')];
       const codexAvailability = await traceAvailabilityCall(trace, {
         name: 'Check Codex image-provider CLI availability',
         functionName: 'checkCodexCliAvailability',

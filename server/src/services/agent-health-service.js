@@ -343,6 +343,21 @@ async function checkRuntimeProvider(runtime, availabilityByProvider, trace = nul
   const provider = normalizeProvider(runtime?.provider || getDefaultProvider());
   const transport = getProviderTransport(provider);
   const model = safeText(runtime?.model) || getProviderModelId(provider) || provider;
+  try {
+    require('./ai-management').assertProviderModelAllowed(provider, model);
+  } catch (err) {
+    if (String(err?.code || '').startsWith('AI_')) {
+      return {
+        provider,
+        providerLabel: getProviderLabel(provider),
+        model,
+        available: false,
+        code: err.code,
+        reason: err.message,
+      };
+    }
+    throw err;
+  }
   emitTrace(trace, {
     name: 'Resolve runtime provider transport',
     functionName: 'checkRuntimeProvider',

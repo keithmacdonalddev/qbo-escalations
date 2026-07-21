@@ -27,6 +27,7 @@ export function getProviderDisabledReason(providerId, providerStatus = null) {
 }
 
 export function getProviderOptionTitle(option, providerStatus = null) {
+  if (option?.disabled) return `${option.label}: disabled in AI Management`;
   const reason = getProviderDisabledReason(option?.value, providerStatus);
   return reason ? `${option.label}: ${reason}` : option?.label || '';
 }

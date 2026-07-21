@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { ErrorBoundary } from 'react-error-boundary';
 import { TooltipProvider } from './hooks/useTooltipLevel.jsx';
 import { ToastProvider } from './hooks/useToast.jsx';
+import { ProviderCatalogProvider } from './context/ProviderCatalogContext.jsx';
 import ErrorFallback from './components/ErrorFallback.jsx';
 import App from './App.jsx';
 import { installRuntimeGuards } from './lib/installRuntimeGuards.js';
@@ -16,6 +17,7 @@ import './themes/atmospherics.css';
 import './themes/new-atmospherics.css';
 import './themes/apple.css';
 import './overhaul.css';
+import './settings-v2.css';
 import './components/AgentsView.css';
 import './console-density.css';
 
@@ -41,7 +43,9 @@ createRoot(document.getElementById('root')).render(
     >
       <TooltipProvider>
         <ToastProvider>
-          <App />
+          <ProviderCatalogProvider>
+            <App />
+          </ProviderCatalogProvider>
         </ToastProvider>
       </TooltipProvider>
     </ErrorBoundary>

@@ -1,4 +1,7 @@
 import catalog from '../../../shared/ai-provider-catalog.json';
+import modelCatalog from '../../../shared/ai-model-catalog.json';
+
+let managementSnapshot = null;
 
 export const PROVIDER_CATALOG = Object.freeze(
   [...catalog]
@@ -14,6 +17,7 @@ const PROVIDER_MAP = Object.freeze(
 );
 
 function buildProviderOption(entry) {
+  const managed = managementSnapshot?.providers?.find((provider) => provider.id === entry.id);
   return {
     id: entry.id,
     value: entry.id,
@@ -40,6 +44,8 @@ function buildProviderOption(entry) {
     contextWindowTokens: Number.isFinite(entry.contextWindowTokens) ? entry.contextWindowTokens : null,
     maxOutputTokens: Number.isFinite(entry.maxOutputTokens) ? entry.maxOutputTokens : null,
     allowedEfforts: Array.isArray(entry.allowedEfforts) ? [...entry.allowedEfforts] : [],
+    enabled: managed ? managed.enabled !== false : true,
+    disabled: managed ? managed.enabled === false : false,
   };
 }
 
@@ -49,10 +55,13 @@ export function getProviderOptions() {
     .map(buildProviderOption);
 }
 
-export const PROVIDER_OPTIONS = Object.freeze(getProviderOptions());
+// These arrays intentionally keep stable references. AI Management replaces
+// their contents after a catalog refresh so existing imports across the app
+// immediately read the governed provider inventory on the next React render.
+export const PROVIDER_OPTIONS = getProviderOptions();
 
 export const PROVIDER_IDS = Object.freeze(PROVIDER_CATALOG.map((entry) => entry.id));
-export const SELECTABLE_PROVIDER_IDS = Object.freeze(PROVIDER_OPTIONS.map((entry) => entry.value));
+export const SELECTABLE_PROVIDER_IDS = PROVIDER_OPTIONS.map((entry) => entry.value);
 export const DEFAULT_PROVIDER = PROVIDER_CATALOG.find((entry) => entry.default)?.id || PROVIDER_IDS[0] || 'claude';
 export const DEFAULT_REASONING_EFFORT = 'high';
 export const DEFAULT_CODEX_SERVICE_TIER = 'fast';
@@ -70,47 +79,44 @@ export const CODEX_SERVICE_TIER_OPTIONS = Object.freeze([
   { value: 'flex', label: 'Flex' },
 ]);
 
-const EXTRA_MODEL_SUGGESTIONS = Object.freeze({
-  claude: Object.freeze([
-    { value: 'claude-fable-5', label: 'Claude Fable 5' },
-    { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
-    { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
-    { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
-  ]),
-  codex: Object.freeze([
-    { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol - flagship' },
-    { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra - balanced' },
-    { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna - fastest' },
-  ]),
-  'llm-gateway': Object.freeze([
-    { value: 'auto', label: 'Auto-detect' },
-  ]),
-  anthropic: Object.freeze([
-    { value: 'claude-fable-5', label: 'Claude Fable 5 - most capable' },
-    { value: 'claude-opus-4-8', label: 'Claude Opus 4.8 - complex agent work' },
-    { value: 'claude-sonnet-5', label: 'Claude Sonnet 5 - everyday balance' },
-    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 - fastest' },
-  ]),
-  openai: Object.freeze([
-    { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol - flagship' },
-    { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra - balanced' },
-    { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna - fastest' },
-    { value: 'gpt-5.5', label: 'GPT-5.5 - generally available flagship' },
-    { value: 'gpt-5.4', label: 'GPT-5.4 - generally available balanced' },
-    { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini - lower cost' },
-    { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano - lowest cost extraction' },
-  ]),
-  gemini: Object.freeze([
-    { value: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash - stable default' },
-    { value: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite - stable low cost' },
-    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro - preview' },
-  ]),
-  kimi: Object.freeze([
-    { value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code - strongest coding model' },
-    { value: 'kimi-k2.7-code-highspeed', label: 'Kimi K2.7 Code Highspeed - same model, faster' },
-    { value: 'kimi-k2.6', label: 'Kimi K2.6 - current default' },
-  ]),
-});
+const STATIC_MODEL_SUGGESTIONS = Object.freeze(Object.fromEntries(
+  Object.entries(modelCatalog.providers || {}).map(([providerId, definition]) => [
+    providerId,
+    Object.freeze((definition.models || []).map((model) => Object.freeze({
+      value: model.id,
+      label: model.label || model.id,
+      provider: providerId,
+      approval: 'approved',
+      enabled: true,
+      disabled: false,
+    }))),
+  ])
+));
+
+export function applyProviderManagementSnapshot(snapshot) {
+  managementSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+  PROVIDER_OPTIONS.splice(0, PROVIDER_OPTIONS.length, ...getProviderOptions());
+  SELECTABLE_PROVIDER_IDS.splice(
+    0,
+    SELECTABLE_PROVIDER_IDS.length,
+    ...PROVIDER_OPTIONS.filter((option) => !option.disabled).map((option) => option.value)
+  );
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('provider-catalog-updated', {
+      detail: { revision: managementSnapshot?.revision || 0 },
+    }));
+  }
+  return managementSnapshot;
+}
+
+export function getProviderManagementSnapshot() {
+  return managementSnapshot;
+}
+
+export function isProviderEnabled(providerId) {
+  const managed = managementSnapshot?.providers?.find((provider) => provider.id === providerId);
+  return managed ? managed.enabled !== false : true;
+}
 
 function getDefaultProviderMeta() {
   return PROVIDER_MAP[DEFAULT_PROVIDER] || PROVIDER_CATALOG[0] || null;
@@ -245,17 +251,38 @@ export function getProviderModelSuggestions(provider) {
       label: entry.label,
       provider: entry.id,
     }));
-  const extraOptions = (EXTRA_MODEL_SUGGESTIONS[normalizedProvider] || []).map((entry) => ({
-    ...entry,
-    provider: normalizedProvider,
-  }));
+  const managedProvider = managementSnapshot?.providers?.find((entry) => entry.id === normalizedProvider);
+  const managedOptions = managedProvider
+    ? (managedProvider.models || [])
+      .filter((model) => model.approval === 'approved')
+      .map((model) => ({
+        value: model.id,
+        label: model.label || model.id,
+        provider: normalizedProvider,
+        approval: model.approval,
+        enabled: model.enabled !== false,
+        disabled: model.enabled === false || managedProvider.enabled === false,
+      }))
+    : (STATIC_MODEL_SUGGESTIONS[normalizedProvider] || []);
 
   const seen = new Set();
-  return [...options, ...extraOptions].filter((option) => {
+  return [...managedOptions, ...options].filter((option) => {
     if (!option.value || seen.has(option.value)) return false;
     seen.add(option.value);
     return true;
   });
+}
+
+export function isProviderModelEnabled(provider, model) {
+  const normalizedProvider = normalizeProvider(provider);
+  const normalizedModel = normalizeModelOverride(model) || getProviderDefaultModel(normalizedProvider);
+  if (!isProviderEnabled(normalizedProvider)) return false;
+  if (!normalizedModel) return true;
+  const managed = managementSnapshot?.providers?.find((entry) => entry.id === normalizedProvider);
+  if (!managed) return true;
+  const record = managed.models?.find((entry) => entry.id === normalizedModel);
+  if (!record) return managementSnapshot?.enforceApprovedModels !== true;
+  return record.approval === 'approved' && record.enabled !== false;
 }
 
 export function hasCustomModelOverride(provider, model) {

@@ -83,7 +83,7 @@ export default function ChatComposeControls({
             <motion.div key="provider-popover" className="provider-popover" {...popover} transition={transitions.fast}>
               <div className="provider-popover-label">Provider</div>
               {PROVIDER_OPTIONS.map((option) => {
-                const disabled = isMissingKey(option.value);
+                const disabled = option.disabled || isMissingKey(option.value);
                 return (
                   <button
                     key={option.value}
@@ -134,7 +134,7 @@ export default function ChatComposeControls({
                   <div className="provider-popover-divider" />
                   <div className="provider-popover-label">Fallback Provider</div>
                   {PROVIDER_OPTIONS.filter((option) => option.value !== provider).map((option) => {
-                    const disabled = isMissingKey(option.value);
+                    const disabled = option.disabled || isMissingKey(option.value);
                     return (
                       <button
                         key={option.value}
@@ -173,7 +173,7 @@ export default function ChatComposeControls({
                     </label>
                     {PROVIDER_OPTIONS.map((option) => {
                       const isSelected = parallelProviders.includes(option.value);
-                      const disabled = isMissingKey(option.value) && !isSelected;
+                      const disabled = (option.disabled || isMissingKey(option.value)) && !isSelected;
                       return (
                         <button
                           key={option.value}

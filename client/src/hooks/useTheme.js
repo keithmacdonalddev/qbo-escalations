@@ -777,7 +777,10 @@ function applyTextSize(textSize) {
   TEXT_SIZE_PROPS.forEach(prop => {
     const base = BASE_TEXT_SIZES[prop];
     const scaled = Math.round(base * scaleFactor * 10) / 10;
-    root.style.setProperty(prop, `${scaled}px`);
+    // The active overhaul stylesheet intentionally pins its base type tokens
+    // with !important. The user setting must use the same priority or the
+    // slider appears to save while producing no visible change.
+    root.style.setProperty(prop, `${scaled}px`, 'important');
   });
 }
 

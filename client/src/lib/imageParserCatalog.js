@@ -9,25 +9,14 @@ import {
   resolveProviderSelection,
 } from './providerCatalog.js';
 
-export const IMAGE_PARSER_PROVIDER_OPTIONS = Object.freeze(
-  PROVIDER_OPTIONS.map((option) => Object.freeze({
-    value: option.value,
-    label: option.label,
-    shortLabel: option.shortLabel || option.label,
-  }))
-);
+export const IMAGE_PARSER_PROVIDER_OPTIONS = [];
 
-const SELECTABLE_IMAGE_PARSER_PROVIDER_IDS = new Set(
-  IMAGE_PARSER_PROVIDER_OPTIONS.map((option) => option.value)
-);
+// Keep disabled providers recognizable so an existing profile assignment is
+// preserved and remains visible for repair. Availability is enforced by the
+// picker and server; normalization must not silently erase the saved choice.
+const KNOWN_IMAGE_PARSER_PROVIDER_IDS = new Set();
 
-export const DEFAULT_IMAGE_PARSER_MODELS = Object.freeze(
-  IMAGE_PARSER_PROVIDER_OPTIONS.reduce((acc, option) => {
-    const defaultModel = getProviderDefaultModel(option.value);
-    acc[option.value] = defaultModel || (option.value === 'lm-studio' ? 'local' : 'auto');
-    return acc;
-  }, {})
-);
+export const DEFAULT_IMAGE_PARSER_MODELS = {};
 
 export const IMAGE_PARSER_REASONING_EFFORT_OPTIONS = Object.freeze([
   { value: 'none', label: 'None' },
@@ -48,11 +37,27 @@ function uniqueSuggestions(suggestions) {
   });
 }
 
-export const IMAGE_PARSER_MODEL_SUGGESTIONS = Object.freeze(uniqueSuggestions(
-  IMAGE_PARSER_PROVIDER_OPTIONS.flatMap((providerOption) => {
-    const suggestions = getProviderModelSuggestions(providerOption.value);
-    if (suggestions.length > 0) {
-      return suggestions.map((suggestion) => ({
+export const IMAGE_PARSER_MODEL_SUGGESTIONS = [];
+
+function rebuildImageParserCatalog() {
+  IMAGE_PARSER_PROVIDER_OPTIONS.splice(0, IMAGE_PARSER_PROVIDER_OPTIONS.length, ...PROVIDER_OPTIONS.map((option) => ({
+    value: option.value,
+    label: option.label,
+    shortLabel: option.shortLabel || option.label,
+    disabled: option.disabled === true,
+  })));
+
+  KNOWN_IMAGE_PARSER_PROVIDER_IDS.clear();
+  for (const option of IMAGE_PARSER_PROVIDER_OPTIONS) {
+    KNOWN_IMAGE_PARSER_PROVIDER_IDS.add(option.value);
+    const defaultModel = getProviderDefaultModel(option.value);
+    DEFAULT_IMAGE_PARSER_MODELS[option.value] = defaultModel || (option.value === 'lm-studio' ? 'local' : 'auto');
+  }
+
+  const suggestions = uniqueSuggestions(IMAGE_PARSER_PROVIDER_OPTIONS.flatMap((providerOption) => {
+    const providerSuggestions = getProviderModelSuggestions(providerOption.value);
+    if (providerSuggestions.length > 0) {
+      return providerSuggestions.map((suggestion) => ({
         ...suggestion,
         provider: providerOption.value,
       }));
@@ -61,9 +66,16 @@ export const IMAGE_PARSER_MODEL_SUGGESTIONS = Object.freeze(uniqueSuggestions(
       value: DEFAULT_IMAGE_PARSER_MODELS[providerOption.value] || 'auto',
       provider: providerOption.value,
       label: getProviderShortLabel(providerOption.value),
+      disabled: providerOption.disabled,
     }];
-  })
-));
+  }));
+  IMAGE_PARSER_MODEL_SUGGESTIONS.splice(0, IMAGE_PARSER_MODEL_SUGGESTIONS.length, ...suggestions);
+}
+
+rebuildImageParserCatalog();
+if (typeof window !== 'undefined') {
+  window.addEventListener('provider-catalog-updated', rebuildImageParserCatalog);
+}
 
 const IMAGE_PARSER_DETERMINISM_BY_PROVIDER = Object.freeze({
   claude: Object.freeze({
@@ -128,7 +140,7 @@ export function resolveImageParserSelection(provider, model = '') {
   if (!providerValue) return { provider: '', model: normalizedModel };
 
   const selection = resolveProviderSelection(providerValue, normalizedModel);
-  if (SELECTABLE_IMAGE_PARSER_PROVIDER_IDS.has(selection.provider)) {
+  if (KNOWN_IMAGE_PARSER_PROVIDER_IDS.has(selection.provider)) {
     return selection;
   }
 

@@ -3,6 +3,7 @@ const codex = require('../codex');
 const lmStudio = require('../lm-studio');
 const remoteApiProviders = require('../remote-api-providers');
 const { createChatAdapter } = require('./chat-provider');
+const { assertProviderEnabled, assertProviderModelAllowed } = require('../ai-management');
 const {
   PROVIDER_IDS,
   DEFAULT_PROVIDER_ID,
@@ -130,17 +131,20 @@ const PROVIDER_DEFS = Object.freeze(
 
     function withDefaultModel(fn) {
       if (typeof fn !== 'function') return null;
-      if (!model) return fn;
       return (...args) => {
         const lastArg = args[args.length - 1];
         if (lastArg && typeof lastArg === 'object' && !Array.isArray(lastArg)) {
           const nextArgs = [...args];
           nextArgs[nextArgs.length - 1] = { ...lastArg, model: lastArg.model || model };
+          assertProviderModelAllowed(id, nextArgs[nextArgs.length - 1].model || '');
           return fn(...nextArgs);
         }
         if (args.length === 1 && args[0] && typeof args[0] === 'object' && !Array.isArray(args[0])) {
-          return fn({ ...args[0], model: args[0].model || model });
+          const nextOptions = { ...args[0], model: args[0].model || model };
+          assertProviderModelAllowed(id, nextOptions.model || '');
+          return fn(nextOptions);
         }
+        assertProviderModelAllowed(id, model || '');
         return fn(...args);
       };
     }
@@ -187,6 +191,7 @@ function normalizeProvider(provider) {
 
 function getProvider(provider) {
   const normalized = normalizeProvider(provider);
+  assertProviderEnabled(normalized);
   const def = PROVIDER_DEFS[normalized];
   const capabilities = getProviderCapabilities(normalized);
   return {

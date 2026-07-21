@@ -109,7 +109,7 @@ export function createProviderAliasMap(provider, providerOptions = PROVIDER_OPTI
   const aliasMap = new Map();
   const familyDefaults = new Map();
 
-  for (const option of providerOptions) {
+  for (const option of providerOptions.filter((entry) => !entry.disabled)) {
     if (!familyDefaults.has(option.family)) {
       familyDefaults.set(option.family, option.value);
     }
