@@ -33,7 +33,7 @@ Memory helps recall; it never overrides current evidence or grants permission.
 - The Claude workspace guard blocks destructive Git operations and direct full-file reads of common secret files.
 - The session-start freshness hook reports instruction-map drift, missing harness files, and visibly stale curated memory.
 - When Codex is run directly, it defaults to the main conversation and exposes only two bounded optional specialists: implementation review and harness audit.
-- Claude Code may also call a separately authenticated, user-level Codex MCP server for selective cross-provider review or bounded delegated work. Availability is checked at runtime, Claude remains responsible for verification, and this connection is not an application-runtime dependency.
+- When delegation is useful, Claude Code prefers a separately authenticated, user-level Codex MCP server for most bounded research, implementation, and review tasks. Its ordinary delegated-work default is GPT-5.6 Sol with medium reasoning; higher effort is reserved for unusually difficult quality-first tasks. Built-in Claude specialists remain available when their preloaded skills or tool limits are the better fit. Availability is checked at runtime, Claude remains responsible for verification, and this connection is not an application-runtime dependency.
 - Claude specialists preload the narrow skill they need instead of rediscovering the whole skill catalog.
 
 ## Deliberately Removed

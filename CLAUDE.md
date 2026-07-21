@@ -101,9 +101,10 @@ Before reporting:
 Claude Code may have access to a separately authenticated Codex coding agent through a user-level MCP connection. MCP (Model Context Protocol) is the tool connection that lets Claude give Codex a bounded task. This is an optional local development capability, not a dependency of the running QBO application.
 
 - Confirm the `codex` MCP server is connected before promising to use it. Continue in the main Claude session when it is unavailable.
-- Use Codex selectively when an independent cross-provider review, second implementation opinion, or clearly bounded delegated task materially improves the outcome. Keep straightforward work in the main Claude session.
+- Keep straightforward work in the main Claude session. When delegation is useful, prefer Codex for most bounded research, implementation, and review tasks. Use a built-in Claude specialist instead when its preloaded project skill, read-only tool limits, or isolated role is a better fit, or when Codex is unavailable.
 - Give Codex the exact task scope, success criteria, repository constraints, and `C:\Projects\qbo-escalations` as its working directory (`cwd`). The runtime-ownership and concurrent-work rules in this file still apply.
-- Unless the user requests a specific model, omit the MCP model override so Codex uses the current default in the user's Codex configuration. Do not hard-code a personal Codex model choice in repository documentation.
+- For those ordinary Codex subagent tasks, use `gpt-5.6-sol` with `medium` reasoning. The user-level MCP server is configured with those defaults, so omit per-call model and reasoning overrides.
+- Use `high` or `xhigh` reasoning only for unusually difficult, quality-first work where deeper analysis is likely to improve the result, or when the user requests it. Keep the user's direct Codex default separate from this Claude-specific subagent default.
 - Claude remains responsible for the final result. Inspect Codex's evidence and edits, re-read affected files, resolve conflicts, and run proportionate verification before accepting or reporting its work.
 - Treat a Codex response as a proposal, not proof. Do not let either agent approve its own risky external action, expose secrets, or bypass required human confirmation.
 
