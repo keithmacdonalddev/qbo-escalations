@@ -10,6 +10,7 @@ This document explains how Claude Code and Codex are configured for this reposit
 | Scoped rules | Client- and server-specific guidance loaded only for matching files | `.claude/rules/` |
 | Skills | Reusable project, planning, review, browser, and harness-audit workflows | `.agents/skills/`, `.claude/skills/` |
 | Claude specialists | Worker, researcher, implementation reviewer, and harness auditor | `.claude/agents/` |
+| Optional external agent tools | User-level MCP connections that let one coding agent give another a bounded task | Personal client configuration such as `~/.claude.json`; not committed |
 | Hooks | Prompt reinforcement, service protection, workspace protection, and freshness warnings | `.claude/hooks/`, `.codex/hooks/` |
 | Curated memory | Small reviewed project overview and Codex handoff | `.claude/memory/`, `.codex/memory/` |
 | Automatic Claude agent memory | Local per-agent learning managed by Claude Code | `.claude/agent-memory/`, Gitignored |
@@ -31,7 +32,8 @@ Memory helps recall; it never overrides current evidence or grants permission.
 - The Claude runtime guard blocks attempts to take over long-running services.
 - The Claude workspace guard blocks destructive Git operations and direct full-file reads of common secret files.
 - The session-start freshness hook reports instruction-map drift, missing harness files, and visibly stale curated memory.
-- Codex defaults to the main conversation and exposes only two bounded optional specialists: implementation review and harness audit.
+- When Codex is run directly, it defaults to the main conversation and exposes only two bounded optional specialists: implementation review and harness audit.
+- Claude Code may also call a separately authenticated, user-level Codex MCP server for selective cross-provider review or bounded delegated work. Availability is checked at runtime, Claude remains responsible for verification, and this connection is not an application-runtime dependency.
 - Claude specialists preload the narrow skill they need instead of rediscovering the whole skill catalog.
 
 ## Deliberately Removed
