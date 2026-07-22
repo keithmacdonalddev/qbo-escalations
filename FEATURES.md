@@ -284,3 +284,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
 Special Feature: Credential Permission Verification - Go beyond checking whether a provider key works by verifying which approved capabilities and data scopes it can access, then warn when it is under-permissioned or unnecessarily powerful for its assigned agents. This would give the operator a governed least-privilege decision before sensitive workflows run, without exposing the secret itself.
+
+Date: 2026-07-22
+Time: 03:11 AST
+Model: Claude Opus 4.8
+Is duplicate?: no
+Complexity: high
+Special Feature: Evidence Lifespan Guardian - The app's evidence records expire on independent timers (parse results, triage results, provider packages, recovery candidates), so a record can silently become unusable because something it depends on expired first — a parked recovery candidate that can no longer be accepted, or a KB draft whose source package is gone. This feature maintains the dependency map between records and warns operators before any active review chain breaks ("this candidate becomes unacceptable in 3 days; this draft loses its provenance in 9"), offers a one-click governed retention extension for records under active review with an audit trail of who extended what and why, and surfaces an expiry-risk queue so nothing under human review dies of old age unnoticed. Distinct from Evidence Recovery Workbench (recovers a gap after loss occurs) and Evidence-Preserving Incident Capsule (freezes a snapshot after a failure) — this prevents dependency-driven expiry before the loss happens.
