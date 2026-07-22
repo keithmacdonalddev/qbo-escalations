@@ -279,10 +279,14 @@ async function start(options = {}) {
           console.log('[startup] Workspace monitor disabled');
         }
 
-        // The operator-controlled schedule defaults to Off. Starting this
-        // lightweight coordinator also keeps overdue catalog-review notices
-        // current without making provider requests unless a check is due.
-        startAiManagementScheduler();
+        if (startupControls.aiManagementScheduler) {
+          // The operator-controlled schedule defaults to Off. Starting this
+          // lightweight coordinator also keeps overdue catalog-review notices
+          // current without making provider requests unless a check is due.
+          startAiManagementScheduler();
+        } else {
+          console.log('[startup] AI management scheduler disabled');
+        }
 
         if (startupControls.agentHealthCheck) {
           startAgentHealthMonitor();

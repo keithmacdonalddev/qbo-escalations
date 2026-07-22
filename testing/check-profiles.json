@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "groups": {
+    "client-components": {
+      "label": "Client behavior tests",
+      "command": "npm",
+      "args": ["--prefix", "client", "test"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "why": "Protects visible client behavior without live services.",
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "qbo-orchestration", "conversation-persistence", "escalation-lifecycle", "provider-controls", "request-diagnostics"]
+    },
+    "server-suite": {
+      "label": "Server behavior tests",
+      "command": "node",
+      "args": ["server/scripts/run-tests.js", "--continue"],
+      "resultContract": "server-tests",
+      "cwd": ".",
+      "timeoutMs": 1800000,
+      "why": "Checks persistence, permissions, evidence, and route contracts.",
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle"]
+    },
+    "stress-harness-tests": {
+      "label": "Stress harness infrastructure tests",
+      "command": "node",
+      "args": ["--test", "stress-testing/scripts/test/*.test.js"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "why": "Checks isolation gates, baselines, and controlled service stubs.",
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration"]
+    },
+    "runner-contracts": {
+      "label": "Complete-check runner contract tests",
+      "command": "node",
+      "args": ["--test", "scripts/test/run-app-checks.test.js", "scripts/test/validate-testing-map.test.js", "stress-testing/scripts/test/run-slices-summary.test.js", "server/test/server-test-runner.test.js"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "why": "Proves passed, failed, and incomplete cannot be confused.",
+      "capabilities": ["evidence-completeness"]
+    },
+    "client-build": {
+      "label": "Production client build and bundle canary",
+      "command": "npm",
+      "args": ["run", "test:client-bundle"],
+      "cwd": ".",
+      "timeoutMs": 180000,
+      "environment": "production",
+      "why": "Catches production-only build and bundle regressions.",
+      "capabilities": ["qbo-evidence-intake", "saved-session-resume"]
+    },
+    "qbo-client": {
+      "label": "Critical QBO client tests",
+      "command": "npm",
+      "args": ["--prefix", "client", "test", "--", "src/lib/unsavedWorkGuard.test.js", "src/hooks/useAppRouteState.test.jsx", "src/components/chat-v5/UnsavedResultNotice.test.jsx", "src/components/chat-v5/EvidenceSummary.test.jsx", "src/components/chat-v5/useStageOrchestrator.test.jsx", "src/components/chat-v5/ChatV5Container.test.jsx", "src/components/EscalationDashboard.test.jsx", "src/components/EscalationDetail.test.jsx", "src/components/KnowledgebaseView.test.jsx"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "why": "Runs the fast checks closest to the critical QBO workflow.",
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle"]
+    },
+    "qbo-stress-slices": {
+      "label": "Critical QBO isolated stress slices",
+      "command": "node",
+      "args": ["stress-testing/scripts/run-slices.js", "escalation-domain", "image-intake-and-parse", "main-chat", "client-surfaces"],
+      "resultContract": "stress-slices",
+      "cwd": ".",
+      "timeoutMs": 1800000,
+      "why": "Exercises QBO server wiring and selected real-browser behavior with synthetic data.",
+      "requirements": ["agent-browser"],
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle"]
+    },
+    "all-stress-slices": {
+      "label": "All nine isolated stress slices",
+      "command": "node",
+      "args": ["stress-testing/scripts/run-slices.js"],
+      "resultContract": "stress-slices",
+      "cwd": ".",
+      "timeoutMs": 3600000,
+      "why": "Runs every registered isolated slice, including real-browser canaries.",
+      "requirements": ["agent-browser"],
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle"]
+    },
+    "testing-map": {
+      "label": "Testing capability map validation",
+      "command": "node",
+      "args": ["scripts/validate-testing-map.js"],
+      "cwd": ".",
+      "timeoutMs": 30000,
+      "why": "Keeps known evidence and testing gaps honest.",
+      "capabilities": ["evidence-completeness"]
+    }
+  },
+  "profiles": {
+    "core": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "testing-map"],
+    "focused-qbo": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "qbo-stress-slices", "testing-map"],
+    "full": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "client-build", "all-stress-slices", "testing-map"]
+  }
+}

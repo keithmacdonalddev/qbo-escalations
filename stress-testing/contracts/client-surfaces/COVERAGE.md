@@ -2,25 +2,16 @@
 
 ## Current status
 
-Started.
+Implemented but not yet trusted as a required gate.
 
-The first browser/realtime `main-chat` canary now exists. It covers:
-- happy-path streaming completion in the real browser
-- fallback-mode recovery with the user-visible fallback notice
-- route change to settings and return during an active stream
-- hard reload of `#/chat/<conversationId>` with persisted final response verification
+The slice now defines the five critical QBO Chat V5 journeys:
+- deterministic image-intake happy path, exact visible and saved triage/known-issue values, saved route, evidence terminal state, and reload de-duplication
+- parser failure with no false downstream completion, reset, and successful retry
+- triage persistence failure, visible recovery copy, stay, and explicit leave
+- saved-session route return plus hard-reload evidence integrity
+- linked escalation handoff, resolved outcome through the real form, reload persistence, and bounded cleanup
 
-The first workspace browser canary also exists. It covers:
-- seeded active and delivered shipment records
-- real workspace dock rendering of active shipments
-- expansion of shipment details and carrier tracking links
-- delivered shipment exclusion from the active shipment UI
-
-The first room browser canary also exists. It covers:
-- seeded two-agent room route loading
-- real room composer send behavior
-- multi-agent response rendering in the room thread
-- persisted room assistant messages after browser send
+Each scenario has an absolute deadline, bounded command and close operations, structured assertions, a success screenshot, and a JSON failure artifact when the browser cannot reach screenshot capture. A fixture and slice are incomplete when session cleanup cannot be proven.
 
 ## Contract priorities
 
@@ -32,6 +23,6 @@ The first room browser canary also exists. It covers:
 
 ## Known gaps
 
-- browser coverage currently exercises `main-chat`, the workspace shipment tracker, and a two-agent room turn
-- no workspace streaming, image parser, dashboard, or settings browser canaries yet
+- the five QBO journeys are structurally implemented but must pass repeatedly before becoming trusted gates
+- native browser transport currently times out on the initial `open` command even for a static local known-good page in a disposable session
 - no UI data-scale plan yet

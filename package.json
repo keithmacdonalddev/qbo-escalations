@@ -16,7 +16,11 @@
     "test:ui-density": "node stress-testing/scripts/ui-density-canary.js",
     "test:client-bundle": "npm --prefix client run build && node stress-testing/scripts/client-bundle-canary.js",
     "test:image-parser": "node --test server/test/image-parser*.test.js",
-    "stress:slices": "node stress-testing/scripts/run-slices.js"
+    "stress:slices": "node stress-testing/scripts/run-slices.js",
+    "verify:core": "node scripts/run-app-checks.js core",
+    "verify:qbo": "node scripts/run-app-checks.js focused-qbo",
+    "verify:full": "node scripts/run-app-checks.js full",
+    "validate:testing-map": "node scripts/validate-testing-map.js"
   },
   "devDependencies": {
     "concurrently": "^9.2.0"

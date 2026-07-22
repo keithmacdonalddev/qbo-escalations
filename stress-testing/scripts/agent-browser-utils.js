@@ -32,6 +32,20 @@ function stripAnsi(value) {
   return String(value || '').replace(/\u001b\[[0-9;]*m/g, '');
 }
 
+function isBrowserCompletionLoss(error) {
+  const code = String(error?.code || error?.cause?.code || '').trim().toUpperCase();
+  if (/^ECONN[A-Z0-9_]*$/.test(code)) return true;
+
+  const text = [error?.message, error?.cause?.message, error?.stderr, error?.stdout]
+    .filter(Boolean)
+    .map((value) => stripAnsi(value))
+    .join('\n');
+  return /\bECONN[A-Z0-9_]*\b/i.test(text)
+    || /\bconnection (?:was )?(?:lost|closed|failed|refused|reset)\b/i.test(text)
+    || /\b(?:failed|unable) to connect\b/i.test(text)
+    || /\bos error (?:10053|10054|10060|10061)\b/i.test(text);
+}
+
 async function allocatePort(host = '127.0.0.1') {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -71,7 +85,6 @@ function resolveAgentBrowserBin() {
 
   const candidates = [];
   if (process.env.APPDATA) {
-    candidates.push(path.join(process.env.APPDATA, 'npm', 'agent-browser.cmd'));
     candidates.push(path.join(
       process.env.APPDATA,
       'npm',
@@ -80,6 +93,7 @@ function resolveAgentBrowserBin() {
       'bin',
       'agent-browser-win32-x64.exe'
     ));
+    candidates.push(path.join(process.env.APPDATA, 'npm', 'agent-browser.cmd'));
   }
   candidates.push(path.join(
     ROOT_DIR,
@@ -92,7 +106,7 @@ function resolveAgentBrowserBin() {
   return candidates.find((candidate) => fs.existsSync(candidate)) || 'agent-browser.cmd';
 }
 
-async function runAgentBrowser(session, args, { json = false } = {}) {
+async function runAgentBrowser(session, args, { json = false, timeoutMs } = {}) {
   const fullArgs = [];
   if (json) fullArgs.push('--json');
   if (session) fullArgs.push('--session', session);
@@ -103,8 +117,10 @@ async function runAgentBrowser(session, args, { json = false } = {}) {
     env: {
       ...process.env,
       AGENT_BROWSER_IDLE_TIMEOUT_MS,
+      AGENT_BROWSER_DEFAULT_TIMEOUT: String(timeoutMs || AGENT_BROWSER_COMMAND_TIMEOUT_MS),
     },
     shell: AGENT_BROWSER_USES_SHELL,
+    ...(timeoutMs ? { timeoutMs } : {}),
   });
 
   return {
@@ -112,6 +128,53 @@ async function runAgentBrowser(session, args, { json = false } = {}) {
     stderr,
     parsed: json ? parseJsonOutput(stdout) : null,
   };
+}
+
+async function runAgentBrowserSequence(session, commands, {
+  bail = true,
+  json = true,
+  timeoutMs = 45_000,
+  deadlineAt = Number.POSITIVE_INFINITY,
+  runImpl = runAgentBrowser,
+} = {}) {
+  const entries = [];
+  let stdout = '';
+  let stderr = '';
+
+  for (const command of commands) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      entries.push({ success: false, incomplete: true, code: 'FIXTURE_DEADLINE', command, error: 'Browser fixture absolute deadline reached.' });
+      break;
+    }
+    try {
+      const result = await runImpl(session, command, { json, timeoutMs: Math.min(timeoutMs, remainingMs) });
+      stdout += result.stdout || '';
+      stderr += result.stderr || '';
+      entries.push({
+        success: true,
+        command,
+        result: json ? (result.parsed?.data ?? result.parsed) : result.stdout,
+      });
+    } catch (error) {
+      stdout += error.stdout || '';
+      stderr += error.stderr || '';
+      const completionLost = isBrowserCompletionLoss(error);
+      entries.push({
+        success: false,
+        command,
+        error: error.message,
+        code: error.code || null,
+        timedOut: error.timedOut === true,
+        signal: error.signal || null,
+        completionLost,
+        incomplete: error.timedOut === true || Boolean(error.signal) || completionLost,
+      });
+      if (bail) break;
+    }
+  }
+
+  return { stdout, stderr, parsed: entries };
 }
 
 function tryParseJsonOutput(stdout) {
@@ -138,6 +201,7 @@ async function runAgentBrowserBatch(session, commands, {
       env: {
         ...process.env,
         AGENT_BROWSER_IDLE_TIMEOUT_MS,
+        AGENT_BROWSER_DEFAULT_TIMEOUT: String(AGENT_BROWSER_COMMAND_TIMEOUT_MS),
       },
       input: `${JSON.stringify(commands)}\n`,
       shell: AGENT_BROWSER_USES_SHELL,
@@ -159,9 +223,12 @@ async function runCommand(command, args, options = {}) {
     const {
       input,
       timeoutMs = AGENT_BROWSER_COMMAND_TIMEOUT_MS,
+      killGraceMs = 750,
+      spawnImpl = spawn,
+      killImpl = killProcessTree,
       ...spawnOptions
     } = options;
-    const child = spawn(command, args, {
+    const child = spawnImpl(command, args, {
       ...spawnOptions,
       shell: spawnOptions.shell ?? false,
       windowsHide: true,
@@ -171,19 +238,37 @@ async function runCommand(command, args, options = {}) {
     let stderr = '';
     let settled = false;
     let timedOut = false;
+    let killGraceTimer = null;
+
+    function timeoutError(code = null, signal = null) {
+      const err = new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(' ')}`);
+      err.code = 'COMMAND_TIMEOUT';
+      err.timedOut = true;
+      err.exitCode = code;
+      err.signal = signal;
+      return err;
+    }
 
     const timer = timeoutMs > 0
       ? setTimeout(() => {
+        if (settled) return;
         timedOut = true;
-        killProcessTree(child).catch(() => {
+        Promise.resolve(killImpl(child, { timeoutMs: Math.max(100, killGraceMs) })).catch(() => {
           try { child.kill(); } catch { /* best effort */ }
         });
+        killGraceTimer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          rejectWithOutput(timeoutError());
+        }, killGraceMs);
+        if (typeof killGraceTimer.unref === 'function') killGraceTimer.unref();
       }, timeoutMs)
       : null;
     if (timer && typeof timer.unref === 'function') timer.unref();
 
     function clearTimer() {
       if (timer) clearTimeout(timer);
+      if (killGraceTimer) clearTimeout(killGraceTimer);
     }
 
     function rejectWithOutput(err) {
@@ -216,12 +301,7 @@ async function runCommand(command, args, options = {}) {
       clearTimer();
 
       if (timedOut) {
-        const err = new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(' ')}`);
-        err.code = 'COMMAND_TIMEOUT';
-        err.timedOut = true;
-        err.exitCode = code;
-        err.signal = signal;
-        rejectWithOutput(err);
+        rejectWithOutput(timeoutError(code, signal));
         return;
       }
 
@@ -302,11 +382,19 @@ async function takeScreenshot(session, destinationPath) {
   return destinationPath;
 }
 
-async function closeSession(session) {
+async function closeSession(session, { timeoutMs = 7_000, runImpl = runAgentBrowser } = {}) {
+  let timer;
   try {
-    await runAgentBrowser(session, ['close']);
-  } catch {
-    // Best-effort cleanup only.
+    const result = await Promise.race([
+      runImpl(session, ['close'], { timeoutMs }),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Browser session close exceeded ${timeoutMs}ms.`)), timeoutMs + 250);
+        if (typeof timer.unref === 'function') timer.unref();
+      }),
+    ]);
+    return { closed: true, result };
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -343,13 +431,14 @@ async function waitForClientReady(baseUrl, child, logs, getStartupError = () => 
   });
 }
 
-async function killProcessTree(child) {
+async function killProcessTree(child, { timeoutMs = 2_000 } = {}) {
   if (!child || child.exitCode !== null) return;
 
   if (IS_WINDOWS) {
     try {
       await execFileAsync('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
         windowsHide: true,
+        timeout: timeoutMs,
       });
       return;
     } catch {
@@ -424,15 +513,19 @@ async function startClientDevServer({ proxyTarget, port }) {
 
 module.exports = {
   allocatePort,
+  AGENT_BROWSER_BIN,
   AGENT_BROWSER_COMMAND_TIMEOUT_MS,
   closeSession,
   evaluate,
   getUrl,
+  isBrowserCompletionLoss,
   listSnapshotRefs,
   openPage,
   requireSnapshotRef,
+  runCommand,
   runAgentBrowser,
   runAgentBrowserBatch,
+  runAgentBrowserSequence,
   snapshotInteractive,
   startClientDevServer,
   takeScreenshot,

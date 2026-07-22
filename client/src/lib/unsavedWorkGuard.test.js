@@ -14,6 +14,10 @@ afterEach(() => {
 });
 
 describe('unsavedWorkGuard', () => {
+  it('reports no unsaved work when no guard is registered', () => {
+    expect(hasUnsavedWork()).toBe(false);
+  });
+
   it('reports unsaved work from a registered check and clears it on cleanup', () => {
     const cleanup = register(() => true);
 

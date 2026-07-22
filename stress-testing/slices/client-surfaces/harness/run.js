@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ChatRoom = require('../../../../server/src/models/ChatRoom');
+const Escalation = require('../../../../server/src/models/Escalation');
+const KnowledgeCandidate = require('../../../../server/src/models/KnowledgeCandidate');
 const Shipment = require('../../../../server/src/models/Shipment');
 const { registerProviderStub } = require('../../../../server/src/lib/harness-provider-gate');
 const { resetProviderHealth } = require('../../../../server/src/services/provider-health');
@@ -19,7 +21,7 @@ const {
 } = require('../../../scripts/harness-runner-utils');
 const {
   closeSession,
-  runAgentBrowserBatch,
+  runAgentBrowserSequence,
   startClientDevServer,
 } = require('../../../scripts/agent-browser-utils');
 const {
@@ -30,7 +32,12 @@ const {
   waitForConversationMessage,
 } = require('../../../scripts/fixtures/chat');
 const {
+  DEFAULT_PARSE_FIELDS,
+  STUB_RESPONSE_TEXT,
+} = require('../../../scripts/harness-provider-stubs');
+const {
   runWithHarness,
+  SAMPLE_IMAGE_DATA_URL,
 } = require('../../../scripts/fixtures/common');
 const {
   waitForRoomAssistantCount,
@@ -45,8 +52,182 @@ const STOP_BUTTON_SELECTOR = "button[aria-label='Stop generating']";
 const SETTINGS_BUTTON_SELECTOR = "button[aria-label='Change model and mode settings']";
 const ROOM_INPUT_SELECTOR = "textarea[aria-label='Chat room message input']";
 const ROOM_SEND_BUTTON_SELECTOR = '.chat-room-composer button.chat-room-send-btn';
+const QBO_UPLOAD_SELECTOR = 'input[type="file"][accept="image/*"]';
 const STORED_HASH_KEY = 'client-surface-conversation-hash';
 const API_REQUEST_FILTER = '/api/';
+const BROWSER_FIXTURE_TIMEOUT_MS = Number.parseInt(process.env.CLIENT_SURFACE_FIXTURE_TIMEOUT_MS || '90000', 10);
+const QBO_TRIAGE_FIXTURE = Object.freeze({
+  category: 'payroll',
+  severity: 'P3',
+  read: 'Harness triage confirms the payroll submission did not create paychecks.',
+  action: 'Confirm the payroll period and capture the exact submission result.',
+  confidence: 'high',
+});
+const QBO_KNOWN_ISSUE_FIXTURE = Object.freeze({
+  status: 'needs_more_info',
+  summary: 'More information is needed before known issue matching is reliable.',
+  neededField: 'Payroll period or pay date',
+  visibleStatus: 'done',
+  visibleSummary: 'No INV matches were found.',
+});
+const QBO_BROWSER_FIXTURE_IDS = Object.freeze([
+  'browser-qbo-happy-path',
+  'browser-qbo-parser-failure-recovery',
+  'browser-qbo-unsaved-navigation-protection',
+  'browser-qbo-session-resume-integrity',
+  'browser-qbo-escalation-lifecycle-handoff',
+]);
+
+async function settleWithin(promise, timeoutMs, label) {
+  let timeout;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} did not settle within ${timeoutMs}ms`)), timeoutMs);
+        timeout.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function qboWorkflowChatStub(provider) {
+  return ({ messages, onChunk, onDone, onError }) => {
+    const prompt = JSON.stringify(messages || []);
+    let response = STUB_RESPONSE_TEXT;
+    if (prompt.includes('Search for a known issue match for this parsed QBO escalation.')) {
+      response = JSON.stringify({
+        status: QBO_KNOWN_ISSUE_FIXTURE.status,
+        searches: [],
+        matches: [],
+        rejectedCandidates: [],
+        noMatchReason: '',
+        needsMoreInfo: [QBO_KNOWN_ISSUE_FIXTURE.neededField],
+      });
+    } else if (prompt.includes('Triage this parsed QBO escalation template.')) {
+      response = [
+        `Category: ${QBO_TRIAGE_FIXTURE.category}`,
+        `Severity: ${QBO_TRIAGE_FIXTURE.severity}`,
+        `Fast read: ${QBO_TRIAGE_FIXTURE.read}`,
+        `Immediate next step: ${QBO_TRIAGE_FIXTURE.action}`,
+        `Missing info: ${QBO_KNOWN_ISSUE_FIXTURE.neededField}`,
+        `Confidence: ${QBO_TRIAGE_FIXTURE.confidence}`,
+        'Category check: The parsed customer goal and actual result are both payroll-specific.',
+      ].join('\n');
+    }
+    queueMicrotask(() => {
+      try {
+        onChunk?.(response);
+        onDone?.(response, {
+          provider,
+          model: 'harness-qbo-workflow-model',
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+          stub: true,
+        });
+      } catch (error) {
+        onError?.(error);
+      }
+    });
+    return () => {};
+  };
+}
+
+function resetQboHarnessStubs() {
+  resetHarnessStubs();
+  registerProviderStub('claude', 'chat', qboWorkflowChatStub('claude'));
+  registerProviderStub('codex', 'chat', qboWorkflowChatStub('codex'));
+}
+
+function classifyEvidenceTerminalText(value) {
+  const text = String(value || '');
+  if (/Evidence is still settling/i.test(text)) return 'settling';
+  if (/Evidence complete/i.test(text)) return 'complete';
+  if (/expected evidence items? (?:are|is) not saved/i.test(text)) return 'completed-with-missing-evidence';
+  return 'unknown';
+}
+
+function assertHappyPathContract(outputs) {
+  assert.match(String(outputs.conversationHash || ''), /^#\/chat\/[a-f0-9]{24}$/i);
+  assert.equal(Number(outputs.parseCountAfterReload), 1);
+  assert.equal(Number(outputs.answerCountAfterReload), 1);
+  const evidenceTerminalState = classifyEvidenceTerminalText(outputs.evidenceText);
+  assert.ok(
+    evidenceTerminalState === 'complete' || evidenceTerminalState === 'completed-with-missing-evidence',
+    `Expected a documented completed evidence state, got ${evidenceTerminalState}.`,
+  );
+  assert.equal(outputs.savedEvidence?.triageRead, QBO_TRIAGE_FIXTURE.read);
+  assert.equal(outputs.savedEvidence?.triageAction, QBO_TRIAGE_FIXTURE.action);
+  assert.equal(outputs.savedEvidence?.knownIssueStatus, QBO_KNOWN_ISSUE_FIXTURE.status);
+  assert.equal(outputs.savedEvidence?.knownIssueSummary, QBO_KNOWN_ISSUE_FIXTURE.summary);
+  const expectedVisible = {
+    triageRead: QBO_TRIAGE_FIXTURE.read,
+    triageAction: QBO_TRIAGE_FIXTURE.action,
+    knownIssueStatus: QBO_KNOWN_ISSUE_FIXTURE.visibleStatus,
+    knownIssueSummary: QBO_KNOWN_ISSUE_FIXTURE.visibleSummary,
+  };
+  assert.deepEqual(outputs.visibleBeforeReload, expectedVisible);
+  assert.deepEqual(outputs.visibleAfterReload, expectedVisible);
+  return evidenceTerminalState;
+}
+
+function assertResumeContract(outputs) {
+  assert.equal(Number(outputs.parsedCount), 1);
+  assert.equal(Number(outputs.answerCount), 1);
+  assert.deepEqual(outputs.stageTerminalStates, {
+    parser: 'done',
+    inv: 'done',
+    triage: 'done',
+    main: 'done',
+  });
+}
+
+function assertLifecycleContract({ outputs, saved, conversationId, expectedIdentity }) {
+  assert.equal(String(saved?.conversationId || ''), conversationId);
+  assert.equal(saved?.status, 'resolved');
+  assert.equal(Boolean(outputs.identityVisible), true);
+  assert.deepEqual(outputs.visibleIdentity, expectedIdentity);
+}
+
+function buildStageTerminalStatesScript() {
+  return `(() => Object.fromEntries(['parser', 'inv', 'triage', 'main'].map((key) => {
+    const card = document.querySelector('[data-stage-card="' + key + '"]');
+    const status = ['done', 'failed', 'running', 'pending'].find((candidate) => card?.classList.contains('v5-workflow-card--' + candidate)) || 'unknown';
+    return [key, status];
+  })))()`;
+}
+
+function buildSavedQboEvidenceScript() {
+  return `(async () => {
+    const conversationId = window.location.hash.split('/').pop();
+    const response = await fetch('/api/conversations/' + encodeURIComponent(conversationId));
+    const payload = await response.json();
+    const intake = payload?.conversation?.caseIntake || {};
+    return {
+      triageRead: intake.triageCard?.read || '',
+      triageAction: intake.triageCard?.action || '',
+      knownIssueStatus: intake.knownIssueSearchResult?.status || '',
+      knownIssueSummary: intake.knownIssueSearchResult?.summary || '',
+    };
+  })()`;
+}
+
+function buildVisibleQboValuesScript() {
+  return `(() => {
+    const exactVisibleText = (expected) => [...document.querySelectorAll('p, span')]
+      .find((element) => element.textContent.trim() === expected && element.getClientRects().length > 0)?.textContent.trim() || '';
+    const invCard = document.querySelector('[data-stage-card="inv"]');
+    return {
+      triageRead: exactVisibleText(${JSON.stringify(QBO_TRIAGE_FIXTURE.read)}),
+      triageAction: exactVisibleText(${JSON.stringify(QBO_TRIAGE_FIXTURE.action)}),
+      knownIssueStatus: invCard?.classList.contains('v5-workflow-card--done') ? 'done' : 'not-done',
+      knownIssueSummary: exactVisibleText(${JSON.stringify(QBO_KNOWN_ISSUE_FIXTURE.visibleSummary)}),
+    };
+  })()`;
+}
 
 function cleanAlphaNumeric(value) {
   return String(value || '')
@@ -156,6 +337,27 @@ function buildArtifactPath(runId, fixtureId) {
   const dir = path.join(ARTIFACTS_DIR, runId);
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, `${fixtureId}.png`);
+}
+
+function buildJsonArtifactPath(runId, fixtureId, suffix = 'failure') {
+  const dir = path.join(ARTIFACTS_DIR, runId);
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${fixtureId}.${suffix}.json`);
+}
+
+function writeFailureArtifact(runId, fixtureId, payload) {
+  const artifactPath = buildJsonArtifactPath(runId, fixtureId);
+  fs.writeFileSync(artifactPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  return artifactPath;
+}
+
+function writeQboImageFixture(runId) {
+  const match = String(SAMPLE_IMAGE_DATA_URL).match(/^data:image\/[^;]+;base64,(.+)$/);
+  if (!match) throw new Error('Deterministic QBO image fixture is not a base64 image data URL.');
+  const imagePath = path.join(ARTIFACTS_DIR, runId, 'deterministic-qbo-escalation.png');
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+  fs.writeFileSync(imagePath, Buffer.from(match[1], 'base64'));
+  return imagePath;
 }
 
 function encodeEvalScript(script) {
@@ -268,6 +470,20 @@ function buildRequestTrackerScript() {
 
 function buildTextVisibleExpression(text) {
   return `document.body.innerText.includes(${JSON.stringify(text)})`;
+}
+
+function buildClickButtonByTextScript(text) {
+  return `(() => {
+    const label = ${JSON.stringify(text)};
+    const button = [...document.querySelectorAll('button')].find((entry) => entry.textContent.replace(/\\s+/g, ' ').trim() === label);
+    if (!button) throw new Error('Button not found: ' + label);
+    button.click();
+    return true;
+  })()`;
+}
+
+function buildVisibleTextCountScript(text) {
+  return `(() => document.body.innerText.split(${JSON.stringify(text)}).length - 1)()`;
 }
 
 function buildSetComposerTextScript(prompt) {
@@ -516,11 +732,31 @@ async function runBrowserFixture({
   description,
   session,
   execute,
+  timeoutMs = BROWSER_FIXTURE_TIMEOUT_MS,
+  closeImpl = closeSession,
+  closeTimeoutMs = 7_000,
 }) {
+  const startedAt = Date.now();
+  const deadlineAt = startedAt + timeoutMs;
+  let deadlineTimer;
+  let fixture;
   try {
-    return await execute();
+    fixture = await Promise.race([
+      execute({ deadlineAt }),
+      new Promise((resolve) => {
+        deadlineTimer = setTimeout(() => resolve({
+          id,
+          kind: 'browser',
+          description,
+          ok: false,
+          incomplete: true,
+          error: `Browser fixture absolute deadline reached after ${timeoutMs}ms.`,
+          durationMs: Date.now() - startedAt,
+        }), timeoutMs);
+      }),
+    ]);
   } catch (err) {
-    return {
+    fixture = {
       id,
       kind: 'browser',
       description,
@@ -528,8 +764,30 @@ async function runBrowserFixture({
       error: formatBatchError(err),
     };
   } finally {
-    await closeSession(session);
+    if (deadlineTimer) clearTimeout(deadlineTimer);
+    let closeDeadlineTimer;
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => closeImpl(session, { timeoutMs: closeTimeoutMs })),
+        new Promise((_, reject) => {
+          closeDeadlineTimer = setTimeout(() => reject(new Error(`Browser session cleanup exceeded ${closeTimeoutMs}ms.`)), closeTimeoutMs + 250);
+          if (typeof closeDeadlineTimer.unref === 'function') closeDeadlineTimer.unref();
+        }),
+      ]);
+      if (fixture) fixture = { ...fixture, cleanupVerified: true };
+    } catch (cleanupError) {
+      fixture = {
+        ...(fixture || { id, kind: 'browser', description }),
+        ok: false,
+        incomplete: true,
+        cleanupVerified: false,
+        error: [fixture?.error, `Browser cleanup could not be verified: ${cleanupError.message}`].filter(Boolean).join('; '),
+      };
+    } finally {
+      if (closeDeadlineTimer) clearTimeout(closeDeadlineTimer);
+    }
   }
+  return fixture;
 }
 
 function buildBatchFailureFixture({
@@ -538,16 +796,28 @@ function buildBatchFailureFixture({
   batchResult,
   outputs,
   screenshotPath,
+  runId = null,
 }) {
+  const error = formatBatchError({ parsed: batchResult?.parsed || [] });
+  const completionMissing = (batchResult?.parsed || []).some((entry) => entry?.incomplete === true || entry?.timedOut === true || Boolean(entry?.signal));
+  const diagnosticArtifactPath = runId ? writeFailureArtifact(runId, id, {
+    id,
+    error,
+    outputs,
+    commands: batchResult?.parsed || [],
+    capturedAt: new Date().toISOString(),
+  }) : null;
   return {
     id,
     kind: 'browser',
     description,
     ok: false,
-    error: formatBatchError({ parsed: batchResult?.parsed || [] }),
-    artifacts: fs.existsSync(screenshotPath) ? {
-      screenshotPath,
-    } : {},
+    ...(completionMissing ? { incomplete: true } : {}),
+    error,
+    artifacts: {
+      ...(fs.existsSync(screenshotPath) ? { screenshotPath } : {}),
+      ...(diagnosticArtifactPath ? { diagnosticArtifactPath } : {}),
+    },
     diagnostics: {
       currentUrl: outputs.currentUrl || '',
       bodyPreview: outputs.bodyPreview || '',
@@ -579,7 +849,7 @@ async function runHappyPathFixture({ clientBaseUrl, runId, seed }) {
     id,
     description,
     session,
-    execute: async () => {
+    execute: async ({ deadlineAt }) => {
       const screenshotPath = buildArtifactPath(runId, 'happy-path');
       const commandSpecs = [
         createCommand(null, ['open', `${clientBaseUrl}/#/chat`]),
@@ -608,8 +878,10 @@ async function runHappyPathFixture({ clientBaseUrl, runId, seed }) {
         createCommand('screenshot', ['screenshot', screenshotPath]),
       ];
 
-      const batchResult = await runAgentBrowserBatch(session, commandSpecs.map((spec) => spec.args), {
-        bail: false,
+      const batchResult = await runAgentBrowserSequence(session, commandSpecs.map((spec) => spec.args), {
+        bail: true,
+        timeoutMs: 15_000,
+        deadlineAt,
       });
       const outputs = collectBatchOutputs(commandSpecs, batchResult);
       const batchFailure = findBatchFailure(batchResult.parsed);
@@ -673,7 +945,7 @@ async function runFallbackFixture({ clientBaseUrl, runId, seed }) {
     id,
     description,
     session,
-    execute: async () => {
+    execute: async ({ deadlineAt }) => {
       const screenshotPath = buildArtifactPath(runId, 'fallback');
       const commandSpecs = [
         createCommand(null, ['open', `${clientBaseUrl}/#/chat`]),
@@ -708,8 +980,10 @@ async function runFallbackFixture({ clientBaseUrl, runId, seed }) {
         createCommand('screenshot', ['screenshot', screenshotPath]),
       ];
 
-      const batchResult = await runAgentBrowserBatch(session, commandSpecs.map((spec) => spec.args), {
-        bail: false,
+      const batchResult = await runAgentBrowserSequence(session, commandSpecs.map((spec) => spec.args), {
+        bail: true,
+        timeoutMs: 15_000,
+        deadlineAt,
       });
       const outputs = collectBatchOutputs(commandSpecs, batchResult);
       const batchFailure = findBatchFailure(batchResult.parsed);
@@ -774,7 +1048,7 @@ async function runRouteChangeFixture({ clientBaseUrl, runId, seed }) {
     id,
     description,
     session,
-    execute: async () => {
+    execute: async ({ deadlineAt }) => {
       const screenshotPath = buildArtifactPath(runId, 'route-change-refresh');
       const commandSpecs = [
         createCommand(null, ['open', `${clientBaseUrl}/#/chat`]),
@@ -809,8 +1083,10 @@ async function runRouteChangeFixture({ clientBaseUrl, runId, seed }) {
         createCommand('screenshot', ['screenshot', screenshotPath]),
       ];
 
-      const batchResult = await runAgentBrowserBatch(session, commandSpecs.map((spec) => spec.args), {
-        bail: false,
+      const batchResult = await runAgentBrowserSequence(session, commandSpecs.map((spec) => spec.args), {
+        bail: true,
+        timeoutMs: 15_000,
+        deadlineAt,
       });
       const outputs = collectBatchOutputs(commandSpecs, batchResult);
       const batchFailure = findBatchFailure(batchResult.parsed);
@@ -877,7 +1153,7 @@ async function runShipmentTrackerFixture({ baseUrl, clientBaseUrl, runId, seed }
     id,
     description,
     session,
-    execute: async () => {
+    execute: async ({ deadlineAt }) => {
       await cleanupBrowserShipments(trackingNumbers);
 
       try {
@@ -936,8 +1212,10 @@ async function runShipmentTrackerFixture({ baseUrl, clientBaseUrl, runId, seed }
           createCommand('screenshot', ['screenshot', screenshotPath]),
         ];
 
-        const batchResult = await runAgentBrowserBatch(session, commandSpecs.map((spec) => spec.args), {
-          bail: false,
+        const batchResult = await runAgentBrowserSequence(session, commandSpecs.map((spec) => spec.args), {
+          bail: true,
+          timeoutMs: 15_000,
+          deadlineAt,
         });
         const outputs = collectBatchOutputs(commandSpecs, batchResult);
         const batchFailure = findBatchFailure(batchResult.parsed);
@@ -1022,7 +1300,7 @@ async function runRoomBrowserFixture({ baseUrl, clientBaseUrl, runId, seed }) {
     id,
     description,
     session,
-    execute: async () => {
+    execute: async ({ deadlineAt }) => {
       await cleanupBrowserRooms({ title: roomTitle });
 
       try {
@@ -1070,8 +1348,10 @@ async function runRoomBrowserFixture({ baseUrl, clientBaseUrl, runId, seed }) {
           createCommand('screenshot', ['screenshot', screenshotPath]),
         ];
 
-        const batchResult = await runAgentBrowserBatch(session, commandSpecs.map((spec) => spec.args), {
-          bail: false,
+        const batchResult = await runAgentBrowserSequence(session, commandSpecs.map((spec) => spec.args), {
+          bail: true,
+          timeoutMs: 15_000,
+          deadlineAt,
         });
         const outputs = collectBatchOutputs(commandSpecs, batchResult);
         const batchFailure = findBatchFailure(batchResult.parsed);
@@ -1136,6 +1416,378 @@ async function runRoomBrowserFixture({ baseUrl, clientBaseUrl, runId, seed }) {
   });
 }
 
+async function runQboCommandFixture({
+  id,
+  description,
+  clientBaseUrl,
+  runId,
+  commandSpecs,
+  validate,
+  timeoutMs = BROWSER_FIXTURE_TIMEOUT_MS,
+}) {
+  const session = `${SLICE_ID}-${runId}-${id}`;
+  return runBrowserFixture({
+    id,
+    description,
+    session,
+    timeoutMs,
+    execute: async ({ deadlineAt }) => {
+      const screenshotPath = buildArtifactPath(runId, id);
+      try {
+        const specs = [
+          ...commandSpecs,
+          createCommand('currentUrl', ['get', 'url']),
+          createEvalCommand('bodyPreview', 'document.body.innerText.slice(0, 6000)'),
+          createCommand('consoleOutput', ['console']),
+          createCommand('pageErrors', ['errors']),
+          createCommand('apiRequests', ['network', 'requests', '--filter', API_REQUEST_FILTER]),
+          createCommand('screenshot', ['screenshot', screenshotPath]),
+        ];
+        const sequence = await runAgentBrowserSequence(session, specs.map((spec) => spec.args), {
+          bail: true,
+          timeoutMs: 15_000,
+          deadlineAt,
+        });
+        const outputs = collectBatchOutputs(specs, sequence);
+        if (findBatchFailure(sequence.parsed)) {
+          return buildBatchFailureFixture({ id, description, batchResult: sequence, outputs, screenshotPath, runId });
+        }
+        const assertions = await validate(outputs);
+        return {
+          id,
+          kind: 'browser',
+          description,
+          ok: true,
+          artifacts: { screenshotPath },
+          assertions,
+        };
+      } catch (error) {
+        const diagnosticArtifactPath = writeFailureArtifact(runId, id, {
+          id,
+          error: error?.message || String(error),
+          stack: error?.stack || '',
+          capturedAt: new Date().toISOString(),
+        });
+        return {
+          id,
+          kind: 'browser',
+          description,
+          ok: false,
+          error: error?.message || String(error),
+          artifacts: { diagnosticArtifactPath },
+        };
+      }
+    },
+  });
+}
+
+function qboUploadCommands(clientBaseUrl, imagePath) {
+  return [
+    createCommand(null, ['open', `${clientBaseUrl}/#/chat`]),
+    createWaitForTextCommand('Upload screenshot'),
+    createCommand('uploaded', ['upload', QBO_UPLOAD_SELECTOR, imagePath]),
+    createWaitForTextCommand('Screenshot captured'),
+  ];
+}
+
+async function runQboHappyPathFixture({ clientBaseUrl, runId }) {
+  resetQboHarnessStubs();
+  resetProviderHealth();
+  const id = 'browser-qbo-happy-path';
+  const imagePath = writeQboImageFixture(runId);
+  return runQboCommandFixture({
+    id,
+    description: 'Upload deterministic QBO evidence, observe every agent result, verify durable evidence, then reload without duplication.',
+    clientBaseUrl,
+    runId,
+    commandSpecs: [
+      ...qboUploadCommands(clientBaseUrl, imagePath),
+      createWaitForTextCommand(DEFAULT_PARSE_FIELDS.attemptingTo),
+      createWaitForTextCommand(STUB_RESPONSE_TEXT),
+      createWaitForTextCommand(QBO_TRIAGE_FIXTURE.read),
+      createWaitForTextCommand(QBO_TRIAGE_FIXTURE.action),
+      createWaitForTextCommand(QBO_KNOWN_ISSUE_FIXTURE.visibleSummary),
+      createWaitForFunctionCommand("window.location.hash.startsWith('#/chat/')"),
+      createEvalCommand('conversationHash', 'window.location.hash'),
+      createEvalCommand('visibleBeforeReload', buildVisibleQboValuesScript()),
+      createEvalCommand('parseCountBeforeReload', buildVisibleTextCountScript(DEFAULT_PARSE_FIELDS.attemptingTo)),
+      createEvalCommand('answerCountBeforeReload', buildVisibleTextCountScript(STUB_RESPONSE_TEXT)),
+      createCommand('reloaded', ['reload']),
+      createWaitForTextCommand(DEFAULT_PARSE_FIELDS.attemptingTo),
+      createWaitForTextCommand(STUB_RESPONSE_TEXT),
+      createWaitForTextCommand(QBO_TRIAGE_FIXTURE.read),
+      createWaitForTextCommand(QBO_TRIAGE_FIXTURE.action),
+      createWaitForTextCommand(QBO_KNOWN_ISSUE_FIXTURE.visibleSummary),
+      createEvalCommand('visibleAfterReload', buildVisibleQboValuesScript()),
+      createEvalCommand('parseCountAfterReload', buildVisibleTextCountScript(DEFAULT_PARSE_FIELDS.attemptingTo)),
+      createEvalCommand('answerCountAfterReload', buildVisibleTextCountScript(STUB_RESPONSE_TEXT)),
+      createEvalCommand('evidenceText', `(() => {
+        const text = document.body.innerText;
+        return ['Evidence complete', 'expected evidence items are not saved', 'Evidence is still settling'].find((candidate) => text.includes(candidate)) || '';
+      })()`),
+      createEvalCommand('savedEvidence', buildSavedQboEvidenceScript()),
+    ],
+    validate: async (outputs) => {
+      const evidenceTerminalState = assertHappyPathContract(outputs);
+      return {
+        conversationHash: outputs.conversationHash,
+        parsedEvidenceVisible: Number(outputs.parseCountBeforeReload) >= 1,
+        analystAnswerVisible: Number(outputs.answerCountBeforeReload) >= 1,
+        parseCountAfterReload: Number(outputs.parseCountAfterReload),
+        answerCountAfterReload: Number(outputs.answerCountAfterReload),
+        evidenceTerminal: true,
+        evidenceTerminalState,
+        savedTriageRead: outputs.savedEvidence.triageRead,
+        savedTriageAction: outputs.savedEvidence.triageAction,
+        savedKnownIssueStatus: outputs.savedEvidence.knownIssueStatus,
+        savedKnownIssueSummary: outputs.savedEvidence.knownIssueSummary,
+        visibleBeforeReload: outputs.visibleBeforeReload,
+        visibleAfterReload: outputs.visibleAfterReload,
+      };
+    },
+  });
+}
+
+async function runQboParserRecoveryFixture({ clientBaseUrl, runId }) {
+  resetQboHarnessStubs();
+  resetProviderHealth();
+  const id = 'browser-qbo-parser-failure-recovery';
+  const imagePath = writeQboImageFixture(runId);
+  return runQboCommandFixture({
+    id,
+    description: 'Force parser transport failure, prove downstream work stays absent, reset, retry successfully, and clear stale failure state.',
+    clientBaseUrl,
+    runId,
+    commandSpecs: [
+      createCommand(null, ['open', `${clientBaseUrl}/#/chat`]),
+      createWaitForTextCommand('Upload screenshot'),
+      createCommand('parserFailureRoute', ['network', 'route', '**/api/image-parser/parse', '--abort']),
+      createCommand('failedUpload', ['upload', QBO_UPLOAD_SELECTOR, imagePath]),
+      createWaitForFunctionCommand(`(() => document.body.innerText.includes('Failed to fetch') || document.body.innerText.includes('parser') && document.querySelector('.v5-empty-state--error'))()`),
+      createEvalCommand('downstreamAbsentAfterFailure', `(() => !document.body.innerText.includes(${JSON.stringify(STUB_RESPONSE_TEXT)}))()`),
+      createEvalCommand('resetClicked', buildClickButtonByTextScript('Start a new workflow')),
+      createCommand('failureRouteRemoved', ['network', 'unroute', '**/api/image-parser/parse']),
+      createWaitForTextCommand('Upload screenshot'),
+      createCommand('retryUpload', ['upload', QBO_UPLOAD_SELECTOR, imagePath]),
+      createWaitForTextCommand(DEFAULT_PARSE_FIELDS.attemptingTo),
+      createEvalCommand('staleFailureCleared', `(() => !document.querySelector('.v5-empty-state--error'))()`),
+    ],
+    validate: async (outputs) => {
+      assert.equal(Boolean(outputs.downstreamAbsentAfterFailure), true);
+      assert.equal(Boolean(outputs.staleFailureCleared), true);
+      return {
+        downstreamAbsentAfterFailure: true,
+        retrySucceeded: true,
+        staleFailureCleared: true,
+      };
+    },
+  });
+}
+
+async function runQboUnsavedNavigationFixture({ clientBaseUrl, runId }) {
+  resetQboHarnessStubs();
+  resetProviderHealth();
+  const id = 'browser-qbo-unsaved-navigation-protection';
+  const imagePath = writeQboImageFixture(runId);
+  const escalation = { _id: '000000000000000000000911', status: 'open', coid: 'COID-UNSAVED', category: 'payroll' };
+  return runQboCommandFixture({
+    id,
+    description: 'Force triage persistence failure, retain the visible result, exercise Copy, stay once, then explicitly leave.',
+    clientBaseUrl,
+    runId,
+    commandSpecs: [
+      createCommand(null, ['open', `${clientBaseUrl}/#/chat`]),
+      createWaitForTextCommand('Upload screenshot'),
+      createCommand('triageSaveFailure', ['network', 'route', '**/api/conversations/*/triage-result', '--abort']),
+      createCommand('metaRoute', ['network', 'route', '**/api/conversations/*/meta', '--body', JSON.stringify({ conversation: { escalationId: escalation._id } })]),
+      createCommand('escalationRoute', ['network', 'route', `**/api/escalations/${escalation._id}`, '--body', JSON.stringify({ escalation })]),
+      createCommand('upload', ['upload', QBO_UPLOAD_SELECTOR, imagePath]),
+      createWaitForTextCommand('Not saved'),
+      createWaitForTextCommand('Finish Case'),
+      createEvalCommand('copyClicked', `(() => { const warning = document.querySelector('[aria-label="Triage card not saved"]'); const button = [...warning.querySelectorAll('button')].find((entry) => entry.textContent.trim() === 'Copy'); button.click(); return true; })()`),
+      createWaitForTextCommand('Copied'),
+      createEvalCommand('firstLeaveAttempt', buildClickButtonByTextScript('Finish Case')),
+      createCommand('stayChosen', ['dialog', 'dismiss']),
+      createEvalCommand('resultStillVisible', `(() => document.body.innerText.includes('Not saved') && window.location.hash.startsWith('#/chat/'))()`),
+      createEvalCommand('secondLeaveAttempt', buildClickButtonByTextScript('Finish Case')),
+      createCommand('leaveChosen', ['dialog', 'accept']),
+      createWaitForFunctionCommand(`window.location.hash === '#/escalations/${escalation._id}'`),
+    ],
+    validate: async (outputs) => {
+      assert.equal(Boolean(outputs.resultStillVisible), true);
+      return { warningVisible: true, copied: true, stayedWithResult: true, explicitLeaveHonored: true };
+    },
+  });
+}
+
+async function runQboSessionResumeFixture({ clientBaseUrl, runId }) {
+  resetQboHarnessStubs();
+  resetProviderHealth();
+  const id = 'browser-qbo-session-resume-integrity';
+  const imagePath = writeQboImageFixture(runId);
+  return runQboCommandFixture({
+    id,
+    description: 'Complete QBO evidence, navigate away and back, hard reload the saved route, and reject lost or duplicated results.',
+    clientBaseUrl,
+    runId,
+    commandSpecs: [
+      ...qboUploadCommands(clientBaseUrl, imagePath),
+      createWaitForTextCommand(STUB_RESPONSE_TEXT),
+      createWaitForFunctionCommand("window.location.hash.startsWith('#/chat/')"),
+      createEvalCommand('savedHash', `(() => { sessionStorage.setItem('qbo-resume-hash', window.location.hash); return window.location.hash; })()`),
+      createEvalCommand('awayHash', `window.location.hash = '#/settings'; window.location.hash`),
+      createWaitForFunctionCommand(`window.location.hash === '#/settings'`),
+      createEvalCommand('returnedHash', `window.location.hash = sessionStorage.getItem('qbo-resume-hash'); window.location.hash`),
+      createWaitForTextCommand(STUB_RESPONSE_TEXT),
+      createCommand('hardReloaded', ['reload']),
+      createWaitForTextCommand(DEFAULT_PARSE_FIELDS.attemptingTo),
+      createWaitForTextCommand(STUB_RESPONSE_TEXT),
+      createEvalCommand('parsedCount', buildVisibleTextCountScript(DEFAULT_PARSE_FIELDS.attemptingTo)),
+      createEvalCommand('answerCount', buildVisibleTextCountScript(STUB_RESPONSE_TEXT)),
+      createEvalCommand('stageTerminalStates', buildStageTerminalStatesScript()),
+    ],
+    validate: async (outputs) => {
+      assertResumeContract(outputs);
+      return { savedHash: outputs.savedHash, parsedCount: 1, answerCount: 1, stageTruthVisible: true, stageTerminalStates: outputs.stageTerminalStates };
+    },
+  });
+}
+
+async function runQboLifecycleFixture({ baseUrl, clientBaseUrl, runId, seed }) {
+  resetQboHarnessStubs();
+  resetProviderHealth();
+  const id = 'browser-qbo-escalation-lifecycle-handoff';
+  const description = 'Open the linked escalation from Chat V5, record a resolved outcome in the UI, and verify the isolated database survives reload.';
+  const imagePath = writeQboImageFixture(runId);
+  const session = `${SLICE_ID}-${runId}-${id}`;
+  let escalationId = null;
+  let fixture = null;
+  return runBrowserFixture({
+    id,
+    description,
+    session,
+    execute: async ({ deadlineAt }) => {
+      const screenshotPath = buildArtifactPath(runId, id);
+      try {
+        const firstSpecs = [
+          ...qboUploadCommands(clientBaseUrl, imagePath),
+          createWaitForTextCommand(STUB_RESPONSE_TEXT),
+          createWaitForFunctionCommand("window.location.hash.startsWith('#/chat/')"),
+          createEvalCommand('conversationHash', 'window.location.hash'),
+        ];
+        const first = await runAgentBrowserSequence(session, firstSpecs.map((spec) => spec.args), { bail: true, timeoutMs: 15_000, deadlineAt });
+        const firstOutputs = collectBatchOutputs(firstSpecs, first);
+        if (findBatchFailure(first.parsed)) {
+          fixture = buildBatchFailureFixture({ id, description, batchResult: first, outputs: firstOutputs, screenshotPath, runId });
+          return fixture;
+        }
+        const conversationId = parseConversationIdFromHash(firstOutputs.conversationHash);
+        assert.ok(conversationId, 'QBO lifecycle fixture requires a saved conversation route.');
+        const create = await requestJson(baseUrl, '/api/escalations', {
+          method: 'POST',
+          expectStatus: 201,
+          json: {
+            conversationId,
+            coid: `COID-${seed}`.slice(0, 80),
+            mid: 'MID-QBO-BROWSER',
+            caseNumber: `CASE-${seed}`.slice(0, 80),
+            clientContact: 'QBO Browser Harness',
+            agentName: 'Harness Agent',
+            attemptingTo: DEFAULT_PARSE_FIELDS.attemptingTo,
+            expectedOutcome: DEFAULT_PARSE_FIELDS.expectedOutcome,
+            actualOutcome: DEFAULT_PARSE_FIELDS.actualOutcome,
+            tsSteps: DEFAULT_PARSE_FIELDS.tsSteps,
+            triedTestAccount: 'no',
+            category: 'payroll',
+          },
+        });
+        escalationId = create.data.escalation._id;
+        const resolution = `Confirmed browser lifecycle resolution ${seed}`;
+        const secondSpecs = [
+          createCommand('chatReloaded', ['reload']),
+          createWaitForTextCommand('Finish Case'),
+          createEvalCommand('finishCaseClicked', buildClickButtonByTextScript('Finish Case')),
+          createWaitForTextCommand('Finish this escalation'),
+          createEvalCommand('resolvedSelected', buildClickButtonByTextScript('Fully resolved')),
+          createCommand('resolutionFilled', ['fill', 'textarea[placeholder^="Write the confirmed final fix"]', resolution]),
+          createEvalCommand('saveResolvedClicked', buildClickButtonByTextScript('Save As Resolved')),
+          createWaitForTextCommand('Resolved'),
+          createCommand('detailReloaded', ['reload']),
+          createWaitForTextCommand(resolution),
+          createEvalCommand('visibleIdentity', `(() => ({
+            coid: document.body.innerText.includes(${JSON.stringify(create.data.escalation.coid)}),
+            caseNumber: document.body.innerText.includes(${JSON.stringify(create.data.escalation.caseNumber)}),
+            evidence: document.body.innerText.includes(${JSON.stringify(DEFAULT_PARSE_FIELDS.attemptingTo)}),
+          }))()`),
+          createEvalCommand('identityVisible', `(() => window.location.hash === '#/escalations/${escalationId}')()`),
+          createCommand('currentUrl', ['get', 'url']),
+          createCommand('screenshot', ['screenshot', screenshotPath]),
+        ];
+        const second = await runAgentBrowserSequence(session, secondSpecs.map((spec) => spec.args), { bail: true, timeoutMs: 15_000, deadlineAt });
+        const outputs = collectBatchOutputs(secondSpecs, second);
+        if (findBatchFailure(second.parsed)) {
+          fixture = buildBatchFailureFixture({ id, description, batchResult: second, outputs, screenshotPath, runId });
+          return fixture;
+        }
+        const saved = await Escalation.findById(escalationId).lean();
+        const expectedIdentity = { coid: true, caseNumber: true, evidence: true };
+        assertLifecycleContract({ outputs, saved, conversationId, expectedIdentity });
+        assert.equal(saved.resolution, resolution);
+        fixture = {
+          id,
+          kind: 'browser',
+          description,
+          ok: true,
+          artifacts: { screenshotPath },
+          assertions: {
+            conversationId,
+            escalationId,
+            identityVisible: true,
+            visibleIdentity: outputs.visibleIdentity,
+            persistedConversationId: String(saved.conversationId || ''),
+            persistedStatus: saved.status,
+            persistedResolution: saved.resolution,
+          },
+        };
+        return fixture;
+      } catch (error) {
+        const diagnosticArtifactPath = writeFailureArtifact(runId, id, { id, error: error?.message || String(error), stack: error?.stack || '', capturedAt: new Date().toISOString() });
+        fixture = { id, kind: 'browser', description, ok: false, error: error?.message || String(error), artifacts: { diagnosticArtifactPath } };
+        return fixture;
+      } finally {
+        if (escalationId) {
+          try {
+            const cleanup = await settleWithin((async () => {
+              await Promise.all([
+                Escalation.deleteOne({ _id: escalationId }),
+                KnowledgeCandidate.deleteMany({ escalationId }),
+              ]);
+              const [remainingEscalations, remainingKnowledgeCandidates] = await Promise.all([
+                Escalation.countDocuments({ _id: escalationId }),
+                KnowledgeCandidate.countDocuments({ escalationId }),
+              ]);
+              return { remainingEscalations, remainingKnowledgeCandidates };
+            })(), 5_000, 'QBO lifecycle database cleanup');
+            if (fixture) {
+              fixture.assertions = {
+                ...(fixture.assertions || {}),
+                cleanupRemainingEscalations: cleanup.remainingEscalations,
+                cleanupRemainingKnowledgeCandidates: cleanup.remainingKnowledgeCandidates,
+              };
+            }
+          } catch (cleanupError) {
+            if (fixture) {
+              fixture.ok = false;
+              fixture.incomplete = true;
+              fixture.error = [fixture.error, cleanupError.message].filter(Boolean).join('; ');
+            }
+          }
+        }
+      }
+    },
+  });
+}
+
 async function runSlice(context = {}) {
   return runWithHarness(context, async (harness) => {
     const startedAt = new Date();
@@ -1146,28 +1798,27 @@ async function runSlice(context = {}) {
     });
 
     try {
-      const fixtures = [
-        await runHappyPathFixture({ clientBaseUrl: client.baseUrl, runId, seed }),
-        await runFallbackFixture({ clientBaseUrl: client.baseUrl, runId, seed }),
-        await runRouteChangeFixture({ clientBaseUrl: client.baseUrl, runId, seed }),
-        await runShipmentTrackerFixture({
-          baseUrl: harness.baseUrl,
-          clientBaseUrl: client.baseUrl,
-          runId,
-          seed,
-        }),
-        await runRoomBrowserFixture({
-          baseUrl: harness.baseUrl,
-          clientBaseUrl: client.baseUrl,
-          runId,
-          seed,
-        }),
+      const fixtureRunners = [
+        [QBO_BROWSER_FIXTURE_IDS[0], () => runQboHappyPathFixture({ clientBaseUrl: client.baseUrl, runId })],
+        [QBO_BROWSER_FIXTURE_IDS[1], () => runQboParserRecoveryFixture({ clientBaseUrl: client.baseUrl, runId })],
+        [QBO_BROWSER_FIXTURE_IDS[2], () => runQboUnsavedNavigationFixture({ clientBaseUrl: client.baseUrl, runId })],
+        [QBO_BROWSER_FIXTURE_IDS[3], () => runQboSessionResumeFixture({ clientBaseUrl: client.baseUrl, runId })],
+        [QBO_BROWSER_FIXTURE_IDS[4], () => runQboLifecycleFixture({
+          baseUrl: harness.baseUrl, clientBaseUrl: client.baseUrl, runId, seed,
+        })],
       ];
+      const requestedFixtureId = process.env.CLIENT_SURFACE_FIXTURE_ID || '';
+      const selectedRunners = requestedFixtureId
+        ? fixtureRunners.filter(([fixtureId]) => fixtureId === requestedFixtureId)
+        : fixtureRunners;
+      if (selectedRunners.length === 0) throw new Error(`Unknown client-surface fixture: ${requestedFixtureId}`);
+      const fixtures = [];
+      for (const [, executeFixture] of selectedRunners) fixtures.push(await executeFixture());
 
       const finishedAt = new Date();
       const report = buildSliceReport(SLICE_ID, {
         runId,
-        description: 'Drives the real browser chat, workspace shipment, and room collaboration surfaces through streaming, fallback recovery, route-change resilience, seeded active-shipment rendering, and a two-agent room turn using agent-browser batch execution against the hermetic test server.',
+        description: 'Drives the five critical QBO Chat V5 journeys through sequential bounded browser commands against the hermetic test server and controlled provider responses.',
         startedAt: startedAt.toISOString(),
         finishedAt: finishedAt.toISOString(),
         seed,
@@ -1176,7 +1827,7 @@ async function runSlice(context = {}) {
         fixtures,
         observability: {
           browser: {
-            driver: 'agent-browser batch',
+            driver: 'agent-browser sequential bounded native commands',
             clientBaseUrl: client.baseUrl,
           },
           traces: await summarizeTraces({ since: startedAt, service: 'chat' }),
@@ -1184,12 +1835,12 @@ async function runSlice(context = {}) {
         },
         notes: [
           `Client dev server proxied browser traffic through ${client.baseUrl} -> ${harness.baseUrl}.`,
-          'Each browser scenario now runs as a single batch so route state and DOM state stay inside one daemon-backed session.',
-          'Happy path verifies the browser sees a live streaming state before the final assistant message settles.',
-          'Fallback path uses the real compose-mode picker and verifies the user-facing fallback banner, not just backend retry success.',
-          'Route-change path leaves chat for settings mid-stream, returns, and then reloads the saved conversation URL to verify refresh persistence without duplicate visible output.',
-          'Shipment path seeds active and delivered shipment records, then verifies the real workspace dock renders active packages and hides delivered ones.',
-          'Room path seeds a two-agent room, sends through the real room composer, verifies both agent responses render, and confirms persisted room state.',
+          'Each browser scenario uses one isolated daemon-backed session, sequential commands, a 15-second command bound, and a 90-second absolute fixture deadline.',
+          'Happy path uploads deterministic QBO evidence and verifies parser, triage, analyst, evidence, saved-route, reload, and duplicate-count outcomes.',
+          'Parser recovery forces a browser-level parse transport failure, proves downstream work stays absent, then removes the fault and retries.',
+          'Unsaved navigation forces triage persistence failure, exercises Copy, stays once, and explicitly leaves through the guarded linked-case action.',
+          'Session resume leaves and returns to the complete Chat V5 route, hard reloads it, and checks saved output counts.',
+          'Lifecycle handoff creates an isolated linked escalation, resolves it through the real form, verifies persistence after reload, and deletes it in cleanup.',
         ],
       });
 
@@ -1217,6 +1868,16 @@ if (require.main === module) {
 }
 
 module.exports = {
+  BROWSER_FIXTURE_TIMEOUT_MS,
+  QBO_KNOWN_ISSUE_FIXTURE,
+  QBO_BROWSER_FIXTURE_IDS,
+  QBO_TRIAGE_FIXTURE,
   SLICE_ID,
+  assertHappyPathContract,
+  assertLifecycleContract,
+  assertResumeContract,
+  classifyEvidenceTerminalText,
+  buildBatchFailureFixture,
+  runBrowserFixture,
   runSlice,
 };

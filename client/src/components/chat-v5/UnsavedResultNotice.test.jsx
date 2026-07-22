@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import UnsavedResultNotice from './UnsavedResultNotice.jsx';
 
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -65,6 +66,20 @@ describe('UnsavedResultNotice', () => {
     expect(writeText).toHaveBeenCalledOnce();
     expect(writeText).toHaveBeenCalledWith(text);
     expect(screen.getByRole('status')).toHaveTextContent('Copied');
+  });
+
+  it('keeps a clipboard failure visible so Copy is never mistaken for success', async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockRejectedValue(new Error('clipboard denied')) },
+    });
+    render(<UnsavedResultNotice text="Still visible" error="Save failed." onDismiss={() => {}} />);
+
+    await user.click(screen.getByRole('button', { name: 'Copy' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('Copy failed');
+    expect(screen.getByText('Save failed.')).toBeVisible();
   });
 
   it('downloads the exact visible content through a Blob without a network or AI call', async () => {

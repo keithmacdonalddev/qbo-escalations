@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { requestWaterfallInternals } from './useRequestWaterfall.js';
 
 const { isSensitiveTrackerUrl, sanitizeTrackedOptions } = requestWaterfallInternals;

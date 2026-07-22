@@ -291,3 +291,10 @@ Model: Claude Opus 4.8
 Is duplicate?: no
 Complexity: high
 Special Feature: Evidence Lifespan Guardian - The app's evidence records expire on independent timers (parse results, triage results, provider packages, recovery candidates), so a record can silently become unusable because something it depends on expired first — a parked recovery candidate that can no longer be accepted, or a KB draft whose source package is gone. This feature maintains the dependency map between records and warns operators before any active review chain breaks ("this candidate becomes unacceptable in 3 days; this draft loses its provenance in 9"), offers a one-click governed retention extension for records under active review with an audit trail of who extended what and why, and surfaces an expiry-risk queue so nothing under human review dies of old age unnoticed. Distinct from Evidence Recovery Workbench (recovers a gap after loss occurs) and Evidence-Preserving Incident Capsule (freezes a snapshot after a failure) — this prevents dependency-driven expiry before the loss happens.
+
+Date: 2026-07-22
+Time: 04:43 AST
+Model: Codex GPT-5.6 Sol (xhigh)
+Is duplicate?: no
+Complexity: high
+Special Feature: Release Evidence Seal - When a release candidate is ready, create an immutable review packet binding the exact commit and dirty state, dependency lockfiles, check-profile and capability-map versions, child-report hashes, and browser artifacts. Any later code, config, map, or evidence change invalidates the seal and requires a new human-reviewed run; unlike the existing Completion Claim Verifier, this protects the chain of custody across an entire multi-run release decision.

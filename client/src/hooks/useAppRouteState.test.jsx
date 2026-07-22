@@ -24,6 +24,40 @@ afterEach(() => {
 });
 
 describe('useAppRouteState unsaved-result navigation protection', () => {
+  it('follows normal route and saved-conversation changes when no unsaved guard blocks them', () => {
+    const onRouteChange = vi.fn();
+    const { result } = renderHook(() => useAppRouteState({ onRouteChange }));
+
+    navigateByHash('#/sessions');
+    expect(result.current.route).toEqual({ view: 'sessions', sessionId: null });
+
+    navigateByHash('#/chat/conversation-2');
+    expect(result.current.route).toEqual({ view: 'chat', conversationId: 'conversation-2' });
+    expect(onRouteChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens Settings and returns to the prior saved conversation route', () => {
+    const { result } = renderHook(() => useAppRouteState());
+
+    act(() => result.current.toggleSettings());
+    navigateByHash('#/settings');
+    expect(result.current.settingsOpen).toBe(true);
+
+    act(() => result.current.toggleSettings());
+    navigateByHash('#/chat/conversation-1');
+    expect(result.current.settingsOpen).toBe(false);
+    expect(result.current.route).toEqual({ view: 'chat', conversationId: 'conversation-1' });
+  });
+
+  it('removes its hash-change listener on unmount', () => {
+    const removeEventListener = vi.spyOn(window, 'removeEventListener');
+    const { unmount } = renderHook(() => useAppRouteState());
+
+    unmount();
+
+    expect(removeEventListener).toHaveBeenCalledWith('hashchange', expect.any(Function));
+  });
+
   it('consults the guard and restores the current chat when leaving is cancelled', () => {
     const guard = vi.fn(() => true);
     removeGuard = registerUnsavedWorkGuard(guard);

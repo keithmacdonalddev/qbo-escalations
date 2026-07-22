@@ -27,15 +27,17 @@ Stress the browser-facing React application under large datasets, long-lived str
 
 ## Current harness state
 
-- browser/realtime canaries implemented for `main-chat`, the workspace shipment tracker, and two-agent room turns
+- five QBO Chat V5 journeys cover happy path, parser recovery, unsaved navigation, session resume, and escalation lifecycle handoff
 - driven through the real React app with `agent-browser`
-- proxied through the hermetic server harness instead of a live backend
+- proxied through the hermetic server harness with deterministic provider responses and isolated records
+- every command, fixture, session close, client helper, and database cleanup has a bounded terminal path
+- cleanup timeout or failure propagates as incomplete evidence; it cannot leave a fixture or slice green
+- the happy path compares exact rendered triage and known-issue values before and after reload, as well as the saved API record
 
-## Immediate next expansion
+## Reliability requirement
 
-- workspace browser streaming
-- image parser browser flow
-- dashboard/settings render churn and navigation stability
+- do not count these journeys as trusted until the browser transport completes them repeatedly without unchanged-code failures
+- keep structured failure artifacts and an incomplete verdict when the browser tool cannot prove completion
 
 ## External dependencies
 

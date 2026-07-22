@@ -6,7 +6,10 @@ const path = require('path');
 const DEFAULT_HARNESS_ENV = Object.freeze({
   DISABLE_PROVIDER_WARMUP: '1',
   DISABLE_WORKSPACE_SCHEDULER: '1',
+  DISABLE_KB_AGENT_SCHEDULER: '1',
+  DISABLE_AI_MANAGEMENT_SCHEDULER: '1',
   DISABLE_WORKSPACE_MONITOR: '1',
+  DISABLE_AGENT_HEALTHCHECK: '1',
   DISABLE_IMAGE_PARSER_STARTUP_CHECK: '1',
   DISABLE_IMAGE_PARSER_HEALTHCHECK: '1',
   DISABLE_IMAGE_PARSER_KEYS_MIGRATION: '1',
@@ -18,6 +21,22 @@ const DEFAULT_HARNESS_ENV = Object.freeze({
   PORT: '0',
 });
 
+const FORCED_HARNESS_ENV_KEYS = Object.freeze([
+  'DISABLE_PROVIDER_WARMUP',
+  'DISABLE_WORKSPACE_SCHEDULER',
+  'DISABLE_KB_AGENT_SCHEDULER',
+  'DISABLE_AI_MANAGEMENT_SCHEDULER',
+  'DISABLE_WORKSPACE_MONITOR',
+  'DISABLE_AGENT_HEALTHCHECK',
+  'DISABLE_IMAGE_PARSER_STARTUP_CHECK',
+  'DISABLE_IMAGE_PARSER_HEALTHCHECK',
+  'DISABLE_IMAGE_PARSER_KEYS_MIGRATION',
+  'DISABLE_RUNTIME_PRUNING',
+  'RATE_LIMIT_DISABLED',
+  'HARNESS_PROVIDERS_STUBBED',
+  'HARNESS_CONNECTED_SERVICES_STUBBED',
+]);
+
 const SAFE_URI_MARKERS = [
   /mongodb-memory-server/i,
   /stress/i,
@@ -27,16 +46,18 @@ const SAFE_URI_MARKERS = [
 ];
 
 function buildHarnessEnv(overrides = {}) {
-  return {
+  const merged = {
     ...DEFAULT_HARNESS_ENV,
     ...overrides,
   };
+  for (const key of FORCED_HARNESS_ENV_KEYS) merged[key] = DEFAULT_HARNESS_ENV[key];
+  return merged;
 }
 
 function applyHarnessEnv(targetEnv = process.env, overrides = {}) {
   const harnessEnv = buildHarnessEnv(overrides);
   for (const [key, value] of Object.entries(harnessEnv)) {
-    if (targetEnv[key] === undefined) {
+    if (FORCED_HARNESS_ENV_KEYS.includes(key) || targetEnv[key] === undefined) {
       targetEnv[key] = value;
     }
   }
@@ -165,6 +186,7 @@ function loadServerEnv(targetEnv = process.env, options = {}) {
 
 module.exports = {
   DEFAULT_HARNESS_ENV,
+  FORCED_HARNESS_ENV_KEYS,
   SAFE_URI_MARKERS,
   applyHarnessEnv,
   assertSafeMongoUri,

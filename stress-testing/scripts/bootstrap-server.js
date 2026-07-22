@@ -5,8 +5,8 @@ const { installDefaultProviderStubs } = require('./harness-provider-stubs');
 const { installDefaultConnectedServiceStubs } = require('./harness-service-stubs');
 
 // Load server/.env so MONGODB_URI (etc.) is populated before the safety check
-// runs. Harness env defaults still win over anything the server .env sets, but
-// only for keys the shell hasn't already overridden.
+// runs. Safety-critical harness controls are forced after shell/server env load
+// so ambient values cannot enable providers or background work in a test run.
 loadServerEnv(process.env);
 applyHarnessEnv(process.env);
 

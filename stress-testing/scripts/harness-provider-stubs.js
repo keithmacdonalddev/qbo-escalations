@@ -160,6 +160,7 @@ function installDefaultProviderStubs() {
 module.exports = {
   DEFAULT_PARSE_FIELDS,
   DEFAULT_PARSE_TEXT,
+  STUB_RESPONSE_TEXT,
   installDefaultProviderStubs,
   parseEscalationStub,
   parseImageStub,

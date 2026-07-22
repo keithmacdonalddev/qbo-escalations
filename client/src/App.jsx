@@ -3,12 +3,9 @@ import { lazy, Suspense, useState, useEffect, useCallback, useMemo, Profiler } f
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'framer-motion';
 import { transitions, fade } from './utils/motion.js';
 import Sidebar from './components/Sidebar.jsx';
-import ChatMiniWidget from './components/ChatMiniWidget.jsx';
 import HealthBanner from './components/HealthBanner.jsx';
 import AgentHealthBanner from './components/AgentHealthBanner.jsx';
 import HealthToast from './components/HealthToast.jsx';
-import AgentDock from './components/AgentDock.jsx';
-import AgentBootOverlay from './components/AgentBootOverlay.jsx';
 import AppHeader from './components/app/AppHeader.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
@@ -27,6 +24,9 @@ import { getSidebarCurrentRoute } from './lib/appRoute.js';
 import { tel, TEL } from './lib/devTelemetry.js';
 
 const ChatView = lazy(() => import('./components/Chat.jsx').then(module => ({ default: module.ChatView })));
+const AgentBootOverlay = lazy(() => import('./components/AgentBootOverlay.jsx'));
+const AgentDock = lazy(() => import('./components/AgentDock.jsx'));
+const ChatMiniWidget = lazy(() => import('./components/ChatMiniWidget.jsx'));
 const ChatV5Container = lazy(() => import('./components/chat-v5/ChatV5Container.jsx'));
 const EscalationDashboard = lazy(() => import('./components/EscalationDashboard.jsx'));
 const KnowledgebaseView = lazy(() => import('./components/KnowledgebaseView.jsx'));
@@ -350,6 +350,7 @@ function App() {
     <MotionConfig reducedMotion="user">
     <WorkspaceMonitorProvider enabled>
     <AgentRegistryProvider>
+    <Suspense fallback={<div role="status" aria-live="polite">Loading application…</div>}>
     <AgentBootOverlay>
     <AgentTestModalProvider>
     <div className={`app app-dock-mode-${dockShellMode}${sidebarCollapsed ? ' sidebar-is-collapsed' : ''}`}>
@@ -486,7 +487,7 @@ function App() {
                 </button>
               </header>
               <div className="agent-panel-body">
-                <AgentDock
+                <Suspense fallback={null}><AgentDock
                   chat={chat}
                   activeTab={globalDockTab}
                   onActiveTabChange={setGlobalDockTab}
@@ -495,7 +496,7 @@ function App() {
                   onClose={closeAgentModal}
                   resizable={false}
                   modalMode
-                />
+                /></Suspense>
               </div>
             </motion.section>
           </motion.div>
@@ -504,7 +505,7 @@ function App() {
 
       {/* Floating mini widget — regular chat streaming monitor outside Chat view */}
       {route.view !== 'chat' && (
-        <ChatMiniWidget
+        <Suspense fallback={null}><ChatMiniWidget
           isStreaming={chat.isStreaming}
           streamingText={chat.streamingText}
           parallelStreaming={chat.parallelStreaming}
@@ -514,7 +515,7 @@ function App() {
           conversationId={chat.conversationId}
           error={chat.error}
           abortStream={chat.abortStream}
-        />
+        /></Suspense>
       )}
 
 
@@ -583,6 +584,7 @@ function App() {
     </div>
     </AgentTestModalProvider>
     </AgentBootOverlay>
+    </Suspense>
     </AgentRegistryProvider>
     </WorkspaceMonitorProvider>
     </MotionConfig>

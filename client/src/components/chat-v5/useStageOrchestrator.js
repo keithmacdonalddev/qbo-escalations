@@ -29,7 +29,7 @@ const INITIAL_STAGE_STATE = {
   parser: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
   triage: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false, fallbackReason: '', providerPackageId: '' },
   inv: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
-  main: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
+  main: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false, fallbackReason: '' },
 };
 
 const INITIAL_TRIAGE_CONVERSATION_SAVE = { state: 'idle', error: null, retryAllowed: false };
@@ -834,6 +834,19 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     persistTriageResult();
   }, [markFailureInProgress, persistTriageResult]);
 
+  const handleFallback = useCallback((data = {}) => {
+    const reason = data.reason || data.code || 'PROVIDER_ERROR';
+    setStageState((prev) => ({
+      ...prev,
+      main: { ...prev.main, fallbackUsed: true, fallbackReason: reason },
+    }));
+    pushLocalStageEvent('main', 'provider.fallback', {
+      from: data.from || '',
+      to: data.to || '',
+      reason,
+    });
+  }, [pushLocalStageEvent]);
+
   const runChatStream = useCallback((payload, token) => {
     const { abort } = sendChatMessage(payload, {
       onInit: (data) => { if (tokenRef.current === token) handleInit(data); },
@@ -847,11 +860,11 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
       onDone: (data) => { if (tokenRef.current === token) handleDone(data); },
       onError: (err) => { if (tokenRef.current === token) handleError(err); },
       onProviderError: () => {},
-      onFallback: () => {},
+      onFallback: (data) => { if (tokenRef.current === token) handleFallback(data); },
       onLocalStage: () => {},
     });
     abortRef.current = abort;
-  }, [handleCaseIntake, handleChunk, handleDone, handleError, handleInit, handleInvMatches, handleStageEvent]);
+  }, [handleCaseIntake, handleChunk, handleDone, handleError, handleFallback, handleInit, handleInvMatches, handleStageEvent]);
 
   const startTriageStream = useCallback((parseResult, runtimeByStage, token, triagePlan = getTriagePlan(parseResult)) => {
     const text = (parseResult?.sourceText || parseResult?.text || '').trim();
@@ -1095,10 +1108,10 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     // Mark parser as running while the image-parser HTTP call runs.
     setStageState((prev) => ({
       ...prev,
-      parser: { ...prev.parser, status: 'running', startedAt: Date.now(), finishedAt: null, durationMs: null, error: null },
-      triage: { ...prev.triage, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, providerPackageId: '' },
-      inv: { ...prev.inv, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null },
-      main: { ...prev.main, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null },
+      parser: { ...prev.parser, status: 'running', startedAt: Date.now(), finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
+      triage: { ...prev.triage, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false, fallbackReason: '', providerPackageId: '' },
+      inv: { ...prev.inv, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
+      main: { ...prev.main, status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false, fallbackReason: '' },
     }));
 
     pushLocalStageEvent('parser', 'parser.parse_requested', {
@@ -1412,11 +1425,11 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
         streamingTextRef.current = '';
       },
       onProviderError: () => {},
-      onFallback: () => {},
+      onFallback: (data) => { if (tokenRef.current === token) handleFallback(data); },
       onLocalStage: () => {},
     });
     abortRef.current = abort;
-  }, [conversationId, resumeTargetId, handleCaseIntake, handleInvMatches, handleStageEvent]);
+  }, [conversationId, resumeTargetId, handleCaseIntake, handleFallback, handleInvMatches, handleStageEvent]);
 
   useEffect(() => {
     if (manualNav) return undefined;
@@ -1479,6 +1492,7 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
   }, [manualNav, activeWidget, stageState.triage.status, stageState.main.status]);
 
   useEffect(() => () => {
+    tokenRef.current += 1;
     if (abortRef.current) {
       try { abortRef.current(); } catch { /* noop */ }
       abortRef.current = null;
@@ -1496,6 +1510,10 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     if (widgetSwitchTimerRef.current) {
       clearTimeout(widgetSwitchTimerRef.current);
       widgetSwitchTimerRef.current = null;
+    }
+    if (evidenceRecheckTimerRef.current) {
+      clearTimeout(evidenceRecheckTimerRef.current);
+      evidenceRecheckTimerRef.current = null;
     }
   }, []);
 

@@ -2,129 +2,158 @@
   "slice": "client-surfaces",
   "checks": [
     {
-      "label": "Client surfaces now report five browser scenarios",
+      "label": "Client surfaces report exactly the five critical QBO browser journeys",
       "path": "fixtures",
       "lengthMin": 5
     },
     {
-      "label": "Happy-path browser run reaches a concrete chat conversation route",
-      "path": "fixtures[0].assertions.conversationHashSet",
+      "label": "QBO happy path renders parsed evidence",
+      "path": "fixtures[0].assertions.parsedEvidenceVisible",
       "equals": true
     },
     {
-      "label": "Happy-path browser run observed the live stop button state",
-      "path": "fixtures[0].assertions.stopButtonSeen",
+      "label": "QBO happy path renders the analyst answer",
+      "path": "fixtures[0].assertions.analystAnswerVisible",
       "equals": true
     },
     {
-      "label": "Happy-path browser run renders the final streamed response",
-      "path": "fixtures[0].assertions.finalResponseVisible",
+      "label": "QBO happy path reaches a terminal evidence state",
+      "path": "fixtures[0].assertions.evidenceTerminal",
       "equals": true
     },
     {
-      "label": "Fallback browser run shows the fallback banner",
-      "path": "fixtures[1].assertions.fallbackBannerVisible",
-      "equals": true
+      "label": "QBO happy path saves the expected triage read",
+      "path": "fixtures[0].assertions.savedTriageRead",
+      "equals": "Harness triage confirms the payroll submission did not create paychecks."
     },
     {
-      "label": "Fallback browser run renders the fallback response text",
-      "path": "fixtures[1].assertions.finalProviderTextVisible",
-      "equals": true
+      "label": "QBO happy path saves the expected known-issue state",
+      "path": "fixtures[0].assertions.savedKnownIssueStatus",
+      "equals": "needs_more_info"
     },
     {
-      "label": "Route-change browser run really visited settings",
-      "path": "fixtures[2].assertions.settingsRouteVisited",
-      "equals": true
+      "label": "QBO happy path saves the expected known-issue summary",
+      "path": "fixtures[0].assertions.savedKnownIssueSummary",
+      "equals": "More information is needed before known issue matching is reliable."
     },
     {
-      "label": "Route-change browser run renders the final response after refresh",
-      "path": "fixtures[2].assertions.finalResponseVisibleAfterRefresh",
-      "equals": true
+      "label": "QBO happy path renders exact triage and known-issue values before reload",
+      "path": "fixtures[0].assertions.visibleBeforeReload",
+      "equals": {
+        "triageRead": "Harness triage confirms the payroll submission did not create paychecks.",
+        "triageAction": "Confirm the payroll period and capture the exact submission result.",
+        "knownIssueStatus": "done",
+        "knownIssueSummary": "No INV matches were found."
+      }
     },
     {
-      "label": "Route-change browser run shows the final response only once after refresh",
-      "path": "fixtures[2].assertions.duplicateResponseCountAfterRefresh",
+      "label": "QBO happy path renders exact triage and known-issue values after reload",
+      "path": "fixtures[0].assertions.visibleAfterReload",
+      "equals": {
+        "triageRead": "Harness triage confirms the payroll submission did not create paychecks.",
+        "triageAction": "Confirm the payroll period and capture the exact submission result.",
+        "knownIssueStatus": "done",
+        "knownIssueSummary": "No INV matches were found."
+      }
+    },
+    {
+      "label": "QBO happy reload has one parsed result",
+      "path": "fixtures[0].assertions.parseCountAfterReload",
       "equals": 1
     },
     {
-      "label": "Workspace shipment browser run observes shipment API traffic",
-      "path": "fixtures[3].assertions.shipmentRequestCount",
-      "min": 1
+      "label": "QBO happy reload has one analyst answer",
+      "path": "fixtures[0].assertions.answerCountAfterReload",
+      "equals": 1
     },
     {
-      "label": "Workspace shipment browser run renders first active shipment",
-      "path": "fixtures[3].assertions.firstActiveVisible",
+      "label": "Parser failure does not falsely complete downstream work",
+      "path": "fixtures[1].assertions.downstreamAbsentAfterFailure",
       "equals": true
     },
     {
-      "label": "Workspace shipment browser run renders second active shipment",
-      "path": "fixtures[3].assertions.secondActiveVisible",
+      "label": "Parser retry succeeds and clears stale failure state",
+      "path": "fixtures[1].assertions.staleFailureCleared",
       "equals": true
     },
     {
-      "label": "Workspace shipment browser run hides delivered shipment",
-      "path": "fixtures[3].assertions.deliveredHidden",
+      "label": "Unsaved triage warning remains visible",
+      "path": "fixtures[2].assertions.warningVisible",
       "equals": true
     },
     {
-      "label": "Workspace shipment browser run expands tracking details",
-      "path": "fixtures[3].assertions.trackingDetailsVisible",
+      "label": "Unsaved triage recovery Copy succeeds",
+      "path": "fixtures[2].assertions.copied",
       "equals": true
     },
     {
-      "label": "Workspace shipment browser run keeps UPS tracking link",
-      "path": "fixtures[3].assertions.trackingLinkIsUps",
+      "label": "Unsaved navigation stays once with result preserved",
+      "path": "fixtures[2].assertions.stayedWithResult",
       "equals": true
     },
     {
-      "label": "Workspace shipment browser cleanup leaves no seeded shipments",
-      "path": "fixtures[3].assertions.cleanupRemainingShipments",
+      "label": "Unsaved navigation explicitly leaves when confirmed",
+      "path": "fixtures[2].assertions.explicitLeaveHonored",
+      "equals": true
+    },
+    {
+      "label": "Saved-session reload keeps one parsed result",
+      "path": "fixtures[3].assertions.parsedCount",
+      "equals": 1
+    },
+    {
+      "label": "Saved-session reload keeps one analyst answer",
+      "path": "fixtures[3].assertions.answerCount",
+      "equals": 1
+    },
+    {
+      "label": "Saved-session reload preserves stage truth",
+      "path": "fixtures[3].assertions.stageTruthVisible",
+      "equals": true
+    },
+    {
+      "label": "Saved-session reload preserves completed stage states",
+      "path": "fixtures[3].assertions.stageTerminalStates",
+      "equals": {
+        "parser": "done",
+        "inv": "done",
+        "triage": "done",
+        "main": "done"
+      }
+    },
+    {
+      "label": "Lifecycle handoff preserves the linked identity",
+      "path": "fixtures[4].assertions.identityVisible",
+      "equals": true
+    },
+    {
+      "label": "Lifecycle handoff persists resolved state",
+      "path": "fixtures[4].assertions.persistedStatus",
+      "equals": "resolved"
+    },
+    {
+      "label": "Lifecycle handoff keeps the persisted conversation identity",
+      "path": "fixtures[4].assertions.persistedConversationId",
+      "equalsPath": "fixtures[4].assertions.conversationId"
+    },
+    {
+      "label": "Lifecycle handoff displays the case and evidence identity",
+      "path": "fixtures[4].assertions.visibleIdentity",
+      "equals": {
+        "coid": true,
+        "caseNumber": true,
+        "evidence": true
+      }
+    },
+    {
+      "label": "Lifecycle cleanup leaves no seeded escalation",
+      "path": "fixtures[4].assertions.cleanupRemainingEscalations",
       "equals": 0
     },
     {
-      "label": "Room browser run stays on the seeded room route",
-      "path": "fixtures[4].assertions.roomHashMatches",
-      "equals": true
-    },
-    {
-      "label": "Room browser run sends through the room API",
-      "path": "fixtures[4].assertions.roomSendRequestCount",
-      "min": 1
-    },
-    {
-      "label": "Room browser run renders the user message",
-      "path": "fixtures[4].assertions.userMessageVisible",
-      "equals": true
-    },
-    {
-      "label": "Room browser run renders at least two agent groups",
-      "path": "fixtures[4].assertions.agentMessageGroupCount",
-      "min": 2
-    },
-    {
-      "label": "Room browser run renders both deterministic agent responses",
-      "path": "fixtures[4].assertions.finalTextOccurrence",
-      "min": 2
-    },
-    {
-      "label": "Room browser run persists at least two assistant messages",
-      "path": "fixtures[4].assertions.persistedAssistantCount",
-      "min": 2
-    },
-    {
-      "label": "Room browser cleanup leaves no seeded rooms",
-      "path": "fixtures[4].assertions.cleanupRemainingRooms",
+      "label": "Lifecycle cleanup leaves no generated knowledge candidate",
+      "path": "fixtures[4].assertions.cleanupRemainingKnowledgeCandidates",
       "equals": 0
-    },
-    {
-      "label": "Client surfaces generate chat traces",
-      "path": "observability.traces.count",
-      "min": 3
-    },
-    {
-      "label": "Client surfaces generate chat usage records",
-      "path": "observability.usage.count",
-      "min": 3
     }
   ]
 }

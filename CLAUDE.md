@@ -147,9 +147,11 @@ All endpoints return `{ ok: true/false, ... }`. Errors include `code` and `error
 ## Testing Policy
 
 - Server tests: Node.js built-in `node:test` + `supertest` + `mongodb-memory-server`, in `server/test/`. Run with `npm --prefix server test` (or `npm test` at root).
+- Client behavior tests: Vitest + React Testing Library in `client/src/`. Run once with `npm --prefix client test`; use `npm --prefix client run test:watch` only when watch mode is explicitly useful.
 - Test new routes, critical business logic (chat flow, parsing, image archive, INV matching), and bug-fix regressions. Skip trivial CRUD wrappers, config changes, and one-off scripts.
 - Visual tests: use `agent-browser` against `localhost:5174` after significant UI changes; save screenshots to `review-screenshots/` with descriptive names; use `snapshot -i` to verify interactive elements; capture before/after pairs for visual bugs.
 - Run the test suite as a separate, explicit step — not mid-implementation. Don't block implementation progress on test completeness.
+- Passing existing tests is evidence for the configured checks, not proof that the full app is sufficiently tested. When a material user capability or mapped source path changes, update or run its mapped tests and keep `testing/app-capabilities.json` honest; record intentionally deferred coverage as a visible gap.
 
 ## Verification
 

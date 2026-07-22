@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   DEFAULT_HARNESS_ENV,
+  FORCED_HARNESS_ENV_KEYS,
   applyHarnessEnv,
   assertSafeMongoUri,
   buildHarnessEnv,
@@ -14,11 +15,16 @@ const {
   loadServerEnv,
   resolveHarnessMongoUri,
 } = require('../harness-env');
+const { resolveStartupControls } = require('../../../server/src/lib/startup-controls');
+const { isStubbed } = require('../../../server/src/lib/harness-provider-gate');
 
 test('DEFAULT_HARNESS_ENV disables every known background behavior', () => {
   assert.equal(DEFAULT_HARNESS_ENV.DISABLE_PROVIDER_WARMUP, '1');
   assert.equal(DEFAULT_HARNESS_ENV.DISABLE_WORKSPACE_SCHEDULER, '1');
+  assert.equal(DEFAULT_HARNESS_ENV.DISABLE_KB_AGENT_SCHEDULER, '1');
+  assert.equal(DEFAULT_HARNESS_ENV.DISABLE_AI_MANAGEMENT_SCHEDULER, '1');
   assert.equal(DEFAULT_HARNESS_ENV.DISABLE_WORKSPACE_MONITOR, '1');
+  assert.equal(DEFAULT_HARNESS_ENV.DISABLE_AGENT_HEALTHCHECK, '1');
   assert.equal(DEFAULT_HARNESS_ENV.DISABLE_IMAGE_PARSER_STARTUP_CHECK, '1');
   assert.equal(DEFAULT_HARNESS_ENV.DISABLE_IMAGE_PARSER_HEALTHCHECK, '1');
   assert.equal(DEFAULT_HARNESS_ENV.DISABLE_IMAGE_PARSER_KEYS_MIGRATION, '1');
@@ -28,6 +34,55 @@ test('DEFAULT_HARNESS_ENV disables every known background behavior', () => {
   assert.equal(DEFAULT_HARNESS_ENV.HARNESS_CONNECTED_SERVICES_STUBBED, '1');
   assert.equal(DEFAULT_HARNESS_ENV.HOST, '127.0.0.1');
   assert.equal(DEFAULT_HARNESS_ENV.PORT, '0');
+});
+
+test('buildHarnessEnv disables every startup control end to end', () => {
+  const controls = resolveStartupControls(buildHarnessEnv());
+  assert.deepEqual(controls, {
+    providerWarmup: false,
+    workspaceScheduler: false,
+    kbAgentScheduler: false,
+    aiManagementScheduler: false,
+    workspaceMonitor: false,
+    agentHealthCheck: false,
+    imageParserStartupCheck: false,
+    imageParserHealthCheck: false,
+    imageParserKeysMigration: false,
+  });
+  assert.equal(Object.values(controls).some(Boolean), false, 'no harness startup task may remain enabled');
+});
+
+test('ambient and explicit zero overrides cannot weaken harness isolation', () => {
+  const env = {
+    HARNESS_PROVIDERS_STUBBED: '0',
+    HARNESS_CONNECTED_SERVICES_STUBBED: '0',
+    DISABLE_PROVIDER_WARMUP: '0',
+    DISABLE_WORKSPACE_SCHEDULER: '0',
+    DISABLE_KB_AGENT_SCHEDULER: '0',
+    DISABLE_AI_MANAGEMENT_SCHEDULER: '0',
+    DISABLE_WORKSPACE_MONITOR: '0',
+    DISABLE_AGENT_HEALTHCHECK: '0',
+    DISABLE_IMAGE_PARSER_STARTUP_CHECK: '0',
+    DISABLE_IMAGE_PARSER_HEALTHCHECK: '0',
+    DISABLE_IMAGE_PARSER_KEYS_MIGRATION: '0',
+    DISABLE_RUNTIME_PRUNING: '0',
+    RATE_LIMIT_DISABLED: '0',
+  };
+  const previousProviderGate = process.env.HARNESS_PROVIDERS_STUBBED;
+  applyHarnessEnv(env, Object.fromEntries(FORCED_HARNESS_ENV_KEYS.map((key) => [key, '0'])));
+  try {
+    process.env.HARNESS_PROVIDERS_STUBBED = env.HARNESS_PROVIDERS_STUBBED;
+    assert.equal(isStubbed(), true, 'provider calls must remain gated in harness mode');
+  } finally {
+    if (previousProviderGate === undefined) delete process.env.HARNESS_PROVIDERS_STUBBED;
+    else process.env.HARNESS_PROVIDERS_STUBBED = previousProviderGate;
+  }
+  assert.equal(env.HARNESS_CONNECTED_SERVICES_STUBBED, '1');
+  assert.equal(env.DISABLE_RUNTIME_PRUNING, '1');
+  assert.equal(env.RATE_LIMIT_DISABLED, '1');
+  const controls = resolveStartupControls(env);
+  assert.equal(Object.values(controls).some(Boolean), false, 'every resolved startup control must remain disabled');
+  assert.ok(FORCED_HARNESS_ENV_KEYS.every((key) => env[key] === DEFAULT_HARNESS_ENV[key]));
 });
 
 test('DEFAULT_HARNESS_ENV is frozen', () => {

@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiFetchJson } from '../api/http.js';
 import ProviderSpendingCard from './ProviderSpendingCard.jsx';
 

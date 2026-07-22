@@ -268,6 +268,7 @@ test('POST /api/chat (single, ok) → UsageLog service=chat, status=ok, correct 
 // ================================================================
 test('POST /api/chat (single, error) → UsageLog status=error, partial usage', async () => {
   currentClaudeStub = makeFakeStreamError({ ...FAKE_USAGE, inputTokens: 100, outputTokens: 0 });
+  currentCodexStub = makeFakeStreamError(null);
 
   const res = await agent
     .post('/api/chat')
@@ -279,7 +280,7 @@ test('POST /api/chat (single, error) → UsageLog status=error, partial usage', 
   await drainPendingWrites(5000);
   resetDrain();
 
-  const doc = await UsageLog.findOne({ service: 'chat' }).lean();
+  const doc = await UsageLog.findOne({ service: 'chat', provider: 'claude' }).lean();
   assert.ok(doc);
   assert.equal(doc.status, 'error');
   assert.equal(doc.inputTokens, 100);
@@ -431,6 +432,7 @@ test('POST /api/chat/retry (error) → UsageLog status=error', async () => {
 
   // Now switch to error stub for the retry
   currentClaudeStub = makeFakeStreamError({ ...FAKE_USAGE, inputTokens: 80, outputTokens: 0 });
+  currentCodexStub = makeFakeStreamError(null);
 
   const retryRes = await agent.post('/api/chat/retry').send({ conversationId }).expect(200);
   assert.ok(parseSseEvents(retryRes.text).find((e) => e.event === 'error'), 'retry error event');
@@ -438,7 +440,7 @@ test('POST /api/chat/retry (error) → UsageLog status=error', async () => {
   await drainPendingWrites(5000);
   resetDrain();
 
-  const doc = await UsageLog.findOne({ service: 'chat' }).lean();
+  const doc = await UsageLog.findOne({ service: 'chat', provider: 'claude' }).lean();
   assert.ok(doc, 'UsageLog from failed retry');
   assert.equal(doc.status, 'error');
   assert.equal(doc.inputTokens, 80);
@@ -606,6 +608,7 @@ test('POST /api/copilot/analyze-escalation (ok) → full field check', async () 
 // ================================================================
 test('POST /api/copilot/analyze-escalation (error) → UsageLog status=error', async () => {
   currentClaudeStub = makeFakeStreamError({ ...FAKE_USAGE, inputTokens: 50, outputTokens: 0 });
+  currentCodexStub = makeFakeStreamError(null);
 
   const esc = await Escalation.create({
     category: 'payroll',
@@ -624,7 +627,7 @@ test('POST /api/copilot/analyze-escalation (error) → UsageLog status=error', a
   await drainPendingWrites(5000);
   resetDrain();
 
-  const doc = await UsageLog.findOne({ service: 'copilot' }).lean();
+  const doc = await UsageLog.findOne({ service: 'copilot', provider: 'claude' }).lean();
   assert.ok(doc);
   assert.equal(doc.status, 'error');
   assert.equal(doc.inputTokens, 50);

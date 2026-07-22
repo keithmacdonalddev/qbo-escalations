@@ -16,6 +16,7 @@ server/.playwright-mcp/
 review-screenshots/
 stress-testing/reports/**/*.json
 stress-testing/reports/**/artifacts/
+test-results/app-check/
 .claude-state/
 .claude/agent-memory/
 claude.cmd

@@ -2707,6 +2707,7 @@ function LinkedCaseLifecycleBanner({ escalation, knowledge, onRequestNavigation 
   if (!escalation) return null;
 
   const lifecycle = getEscalationKnowledgeLifecycle({ escalation, knowledge });
+  const knowledgeId = cleanValue(knowledge?.id || knowledge?._id);
 
   return (
     <section className="v5-linked-case" aria-label="Linked case lifecycle">
@@ -2733,6 +2734,18 @@ function LinkedCaseLifecycleBanner({ escalation, knowledge, onRequestNavigation 
       >
         Finish Case
       </button>
+      {knowledgeId && (
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => {
+            if (onRequestNavigation?.() === false) return;
+            window.location.hash = `#/knowledge/${encodeURIComponent(knowledgeId)}`;
+          }}
+        >
+          Review Knowledge
+        </button>
+      )}
     </section>
   );
 }

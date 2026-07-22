@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
 import EvidenceSummary from './EvidenceSummary.jsx';
 
 function makeEvidence(overrides = {}) {
@@ -36,6 +37,13 @@ function ready(evidence) {
 }
 
 describe('EvidenceSummary', () => {
+  it('states that evidence is being checked without showing a false warning', () => {
+    render(<EvidenceSummary runEvidence={{ state: 'loading', evidence: null }} />);
+
+    expect(screen.getByText('Checking whether this run’s evidence was saved…')).toBeVisible();
+    expect(screen.queryByRole('region', { name: /warning/i })).not.toBeInTheDocument();
+  });
+
   it('shows one quiet confirmation with the exact saved-result count and supporting note', () => {
     const headline = 'Evidence complete — all 3 of 3 expected results were safely saved.';
     render(
@@ -234,5 +242,19 @@ describe('EvidenceSummary', () => {
     );
     expect(screen.getByText('2 expected evidence items are not saved.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeEnabled();
+  });
+
+  it('shows acknowledgement failure and leaves the finding actionable', () => {
+    render(
+      <EvidenceSummary
+        runEvidence={ready(makeEvidence())}
+        acknowledgeError="The acknowledgement could not be saved."
+        onAcknowledge={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The acknowledgement could not be saved.');
+    expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeEnabled();
+    expect(screen.getByRole('region', { name: 'Evidence completeness warning' })).toBeVisible();
   });
 });

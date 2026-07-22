@@ -14,10 +14,15 @@ Shared scenario libraries for the current slice runners. Covers:
 ### `harness-env.js`
 Applies the stable harness env profile and refuses to boot against non-hermetic infrastructure.
 
+Safety-critical provider/service gates and disable flags are forced to their controlled values after ambient shell and `server/.env` loading. An inherited `0` value cannot re-enable live providers, schedulers, monitors, health checks, migrations, pruning, or rate limiting inside the harness.
+
 Defaults:
 - disables provider warmup
 - disables workspace scheduler
+- disables Knowledge Base Agent scheduler
+- disables AI-management scheduler
 - disables workspace monitor
+- disables scheduled agent health checks
 - disables image-parser startup check
 - disables image-parser periodic health check
 - disables image-parser keys migration
@@ -79,8 +84,9 @@ Shared execution helpers for the slice runners. Covers:
 Shared browser-driver helpers for `client-surfaces`. Covers:
 - starting a Vite client dev server pointed at the hermetic test server via `VITE_PROXY_TARGET`
 - running `agent-browser` commands under isolated browser sessions
-- running deterministic `agent-browser batch` scenarios inside one live browser session
+- running deterministic sequential bounded native `agent-browser` commands inside one isolated browser session
 - command-level timeout and cleanup handling for browser subprocesses
+- fixed transport-loss classification for Node `ECONN*`, native connection loss/refusal/reset, and Windows socket errors; selector, application, HTTP, and baseline assertions remain completed failures
 - interactive snapshots and `@eN` ref lookup helpers
 - browser `wait`, `eval`, screenshot, and session cleanup helpers
 
@@ -123,7 +129,10 @@ Behavior:
 | `STRESS_MONGODB_UNSAFE_ALLOW=1` | Bypass the URI guard. Do not use unless intentionally pointing at a disposable prod-shaped cluster. |
 | `DISABLE_PROVIDER_WARMUP=1` | Skip `claude`/`codex` warmUp calls at boot. |
 | `DISABLE_WORKSPACE_SCHEDULER=1` | Skip `startBriefingScheduler()`. |
+| `DISABLE_KB_AGENT_SCHEDULER=1` | Skip the scheduled Knowledge Base Agent scan. |
+| `DISABLE_AI_MANAGEMENT_SCHEDULER=1` | Skip the AI model-discovery scheduler coordinator. |
 | `DISABLE_WORKSPACE_MONITOR=1` | Skip `startWorkspaceMonitor()`. |
+| `DISABLE_AGENT_HEALTHCHECK=1` | Skip scheduled agent health checks. |
 | `DISABLE_IMAGE_PARSER_STARTUP_CHECK=1` | Skip the one-time provider availability probe. |
 | `DISABLE_IMAGE_PARSER_HEALTHCHECK=1` | Skip the 5-minute provider probe interval. |
 | `DISABLE_IMAGE_PARSER_KEYS_MIGRATION=1` | Skip the JSON→Mongo key migration on boot. |
@@ -191,4 +200,4 @@ The current nine runners each emit multiple fixtures per run:
 - request validation failures
 - targeted service/provider failure coverage where appropriate
 - one small load or replay/persistence scenario
-- for `client-surfaces`, real browser canaries for `main-chat`, the workspace shipment tracker, and two-agent room turns driven by `agent-browser batch`
+- for `client-surfaces`, the five critical QBO journeys driven by sequential bounded native `agent-browser` commands

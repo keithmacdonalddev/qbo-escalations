@@ -88,6 +88,11 @@ Before reporting:
 - Keep prototype files and experiments out of core test/review paths by default.
 - Prefer separate branch for prototypes when feasible.
 
+### Testing Evidence
+
+- Client behavior tests use Vitest and React Testing Library. Passing existing tests is evidence for the configured checks, not proof that the full app is sufficiently tested.
+- When a material user capability or mapped source path changes, update or run its mapped tests and keep `testing/app-capabilities.json` honest. If coverage is intentionally deferred, record the gap instead of claiming the feature is fully tested.
+
 ### Browser Automation
 
 Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.

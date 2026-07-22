@@ -389,10 +389,17 @@ function buildSliceReport(sliceId, {
   notes = [],
   startupControls = null,
 } = {}) {
-  const ok = fixtures.every((fixture) => fixture.ok !== false);
+  const incompleteFixture = fixtures.find((fixture) => fixture?.incomplete === true);
+  const incomplete = Boolean(incompleteFixture);
+  const ok = !incomplete && fixtures.every((fixture) => fixture.ok !== false);
   return {
+    schemaVersion: 1,
     slice: sliceId,
     ok,
+    incomplete,
+    incompleteReason: incompleteFixture
+      ? incompleteFixture.error || incompleteFixture.reason || `Fixture ${incompleteFixture.id || '<unknown>'} did not complete.`
+      : null,
     runId,
     description,
     seed,

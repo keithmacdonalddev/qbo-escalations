@@ -17,6 +17,7 @@ function resolveStartupControls(env = process.env, overrides = {}) {
     providerWarmup: overrides.providerWarmup ?? !parseBooleanEnv(env.DISABLE_PROVIDER_WARMUP, false),
     workspaceScheduler: overrides.workspaceScheduler ?? !parseBooleanEnv(env.DISABLE_WORKSPACE_SCHEDULER, false),
     kbAgentScheduler: overrides.kbAgentScheduler ?? !parseBooleanEnv(env.DISABLE_KB_AGENT_SCHEDULER, false),
+    aiManagementScheduler: overrides.aiManagementScheduler ?? !parseBooleanEnv(env.DISABLE_AI_MANAGEMENT_SCHEDULER, false),
     workspaceMonitor: overrides.workspaceMonitor ?? !parseBooleanEnv(env.DISABLE_WORKSPACE_MONITOR, false),
     agentHealthCheck: overrides.agentHealthCheck ?? !parseBooleanEnv(env.DISABLE_AGENT_HEALTHCHECK, false),
     imageParserStartupCheck: overrides.imageParserStartupCheck ?? !parseBooleanEnv(env.DISABLE_IMAGE_PARSER_STARTUP_CHECK, false),
