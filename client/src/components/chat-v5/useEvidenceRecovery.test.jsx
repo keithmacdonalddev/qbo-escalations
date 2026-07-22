@@ -194,6 +194,93 @@ describe('useEvidenceRecovery confirmation', () => {
     expect(mocks.onEvidenceRefresh).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    {
+      code: 'RECOVERY_PLAN_CHANGED',
+      serverMessage: 'Runtime defaults changed.',
+      explanation: /Recovery settings changed after you reviewed them.*review them again/i,
+    },
+    {
+      code: 'RECOVERY_PROVIDER_NOT_READY',
+      serverMessage: 'The configured provider is unavailable.',
+      explanation: /AI provider is not ready.*did not start/i,
+    },
+  ])('refreshes and requires re-review for $code without auto-confirming', async ({ code, serverMessage, explanation }) => {
+    const user = userEvent.setup();
+    const refreshed = makeOption({
+      planId: `plan-refreshed-${code.toLowerCase()}`,
+      reason: 'Review the refreshed provider settings.',
+    });
+    mocks.getEvidenceRecoveryOptions
+      .mockResolvedValueOnce({ recovery: makeRecovery() })
+      .mockResolvedValueOnce({ recovery: makeRecovery(refreshed) });
+    mocks.confirmEvidenceRecovery.mockRejectedValue(Object.assign(
+      new Error(serverMessage),
+      { code, status: 409 },
+    ));
+
+    render(<EvidenceChangedHarness />);
+    await user.click(screen.getByRole('button', { name: 'Open recovery' }));
+    await user.click(await screen.findByRole('button', { name: 'Start recovery' }));
+
+    expect(await screen.findByText(explanation)).toBeVisible();
+    expect(screen.getByRole('heading', { name: refreshed.reason })).toBeVisible();
+    expect(mocks.confirmEvidenceRecovery).toHaveBeenCalledOnce();
+    expect(mocks.getEvidenceRecoveryOptions).toHaveBeenCalledTimes(2);
+    expect(mocks.onEvidenceRefresh).not.toHaveBeenCalled();
+  });
+
+  it('starts a failed recovery retry only after refreshed options are reviewed and uses a fresh key', async () => {
+    const randomUUID = vi.fn()
+      .mockReturnValueOnce('failed-attempt-key')
+      .mockReturnValueOnce('fresh-attempt-key');
+    vi.stubGlobal('crypto', { randomUUID });
+    const refreshedOption = makeOption({
+      planId: 'plan-refreshed-for-attempt-2',
+      reason: 'Review this fresh recovery plan before attempt 2.',
+    });
+    mocks.getEvidenceRecoveryOptions.mockResolvedValue({ recovery: makeRecovery(refreshedOption) });
+    mocks.confirmEvidenceRecovery
+      .mockResolvedValueOnce({
+        operation: {
+          operationId: 'operation-attempt-1',
+          attemptNumber: 1,
+          strategy: 'repersist',
+          status: 'failed',
+        },
+      })
+      .mockResolvedValueOnce({
+        operation: {
+          operationId: 'operation-attempt-2',
+          attemptNumber: 2,
+          strategy: 'repersist',
+          status: 'confirmed',
+        },
+      });
+    const { result } = renderHook(() => useEvidenceRecovery({ conversationId: 'conversation-fresh-attempt' }));
+    await flushReactWork();
+
+    await act(async () => {
+      await result.current.confirmRecovery(makeOption());
+    });
+    expect(result.current.operation.status).toBe('failed');
+    expect(mocks.confirmEvidenceRecovery).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await result.current.tryAgain();
+    });
+    expect(result.current.operation).toBeNull();
+    expect(result.current.recovery.options[0].planId).toBe('plan-refreshed-for-attempt-2');
+    expect(mocks.confirmEvidenceRecovery).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      await result.current.confirmRecovery(result.current.recovery.options[0]);
+    });
+    expect(result.current.operation).toMatchObject({ operationId: 'operation-attempt-2', attemptNumber: 2 });
+    expect(mocks.confirmEvidenceRecovery.mock.calls[0][1].idempotencyKey).toBe('failed-attempt-key');
+    expect(mocks.confirmEvidenceRecovery.mock.calls[1][1].idempotencyKey).toBe('fresh-attempt-key');
+  });
+
   it('never accepts an awaiting candidate automatically and sends only explicitly supplied comparison hashes', async () => {
     vi.useFakeTimers();
     const option = makeOption({ strategy: 'rerun-stage', aiCallNeeded: true });
@@ -253,7 +340,7 @@ describe('useEvidenceRecovery confirmation', () => {
 });
 
 describe('useEvidenceRecovery polling', () => {
-  it.each(['succeeded', 'failed', 'cancelled', 'interrupted', 'manual-review'])(
+  it.each(['succeeded', 'succeeded-unverified', 'failed', 'cancelled', 'interrupted', 'manual-review'])(
     'stops polling when the operation becomes %s',
     async (terminalStatus) => {
       vi.useFakeTimers();

@@ -23,6 +23,7 @@ export const ACTIVE_RECOVERY_STATUSES = new Set([
 ]);
 export const TERMINAL_RECOVERY_STATUSES = new Set([
   'succeeded',
+  'succeeded-unverified',
   'failed',
   'cancelled',
   'interrupted',
@@ -104,6 +105,10 @@ function startErrorMessage(error) {
       return 'The saved evidence changed before recovery started. The options below have been refreshed.';
     case 'RECOVERY_PLAN_UNAVAILABLE':
       return 'That recovery choice is no longer available. Review the refreshed options before trying again.';
+    case 'RECOVERY_PLAN_CHANGED':
+      return 'Recovery settings changed after you reviewed them. The options below were refreshed; review them again before starting.';
+    case 'RECOVERY_PROVIDER_NOT_READY':
+      return 'The reviewed AI provider is not ready, so recovery did not start. Check the refreshed readiness details before trying again.';
     case 'RECOVERY_NOT_AUTOMATABLE':
       return 'This item cannot be recovered automatically. A person needs to review it.';
     case 'RECOVERY_INPUT_CHANGED':
@@ -176,7 +181,8 @@ export function useEvidenceRecovery({
       }
     }
     if (
-      nextOperation.status === 'succeeded'
+      ['succeeded', 'succeeded-unverified'].includes(nextOperation.status)
+      && nextOperation.conversationWriteApplied !== false
       && !conversationRefreshesRef.current.has(nextOperation.operationId)
     ) {
       conversationRefreshesRef.current.add(nextOperation.operationId);
@@ -212,6 +218,12 @@ export function useEvidenceRecovery({
     await Promise.resolve(onEvidenceRefresh?.()).catch(() => {});
     await loadRecoveryOptions({ preserve: false });
   }, [loadRecoveryOptions, onEvidenceRefresh]);
+
+  const refreshAfterPlanChange = useCallback(async (message) => {
+    setEvidenceChangedMessage(message || 'Recovery settings changed. Review the refreshed options before starting.');
+    confirmationRef.current = null;
+    await loadRecoveryOptions({ preserve: false });
+  }, [loadRecoveryOptions]);
 
   useEffect(() => {
     const sequence = ++reattachSequenceRef.current;
@@ -357,6 +369,8 @@ export function useEvidenceRecovery({
       if (['EVIDENCE_CHANGED', 'RECOVERY_INPUT_CHANGED', 'RECOVERY_PLAN_UNAVAILABLE'].includes(normalized.code)) {
         confirmationRef.current = null;
         await refreshAfterEvidenceChange(startErrorMessage(normalized));
+      } else if (['RECOVERY_PLAN_CHANGED', 'RECOVERY_PROVIDER_NOT_READY'].includes(normalized.code)) {
+        await refreshAfterPlanChange(startErrorMessage(normalized));
       } else {
         if (normalized.status >= 400 && normalized.status < 500) confirmationRef.current = null;
         setStartError(startErrorMessage(normalized));
@@ -365,7 +379,7 @@ export function useEvidenceRecovery({
     } finally {
       setStartPending(false);
     }
-  }, [applyOperation, cleanConversationId, recovery?.evidenceFingerprint, refreshAfterEvidenceChange, startPending]);
+  }, [applyOperation, cleanConversationId, recovery?.evidenceFingerprint, refreshAfterEvidenceChange, refreshAfterPlanChange, startPending]);
 
   const acceptCandidate = useCallback(async ({ candidateSha256, previousSha256 }) => {
     if (!cleanConversationId || !operation?.operationId || acceptPending) return null;
@@ -453,6 +467,19 @@ export function useEvidenceRecovery({
     }
   }, [cleanConversationId, operation?.operationId, operation?.status]);
 
+  const tryAgain = useCallback(async () => {
+    if (!cleanConversationId || !['failed', 'cancelled', 'interrupted'].includes(operation?.status)) return null;
+    const previousOperationId = operation.operationId;
+    confirmationRef.current = null;
+    forgetOperation(cleanConversationId, previousOperationId);
+    setOperation(null);
+    setSelectedOption(null);
+    setStartError('');
+    setOperationError('');
+    setEvidenceChangedMessage('Options refreshed. Review them before starting a new recovery attempt.');
+    return loadRecoveryOptions({ preserve: false });
+  }, [cleanConversationId, loadRecoveryOptions, operation?.operationId, operation?.status]);
+
   return {
     conversationId: cleanConversationId,
     isOpen,
@@ -474,6 +501,7 @@ export function useEvidenceRecovery({
     acceptCandidate,
     requestCancel,
     recoverLater,
+    tryAgain,
   };
 }
 

@@ -2635,6 +2635,7 @@ function AnalystWorkbench({
               acknowledging={evidenceAcknowledging}
               acknowledgeError={evidenceAcknowledgeError}
               recoveryStatus={evidenceRecovery?.operation?.status}
+              knowledgeDraftNeedsReview={evidenceRecovery?.operation?.knowledgeDraftNeedsReview}
               onAcknowledge={onAcknowledgeEvidence}
               onRefresh={onRefreshEvidence}
               onReviewRecovery={evidenceRecovery?.openRecovery}

@@ -17,6 +17,7 @@ vi.mock('../../api/evidenceRecoveryApi.js', () => apiMocks);
 function makeOperation() {
   return {
     operationId: 'operation-awaiting-review',
+    attemptNumber: 2,
     strategy: 'rerun-stage',
     status: 'awaiting-acceptance',
     candidateResult: {
@@ -83,6 +84,11 @@ describe('TriageRecoveryComparison', () => {
     expect(onAccept).not.toHaveBeenCalled();
     expect(screen.getByText('candidate-sha-256')).not.toBeVisible();
     expect(screen.getByText('previous-sha-256')).not.toBeVisible();
+
+    await user.click(screen.getByText('Technical details'));
+    const technical = screen.getByText('Technical details').closest('details');
+    expect(within(technical).getByText('Attempt number')).toBeVisible();
+    expect(within(technical).getByText('2')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Accept recovered result' }));
 

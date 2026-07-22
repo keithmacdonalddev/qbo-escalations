@@ -199,7 +199,21 @@
       "userOutcome": "Results shown to the user are saved or clearly identified as unsaved and recoverable.",
       "risk": "critical",
       "owner": "QBO Chat",
-      "sourcePaths": ["server/src/routes/chat/index.js", "client/src/components/chat-v5/UnsavedResultNotice.jsx"],
+      "sourcePaths": [
+        "server/src/routes/chat/index.js",
+        "client/src/components/chat-v5/UnsavedResultNotice.jsx",
+        "server/src/services/evidence-recovery-service.js",
+        "server/src/models/RecoveryOperation.js",
+        "server/src/models/KnowledgeCandidate.js",
+        "server/src/routes/chat/recovery.js",
+        "client/src/api/evidenceRecoveryApi.js",
+        "client/src/components/chat-v5/useEvidenceRecovery.js",
+        "client/src/components/chat-v5/EvidenceRecoveryPanel.jsx",
+        "client/src/components/chat-v5/TriageRecoveryComparison.jsx",
+        "client/src/components/chat-v5/EvidenceSummary.jsx",
+        "client/src/components/SessionsView.jsx",
+        "client/src/components/chat-v5/ChatV5Container.jsx"
+      ],
       "requiredCheckTypes": ["component", "server", "browser"],
       "evidence": [
         { "type": "component", "groupId": "client-components", "paths": ["client/src/components/chat-v5/UnsavedResultNotice.test.jsx", "client/src/components/chat-v5/useStageOrchestrator.test.jsx", "client/src/components/chat-v5/EvidenceRecoveryPanel.test.jsx", "client/src/components/chat-v5/TriageRecoveryComparison.test.jsx", "client/src/components/chat-v5/useEvidenceRecovery.test.jsx"] },

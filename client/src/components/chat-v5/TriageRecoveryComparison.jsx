@@ -171,6 +171,7 @@ export default function TriageRecoveryComparison({
         <summary>Technical details</summary>
         <dl>
           <div><dt>Operation ID</dt><dd>{operation?.operationId || 'Unavailable'}</dd></div>
+          <div><dt>Attempt number</dt><dd>{operation?.attemptNumber || 1}</dd></div>
           <div><dt>Previous result hash</dt><dd>{comparison.previousSha256 || 'Unavailable'}</dd></div>
           <div><dt>Recovered result hash</dt><dd>{comparison.candidateSha256 || 'Unavailable'}</dd></div>
           <div><dt>Difference fields</dt><dd>{[...changedFields].join(', ') || 'None'}</dd></div>

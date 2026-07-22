@@ -52,6 +52,15 @@ function RecoveryPendingIndicator({ status }) {
   );
 }
 
+function KnowledgeDraftReviewIndicator({ marker }) {
+  if (!marker) return null;
+  return (
+    <span className="recovery-warning" role="status">
+      Knowledge draft needs review after the accepted recovery changed the triage result.
+    </span>
+  );
+}
+
 function IncompleteDetails({ evidence, acknowledging, onAcknowledge, acknowledged, onReviewRecovery }) {
   const summary = evidence.summary || {};
   const missing = Array.isArray(evidence.missing) ? evidence.missing : [];
@@ -116,6 +125,7 @@ export default function EvidenceSummary({
   acknowledging = false,
   acknowledgeError = '',
   recoveryStatus = '',
+  knowledgeDraftNeedsReview = null,
   onAcknowledge,
   onRefresh,
   onReviewRecovery,
@@ -140,6 +150,7 @@ export default function EvidenceSummary({
       <div className="v5-run-evidence v5-run-evidence--complete">
         <span>✓ {evidence.summary.headline}</span>
         {evidence.summary.supportingNote && <span>{evidence.summary.supportingNote}</span>}
+        <KnowledgeDraftReviewIndicator marker={knowledgeDraftNeedsReview} />
       </div>
     );
   }
@@ -147,6 +158,7 @@ export default function EvidenceSummary({
     return (
       <div className="v5-run-evidence v5-run-evidence--neutral">
         <span>{evidence.summary.headline} {evidence.summary.nextStep}</span>
+        <KnowledgeDraftReviewIndicator marker={knowledgeDraftNeedsReview} />
         {evidence.status === 'unknown' && (
           <button type="button" className="v5-run-evidence__retry" onClick={onRefresh}>Check again</button>
         )}
@@ -163,6 +175,7 @@ export default function EvidenceSummary({
           {' '}
           <RecoveryPendingIndicator status={recoveryStatus} />
         </summary>
+        <KnowledgeDraftReviewIndicator marker={knowledgeDraftNeedsReview} />
         <IncompleteDetails evidence={evidence} acknowledged onReviewRecovery={onReviewRecovery} />
       </details>
     );
@@ -174,6 +187,7 @@ export default function EvidenceSummary({
         <strong className="v5-run-evidence__heading">{evidence.summary.headline}</strong>
         <RecoveryPendingIndicator status={recoveryStatus} />
       </div>
+      <KnowledgeDraftReviewIndicator marker={knowledgeDraftNeedsReview} />
       <IncompleteDetails
         evidence={evidence}
         acknowledging={acknowledging}

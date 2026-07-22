@@ -10,6 +10,7 @@ import {
   updateConversation,
 } from '../api/chatApi.js';
 import { getConversationTraces } from '../api/traceApi.js';
+import { getEvidenceRecoveryHistory } from '../api/evidenceRecoveryApi.js';
 import { getProviderLabel } from '../lib/providerCatalog.js';
 import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
@@ -173,8 +174,10 @@ export default function SessionsView({ sessionId = null }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [evidenceState, setEvidenceState] = useState({ state: 'idle', evidence: null, error: '' });
   const [evidenceAcknowledging, setEvidenceAcknowledging] = useState(false);
+  const [recoveryHistoryState, setRecoveryHistoryState] = useState({ state: 'idle', operations: [], error: '' });
   const fetchGenRef = useRef(0);
   const evidenceFetchGenRef = useRef(0);
+  const recoveryHistoryGenRef = useRef(0);
 
   const loadEvidence = useCallback(async (id, preserveEvidence = false) => {
     if (!id) {
@@ -203,9 +206,40 @@ export default function SessionsView({ sessionId = null }) {
     }
   }, []);
 
+  const loadRecoveryHistory = useCallback(async (id, preserveHistory = false) => {
+    if (!id) {
+      setRecoveryHistoryState({ state: 'idle', operations: [], error: '' });
+      return [];
+    }
+    const gen = ++recoveryHistoryGenRef.current;
+    setRecoveryHistoryState((previous) => ({
+      state: 'loading',
+      operations: preserveHistory ? previous.operations : [],
+      error: '',
+    }));
+    try {
+      const response = await getEvidenceRecoveryHistory(id);
+      if (gen !== recoveryHistoryGenRef.current) return [];
+      const operations = Array.isArray(response?.operations) ? response.operations : [];
+      setRecoveryHistoryState({ state: 'ready', operations, error: '' });
+      return operations;
+    } catch (error) {
+      if (gen !== recoveryHistoryGenRef.current) return [];
+      setRecoveryHistoryState({
+        state: 'unavailable',
+        operations: [],
+        error: error?.message || 'Recovery history could not be loaded.',
+      });
+      return [];
+    }
+  }, []);
+
   const refreshEvidenceAfterRecovery = useCallback(
-    () => loadEvidence(sessionId, true),
-    [loadEvidence, sessionId],
+    () => Promise.all([
+      loadEvidence(sessionId, true),
+      loadRecoveryHistory(sessionId, true),
+    ]),
+    [loadEvidence, loadRecoveryHistory, sessionId],
   );
   const refreshConversationAfterRecovery = useCallback(async () => {
     if (!sessionId) return null;
@@ -279,6 +313,10 @@ export default function SessionsView({ sessionId = null }) {
   useEffect(() => {
     void loadEvidence(sessionId);
   }, [loadEvidence, sessionId]);
+
+  useEffect(() => {
+    void loadRecoveryHistory(sessionId);
+  }, [loadRecoveryHistory, sessionId]);
 
   const acknowledgeEvidence = useCallback(async () => {
     if (!sessionId || evidenceAcknowledging) return;
@@ -452,6 +490,8 @@ export default function SessionsView({ sessionId = null }) {
           onRefreshEvidence={() => loadEvidence(sessionId, true)}
           evidenceRecovery={evidenceRecovery}
           pendingRecovery={evidenceRecovery.operation || selectedRecoverySummary}
+          recoveryHistoryState={recoveryHistoryState}
+          onRefreshRecoveryHistory={() => loadRecoveryHistory(sessionId, true)}
         />
       )}
 
@@ -591,6 +631,8 @@ function SessionDetail({
   onRefreshEvidence,
   evidenceRecovery,
   pendingRecovery,
+  recoveryHistoryState,
+  onRefreshRecoveryHistory,
 }) {
   if (loading && !session) {
     return <div className="sessions-empty">Loading session...</div>;
@@ -644,9 +686,11 @@ function SessionDetail({
           evidenceAcknowledging,
           onAcknowledgeEvidence,
           onRefreshEvidence,
-          onReviewRecovery: evidenceRecovery.openRecovery,
-          recoveryStatus: pendingRecovery?.status,
-        })}
+           onReviewRecovery: evidenceRecovery.openRecovery,
+           recoveryStatus: pendingRecovery?.status,
+           recoveryHistoryState,
+           onRefreshRecoveryHistory,
+         })}
       </div>
     </section>
   );
@@ -1063,6 +1107,154 @@ function EvidenceAuditSection({
   );
 }
 
+function recoveryStatusLabel(status) {
+  const labels = {
+    confirmed: 'Confirmed',
+    running: 'Running',
+    'awaiting-acceptance': 'Awaiting your review',
+    succeeded: 'Recovered and verified',
+    'succeeded-unverified': 'Saved; final confirmation incomplete',
+    failed: 'Failed',
+    cancelled: 'Cancelled',
+    interrupted: 'Interrupted',
+    'cancel-requested': 'Cancellation requested',
+    'manual-review': 'Human review required',
+  };
+  return labels[status] || displayEvidenceStageStatus(status);
+}
+
+function recoveryStrategyLabel(strategy) {
+  if (strategy === 'repersist') return 'Reuse the matching saved triage result without another AI call';
+  if (strategy === 'rerun-stage') return 'Run the triage stage again from verified input';
+  return displayEvidenceStageStatus(strategy);
+}
+
+function RecoveryTimelineTechnical({ operation }) {
+  const original = operation?.originalEvidence || {};
+  const attempts = Array.isArray(operation?.attempts) ? operation.attempts : [];
+  const ids = [
+    ['Operation ID', operation?.operationId],
+    ['Plan ID', operation?.planId],
+    ['Original run ID', original.failedRun?.id],
+    ['Original result ID', original.resultId || original.failedRun?.resultId || original.receipt?.resultId],
+    ['Original provider package ID', original.packageId || original.failedRun?.packageId || original.receipt?.packageId],
+    ['Original trace IDs', Array.isArray(original.traceIds) ? original.traceIds.join(', ') : ''],
+    ['Recovered provider package ID', operation?.runtimeSnapshot?.actualProviderPackageId],
+    ['Recovered result IDs', attempts.map((attempt) => attempt?.triageResultId).filter(Boolean).join(', ')],
+  ].filter(([, value]) => value);
+  return (
+    <details className="session-evidence-technical">
+      <summary>Technical details</summary>
+      {ids.length > 0 ? (
+        <dl>
+          {ids.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+        </dl>
+      ) : <p>No technical identifiers were recorded.</p>}
+    </details>
+  );
+}
+
+function RecoveryTimeline({ historyState, onRefresh }) {
+  if (!historyState || historyState.state === 'idle' || historyState.state === 'loading') {
+    return (
+      <section className="session-evidence-audit">
+        <h3>Recovery timeline</h3>
+        <p className="session-evidence-note">Checking this session’s recovery history…</p>
+      </section>
+    );
+  }
+  if (historyState.state === 'unavailable') {
+    return (
+      <section className="session-evidence-audit">
+        <h3>Recovery timeline</h3>
+        <p className="session-evidence-note">{historyState.error || 'Recovery history could not be loaded.'}</p>
+        <button type="button" className="session-evidence-action" onClick={onRefresh}>Check again</button>
+      </section>
+    );
+  }
+  const operations = Array.isArray(historyState.operations) ? historyState.operations : [];
+  return (
+    <section className="session-evidence-audit">
+      <div className="session-evidence-audit__head">
+        <div>
+          <h3>Recovery timeline</h3>
+          <p>{operations.length > 0
+            ? 'Original failures and every recovery attempt remain reviewable here.'
+            : 'No recovery has been attempted for this session.'}</p>
+        </div>
+      </div>
+      {operations.length > 0 && (
+        <div className="session-evidence-groups">
+          {operations.map((operation) => {
+            const original = operation.originalEvidence || {};
+            const attempts = Array.isArray(operation.attempts) ? operation.attempts : [];
+            const actualProvider = operation.runtimeSnapshot?.actualProvider
+              || [...attempts].reverse().find((attempt) => attempt?.provider)?.provider
+              || 'No provider call';
+            const actualModel = operation.runtimeSnapshot?.actualModel
+              || [...attempts].reverse().find((attempt) => attempt?.model)?.model
+              || '';
+            const providerSummary = operation.strategy === 'repersist'
+              ? `No new provider call; reused a saved result from ${actualProvider}${actualModel ? ` · ${actualModel}` : ''}`
+              : `Actual provider: ${actualProvider}${actualModel ? ` · ${actualModel}` : ''}`;
+            const comparisonNotes = Array.isArray(operation.comparison?.plainSummary)
+              ? operation.comparison.plainSummary
+              : [];
+            const finalEvidence = operation.status === 'succeeded'
+              ? 'The targeted saved evidence was confirmed.'
+              : operation.status === 'succeeded-unverified'
+                ? 'Recovery data was saved, but final confirmation could not be completed. Check the evidence status.'
+                : operation.errorMessage || `Recovery ended as ${recoveryStatusLabel(operation.status).toLowerCase()}.`;
+            return (
+              <article className="session-evidence-group is-confirmed" key={operation.operationId}>
+                <h4>Attempt {operation.attemptNumber || 1}: {recoveryStatusLabel(operation.status)}</h4>
+                <ul>
+                  <li>
+                    <strong>Original failure</strong>
+                    <span>
+                      {original.failureMessage || original.failedRun?.summary || 'No original failure message was recorded.'}
+                      {original.failureCode ? ` (${original.failureCode})` : ''}
+                      {' · '}{formatDateTime(original.failedRun?.completedAt || original.receipt?.recordedAt)}
+                    </span>
+                  </li>
+                  <li>
+                    <strong>Plan and confirmation</strong>
+                    <span>{recoveryStrategyLabel(operation.strategy)} · confirmed {formatDateTime(operation.confirmedAt || operation.createdAt)}</span>
+                  </li>
+                  <li>
+                    <strong>Recovery attempt</strong>
+                    <span>{providerSummary} · started {formatDateTime(operation.startedAt)}</span>
+                  </li>
+                  {operation.comparison && (
+                    <li>
+                      <strong>Comparison and acceptance</strong>
+                      <span>
+                        {comparisonNotes.length > 0 ? comparisonNotes.join(' ') : 'The recovered result differed meaningfully.'}
+                        {operation.acceptedAt ? ` Accepted ${formatDateTime(operation.acceptedAt)}.` : ' Not accepted yet.'}
+                      </span>
+                    </li>
+                  )}
+                  <li>
+                    <strong>Final evidence result</strong>
+                    <span>{finalEvidence} · finished {formatDateTime(operation.completedAt)}</span>
+                  </li>
+                  {operation.knowledgeDraftNeedsReview && (
+                    <li>
+                      <strong>Knowledge draft</strong>
+                      <span>Your knowledge draft may need review because the accepted triage result changed meaningfully.</span>
+                    </li>
+                  )}
+                </ul>
+                <RecoveryTimelineTechnical operation={operation} />
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function AuditTab({
   session,
   traces,
@@ -1072,6 +1264,8 @@ function AuditTab({
   onRefreshEvidence,
   recoveryStatus,
   onReviewRecovery,
+  recoveryHistoryState,
+  onRefreshRecoveryHistory,
 }) {
   return (
     <div className="session-stack">
@@ -1083,6 +1277,7 @@ function AuditTab({
         onRefresh={onRefreshEvidence}
         onReviewRecovery={onReviewRecovery}
       />
+      <RecoveryTimeline historyState={recoveryHistoryState} onRefresh={onRefreshRecoveryHistory} />
       <MetadataTable rows={[
         ['Session created', formatDateTime(session.createdAt)],
         ['Session updated', formatDateTime(session.updatedAt)],

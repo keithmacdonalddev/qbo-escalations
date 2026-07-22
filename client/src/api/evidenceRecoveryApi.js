@@ -34,6 +34,14 @@ export async function getEvidenceRecoveryOperation(conversationId, operationId) 
   );
 }
 
+export async function getEvidenceRecoveryHistory(conversationId) {
+  return apiFetchJson(
+    `${recoveryBase(conversationId)}/history`,
+    {},
+    'Could not load recovery history',
+  );
+}
+
 export async function acceptEvidenceRecoveryCandidate(conversationId, operationId, {
   candidateSha256,
   previousSha256,

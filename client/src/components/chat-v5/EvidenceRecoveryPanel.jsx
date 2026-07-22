@@ -8,6 +8,12 @@ const RECOVERY_ARTIFACT_LABELS = new Map([
   ['TRIAGE_RESULT', 'Triage result'],
 ]);
 
+const DEFAULT_RECOVERY_GROUPS = [
+  { id: 'no-cost', label: 'No-cost recoveries', description: 'Uses an already validated saved result and does not call the AI again.' },
+  { id: 'provider-call', label: 'Provider-call recoveries', description: 'Runs only the missing AI stage and may add provider cost.' },
+  { id: 'human-review', label: 'Human-review items', description: 'These items need a person to review them.' },
+];
+
 function healthClearlyFailing(recentHealth) {
   if (!recentHealth) return false;
   if (typeof recentHealth === 'string') {
@@ -86,6 +92,7 @@ function TechnicalDetails({ option, operation, recovery }) {
       <dl>
         {option?.planId && <div><dt>Plan ID</dt><dd>{option.planId}</dd></div>}
         {operation?.operationId && <div><dt>Operation ID</dt><dd>{operation.operationId}</dd></div>}
+        {operation?.attemptNumber && <div><dt>Attempt number</dt><dd>{operation.attemptNumber}</dd></div>}
         {(option?.strategy || operation?.strategy) && (
           <div><dt>Strategy</dt><dd>{option?.strategy || operation?.strategy}</dd></div>
         )}
@@ -93,6 +100,9 @@ function TechnicalDetails({ option, operation, recovery }) {
         <div><dt>Evidence contract</dt><dd>{fingerprint.contractVersion || 'Unavailable'}</dd></div>
         <div><dt>Evidence updated</dt><dd>{fingerprint.evidenceUpdatedAt || 'Unavailable'}</dd></div>
         <div><dt>Missing artifact codes</dt><dd>{artifactCodes.join(', ') || 'None'}</dd></div>
+        {operation?.providerHandoffAt && <div><dt>Provider handoff</dt><dd>{operation.providerHandoffAt}</dd></div>}
+        {operation?.commitStartedAt && <div><dt>Saved update started</dt><dd>{operation.commitStartedAt}</dd></div>}
+        {operation?.commitCompletedAt && <div><dt>Saved update completed</dt><dd>{operation.commitCompletedAt}</dd></div>}
       </dl>
     </details>
   );
@@ -137,9 +147,9 @@ function RecoveryOption({ option, featured = false, controller }) {
             <div>
               <strong>Cost and existing work</strong>
               <p>
-                {option?.aiCallNeeded
-                  ? 'One triage rerun can make up to three model requests and may add provider cost.'
-                  : 'This does not call the AI again and will not add AI cost.'}
+                {option?.costEstimate?.message || (option?.aiCallNeeded
+                  ? 'A provider call is required, but the cost amount is unknown because no reliable estimate is available.'
+                  : 'This does not call the AI again and will not add AI cost.')}
               </p>
               {option?.aiCallNeeded && (
                 <p>
@@ -197,12 +207,17 @@ function RecoveryOption({ option, featured = false, controller }) {
 function RunningRecovery({ controller, option }) {
   const { operation } = controller;
   const progress = Array.isArray(operation?.progress) ? operation.progress.slice(-10) : [];
-  const costMayBeIncurred = operation?.strategy === 'rerun-stage' && providerHandoffStarted(operation);
+  const providerCallRecovery = operation?.strategy === 'rerun-stage';
+  const handoffDurablyRecorded = Boolean(operation?.providerHandoffAt) || providerHandoffStarted(operation);
   const cancelLabel = controller.cancelPending
     ? 'Requesting cancellation…'
-    : costMayBeIncurred
-      ? 'Request cancel — the AI call may still complete and incur cost'
-      : 'Cancel — no cost incurred';
+    : operation?.commitStartedAt
+      ? 'Request cancel — the final saved update already started and will finish'
+      : providerCallRecovery && handoffDurablyRecorded
+        ? 'Request cancel — the AI call already started and may still complete and incur cost'
+        : providerCallRecovery
+          ? 'Request cancel — if the AI call already started it may still complete and incur cost'
+          : 'Cancel recovery — no AI provider call is involved';
 
   return (
     <section className="evidence-recovery-surface" aria-label="Recovery progress">
@@ -285,6 +300,10 @@ function TerminalRecovery({ controller, option }) {
   const remaining = labelCodes(evidence.remainingMissingCodes, options);
   const statusCopy = {
     succeeded: ['Recovered', 'Recovery finished and the saved evidence was checked again.'],
+    'succeeded-unverified': [
+      'Recovery saved; confirmation incomplete',
+      'Recovery data was saved, but final confirmation could not be completed — check the evidence status.',
+    ],
     failed: ['Recovery failed', operation?.errorMessage || 'Recovery could not safely finish. Existing saved work was not silently replaced.'],
     cancelled: ['Recovery cancelled', 'Recovery stopped. The evidence that was incomplete before recovery may still need attention.'],
     interrupted: ['Recovery failed', 'Recovery was interrupted and was not restarted automatically. Review the session before trying again.'],
@@ -293,6 +312,9 @@ function TerminalRecovery({ controller, option }) {
   const [heading, explanation] = statusCopy[operation?.status] || ['Recovery finished', 'Review the latest evidence before continuing.'];
   const expectedWrites = Array.isArray(option?.expectedWrites) ? option.expectedWrites : [];
   const provenance = failoverProvenance(operation);
+  const writeApplied = operation?.conversationWriteApplied === true
+    || ['succeeded', 'succeeded-unverified'].includes(operation?.status);
+  const retryable = ['failed', 'cancelled', 'interrupted'].includes(operation?.status);
 
   return (
     <section className={`evidence-recovery-surface recovery-terminal is-${operation?.status}`} aria-label={heading}>
@@ -305,13 +327,18 @@ function TerminalRecovery({ controller, option }) {
       </div>
       <p className="recovery-lead">{explanation}</p>
       {provenance && <p className="recovery-note">{provenance}</p>}
+      {operation?.knowledgeDraftNeedsReview && (
+        <p className="recovery-warning" role="status">
+          Your knowledge draft may need review because the accepted recovery changed the triage result meaningfully.
+        </p>
+      )}
 
       <div className="recovery-facts">
         <div>
           <strong>What changed</strong>
-          {expectedWrites.length > 0 && operation?.status === 'succeeded'
+          {expectedWrites.length > 0 && writeApplied
             ? <ul>{expectedWrites.map((item) => <li key={item}>{item}</li>)}</ul>
-            : operation?.status === 'succeeded'
+            : writeApplied
               ? <p>Recovery completed its validated saved update.</p>
               : <p>No unreviewed replacement was applied.</p>}
         </div>
@@ -339,6 +366,11 @@ function TerminalRecovery({ controller, option }) {
 
       {controller.operationError && <p className="recovery-error" role="alert">{controller.operationError}</p>}
       <div className="recovery-actions">
+        {retryable && (
+          <button type="button" className="recovery-action is-primary" onClick={controller.tryAgain}>
+            Try again
+          </button>
+        )}
         <button type="button" className="recovery-action is-primary" onClick={controller.recoverLater}>
           Return to your work
         </button>
@@ -403,11 +435,20 @@ export default function EvidenceRecoveryPanel({ controller }) {
     return <RunningRecovery controller={controller} option={activeOption} />;
   }
 
-  const recommended = options.find((option) => option?.recommended)
-    || options.find((option) => option?.strategy !== 'manual-review')
-    || options[0]
-    || null;
-  const advanced = recommended ? options.filter((option) => option?.planId !== recommended.planId) : [];
+  const configuredGroups = Array.isArray(recovery?.groups) && recovery.groups.length > 0
+    ? recovery.groups
+    : DEFAULT_RECOVERY_GROUPS;
+  const orderedGroups = configuredGroups.map((group) => ({
+    ...group,
+    options: options.filter((option) => {
+      const inferredGroup = option?.strategy === 'manual-review'
+        ? 'human-review'
+        : option?.aiCallNeeded
+          ? 'provider-call'
+          : 'no-cost';
+      return (option?.group || inferredGroup) === group.id;
+    }),
+  })).filter((group) => group.options.length > 0);
 
   return (
     <section className="evidence-recovery-surface" aria-label="Evidence recovery options">
@@ -429,10 +470,33 @@ export default function EvidenceRecoveryPanel({ controller }) {
           <button type="button" className="recovery-action" onClick={controller.refreshOptions}>Try again</button>
         </div>
       )}
-      {controller.optionsState === 'ready' && recommended && (
-        <RecoveryOption option={recommended} featured controller={controller} />
+      {controller.optionsState === 'ready' && orderedGroups.length > 0 && (
+        <div className="recovery-grouped-summary">
+          <p className="recovery-order-note">
+            {recovery?.recommendedOrderNote
+              || 'Review no-cost recoveries first, then provider-call recoveries, then any items that require human review.'}
+          </p>
+          {orderedGroups.map((group) => (
+            <section className={`recovery-option-group is-${group.id}`} key={group.id} aria-labelledby={`recovery-group-${group.id}`}>
+              <div className="recovery-option-group__head">
+                <h3 id={`recovery-group-${group.id}`}>{group.label}</h3>
+                {group.description && <p>{group.description}</p>}
+              </div>
+              <div className="recovery-option-group__list">
+                {group.options.map((option) => (
+                  <RecoveryOption
+                    key={option.planId}
+                    option={option}
+                    featured={Boolean(option.recommended)}
+                    controller={controller}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       )}
-      {controller.optionsState === 'ready' && !recommended && (
+      {controller.optionsState === 'ready' && orderedGroups.length === 0 && (
         <div className="recovery-summary">
           <strong>No automatic recovery is available</strong>
           <p>{recovery?.reason || 'The missing evidence needs human review.'}</p>
@@ -440,17 +504,6 @@ export default function EvidenceRecoveryPanel({ controller }) {
       )}
 
       {controller.startError && <p className="recovery-error" role="alert">{controller.startError}</p>}
-
-      {advanced.length > 0 && (
-        <details className="recovery-advanced">
-          <summary>Advanced options</summary>
-          <div className="recovery-advanced-list">
-            {advanced.map((option) => (
-              <RecoveryOption key={option.planId} option={option} controller={controller} />
-            ))}
-          </div>
-        </details>
-      )}
 
       <div className="recovery-actions">
         <button type="button" className="recovery-action" disabled={controller.startPending} onClick={controller.recoverLater}>

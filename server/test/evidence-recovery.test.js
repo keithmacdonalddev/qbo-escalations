@@ -19,12 +19,14 @@ const { saveConversationLenient } = require('../src/routes/chat/shared');
 
 const TRIAGE_PATH = require.resolve('../src/services/triage');
 const AGENT_IDENTITY_PATH = require.resolve('../src/services/agent-identity-service');
+const CHAT_CONVERSATION_SERVICE_PATH = require.resolve('../src/services/chat-conversation-service');
 const RECOVERY_SERVICE_PATH = require.resolve('../src/services/evidence-recovery-service');
 const RECOVERY_ROUTE_PATH = require.resolve('../src/routes/chat/recovery');
 const CONVERSATIONS_ROUTE_PATH = require.resolve('../src/routes/chat/conversations');
 
 const realTriageService = require(TRIAGE_PATH);
 const realAgentIdentityService = require(AGENT_IDENTITY_PATH);
+const realChatConversationService = require(CHAT_CONVERSATION_SERVICE_PATH);
 
 const CANONICAL_TEMPLATE = [
   'COID/MID: 12345 / 67890',
@@ -101,6 +103,18 @@ const providerStub = {
   settled: null,
 };
 
+const DEFAULT_RUNTIME = {
+  provider: 'lm-studio',
+  model: 'recovery-test-model',
+  fallbackProvider: '',
+  fallbackModel: '',
+  reasoningEffort: 'high',
+  serviceTier: '',
+};
+
+let runtimeDefaultsStub = clone(DEFAULT_RUNTIME);
+const evidenceStub = { failOnceAfterRecoveryWrite: false };
+
 function resetProviderStub() {
   providerStub.calls = [];
   providerStub.mode = 'success';
@@ -110,6 +124,8 @@ function resetProviderStub() {
   providerStub.boundaryGate = null;
   providerStub.entered = null;
   providerStub.settled = null;
+  runtimeDefaultsStub = clone(DEFAULT_RUNTIME);
+  evidenceStub.failOnceAfterRecoveryWrite = false;
 }
 
 function abortError() {
@@ -275,16 +291,25 @@ function installDependencyStubs() {
     ...realAgentIdentityService,
     listAgentRuntimeDefaults: async () => ({
       'triage-agent': {
-        runtime: {
-          provider: 'lm-studio',
-          model: 'recovery-test-model',
-          fallbackProvider: '',
-          fallbackModel: '',
-          reasoningEffort: 'high',
-          serviceTier: '',
-        },
+        runtime: clone(runtimeDefaultsStub),
       },
     }),
+  };
+  require.cache[CHAT_CONVERSATION_SERVICE_PATH].exports = {
+    ...realChatConversationService,
+    async getConversationEvidence(conversationId) {
+      if (evidenceStub.failOnceAfterRecoveryWrite) {
+        const appliedReceipt = await Conversation.exists({
+          _id: conversationId,
+          'caseIntake.evidence.receipts.triage.recoveryOperationId': { $exists: true, $ne: '' },
+        });
+        if (appliedReceipt) {
+          evidenceStub.failOnceAfterRecoveryWrite = false;
+          throw new Error('Simulated post-write evidence recheck failure.');
+        }
+      }
+      return realChatConversationService.getConversationEvidence(conversationId);
+    },
   };
 }
 
@@ -564,6 +589,41 @@ async function confirmPlan(app, conversationId, recovery, plan, idempotencyKey) 
     });
 }
 
+async function createPlanAttempt({
+  seeded,
+  recovery,
+  plan,
+  status,
+  attemptNumber = 1,
+  idempotencyKey = `prior-${new mongoose.Types.ObjectId()}`,
+  overrides = {},
+}) {
+  const operationId = `recovery-${new mongoose.Types.ObjectId()}`;
+  const active = ['confirmed', 'running', 'cancel-requested', 'awaiting-acceptance'].includes(status);
+  return RecoveryOperation.create({
+    operationId,
+    idempotencyKey,
+    planId: plan.planId,
+    attemptNumber,
+    dedupeKey: `${plan.planId}:${attemptNumber}`,
+    ...(active ? { activePlanId: plan.planId } : {}),
+    conversationId: seeded.conversation._id,
+    targetStage: 'triage',
+    strategy: plan.strategy,
+    status,
+    evidenceFingerprint: clone(recovery.evidenceFingerprint),
+    missingCodes: clone(plan.artifactCodes || []),
+    inputSnapshot: {
+      canonicalTemplate: CANONICAL_TEMPLATE,
+      canonicalTemplateSha256: 'a'.repeat(64),
+      parseFieldsSha256: 'b'.repeat(64),
+      sourceRecordIds: {},
+    },
+    runtimeSnapshot: clone(plan.runtimeSnapshot || {}),
+    ...overrides,
+  });
+}
+
 async function waitForOperation(app, conversationId, operationId, expectedStatuses, timeoutMs = 5_000) {
   const wanted = new Set(Array.isArray(expectedStatuses) ? expectedStatuses : [expectedStatuses]);
   const deadline = Date.now() + timeoutMs;
@@ -608,6 +668,7 @@ test.beforeEach(async () => {
 test.after(async () => {
   require.cache[TRIAGE_PATH].exports = realTriageService;
   require.cache[AGENT_IDENTITY_PATH].exports = realAgentIdentityService;
+  require.cache[CHAT_CONVERSATION_SERVICE_PATH].exports = realChatConversationService;
   clearRecoveryModuleState();
   await disconnect();
 });
@@ -960,13 +1021,58 @@ test('already-complete evidence has no recovery offer and POST cannot overwrite 
 
 test('successful recovery preserves original failure and links the new run and receipt back to it', async () => {
   const seeded = await seedConversation({ state: 'repersist', failedOriginalRun: true });
+  await Conversation.collection.updateOne(
+    { _id: seeded.conversation._id, 'caseIntake.runs.id': seeded.originalRunId },
+    {
+      $set: {
+        'caseIntake.runs.$.detail.rawPayload': { prompt: 'do not expose this prompt', apiKey: 'secret-run-key' },
+        'caseIntake.evidence.receipts.triage.rawPayload': { token: 'secret-receipt-token' },
+        'caseIntake.evidence.receipts.triage.prompt': 'do not expose this receipt prompt',
+      },
+    }
+  );
   const recovery = await getRecoveryOptions(app, seeded.conversation._id);
   const plan = triagePlan(recovery);
   assert.equal(plan.strategy, 'repersist');
   const confirmation = await confirmPlan(app, seeded.conversation._id, recovery, plan, 'preserve-provenance');
   assert.equal(confirmation.status, 202, JSON.stringify(confirmation.body));
   const operationId = confirmation.body.operation.operationId;
-  await waitForOperation(app, seeded.conversation._id, operationId, 'succeeded');
+  const publicOperation = await waitForOperation(app, seeded.conversation._id, operationId, 'succeeded');
+  assert.equal(publicOperation.originalEvidence.failureCode, 'TRIAGE_CONVERSATION_SAVE_FAILED');
+  assert.equal(publicOperation.originalEvidence.failedRun.id, seeded.originalRunId);
+  assert.equal(publicOperation.originalEvidence.failedRun.summary, 'The triage result was produced, but the conversation save failed.');
+  assert.equal(publicOperation.originalEvidence.receipt.errorCode, 'TRIAGE_CONVERSATION_SAVE_FAILED');
+  assert.equal(publicOperation.originalEvidence.resultId, String(seeded.sourceResult._id));
+  assert.equal(JSON.stringify(publicOperation.originalEvidence).includes('do not expose'), false);
+  assert.equal(JSON.stringify(publicOperation.originalEvidence).includes('secret-run-key'), false);
+  assert.equal(JSON.stringify(publicOperation.originalEvidence).includes('secret-receipt-token'), false);
+
+  const historyResponse = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/history`);
+  assert.equal(historyResponse.status, 200, JSON.stringify(historyResponse.body));
+  assert.equal(historyResponse.body.operations.length, 1);
+  assert.equal(historyResponse.body.operations[0].operationId, operationId);
+  assert.equal(historyResponse.body.operations[0].originalEvidence.failedRun.id, seeded.originalRunId);
+  assert.equal(historyResponse.body.operations[0].status, 'succeeded');
+  assert.equal(JSON.stringify(historyResponse.body).includes('do not expose'), false);
+  assert.equal(JSON.stringify(historyResponse.body).includes('secret-run-key'), false);
+  assert.equal(JSON.stringify(historyResponse.body).includes('secret-receipt-token'), false);
+  const activeAttempt = await createPlanAttempt({
+    seeded,
+    recovery,
+    plan,
+    status: 'running',
+    attemptNumber: 2,
+    idempotencyKey: 'history-active-attempt',
+  });
+  const historyWithActive = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/history`);
+  assert.equal(historyWithActive.status, 200, JSON.stringify(historyWithActive.body));
+  assert.deepEqual(
+    historyWithActive.body.operations.map((item) => item.operationId),
+    [operationId, activeAttempt.operationId]
+  );
+  assert.deepEqual(historyWithActive.body.operations.map((item) => item.status), ['succeeded', 'running']);
 
   const operation = await RecoveryOperation.findOne({ operationId }).lean();
   assert.equal(operation.originalEvidence.failedRun.id, seeded.originalRunId);
@@ -1056,6 +1162,11 @@ test('degraded source with missing/unsupported provider evidence is never offere
 test('meaningfully different rerun waits for acceptance, commits shown hashes, and resolves repeats/conflicts safely', async () => {
   providerStub.card = clone(DIFFERENT_CARD);
   const seeded = await seedConversation({ state: 'rerun', priorCard: ORIGINAL_CARD });
+  const knowledgeCandidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Existing recovery knowledge draft',
+  });
   const before = await Conversation.findById(seeded.conversation._id).lean();
   const recovery = await getRecoveryOptions(app, seeded.conversation._id);
   const plan = triagePlan(recovery);
@@ -1080,9 +1191,15 @@ test('meaningfully different rerun waits for acceptance, commits shown hashes, a
   assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
   assert.equal(accepted.body.operation.status, 'succeeded');
   assert.equal(accepted.body.idempotent, false);
+  assert.equal(accepted.body.operation.knowledgeDraftNeedsReview.recoveryOperationId, operationId);
+  assert.match(accepted.body.operation.knowledgeDraftNeedsReview.reason, /review this knowledge draft/i);
   const committed = await Conversation.findById(seeded.conversation._id).lean();
   assert.equal(committed.caseIntake.triageCard.severity, DIFFERENT_CARD.severity);
   assert.equal(committed.caseIntake.triageCard.read, DIFFERENT_CARD.read);
+  const markedCandidate = await KnowledgeCandidate.findById(knowledgeCandidate._id).lean();
+  assert.equal(markedCandidate.needsReviewAfterRecovery.recoveryOperationId, operationId);
+  assert.ok(markedCandidate.needsReviewAfterRecovery.markedAt);
+  assert.match(markedCandidate.needsReviewAfterRecovery.reason, /changed the triage card meaningfully/i);
 
   const repeated = await supertest(app)
     .post(`/api/conversations/${seeded.conversation._id}/evidence/recovery/${operationId}/accept`)
@@ -1096,6 +1213,32 @@ test('meaningfully different rerun waits for acceptance, commits shown hashes, a
     .send({ ...hashes, candidateSha256: '0'.repeat(64) });
   assert.equal(conflict.status, 409);
   assert.equal(conflict.body.code, 'RECOVERY_ALREADY_DECIDED');
+});
+
+test('equivalent recovery commits do not mark an existing knowledge draft for review', async () => {
+  const seeded = await seedConversation({ state: 'rerun', priorCard: ORIGINAL_CARD });
+  const knowledgeCandidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Equivalent recovery knowledge draft',
+  });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    triagePlan(recovery),
+    'equivalent-card-no-knowledge-marker'
+  );
+  const operation = await waitForOperation(
+    app,
+    seeded.conversation._id,
+    confirmation.body.operation.operationId,
+    'succeeded'
+  );
+  assert.equal(operation.knowledgeDraftNeedsReview, null);
+  const unchangedCandidate = await KnowledgeCandidate.findById(knowledgeCandidate._id).lean();
+  assert.equal(unchangedCandidate.needsReviewAfterRecovery, null);
 });
 
 test('accepting after the parked source expires moves the operation to manual review', async () => {
@@ -1443,12 +1586,349 @@ test('GET recovery options uses only cached/no-cost readiness signals and never 
 
   assert.equal(plan.strategy, 'rerun-stage');
   assert.equal(plan.aiCallNeeded, true);
+  assert.equal(plan.group, 'provider-call');
+  assert.equal(plan.costEstimate.amountKnown, false);
+  assert.equal(plan.costEstimate.amount, null);
+  assert.match(plan.costEstimate.message, /cost amount is unknown/i);
   assert.equal(plan.readiness.provider, 'lm-studio');
   assert.equal(plan.readiness.cachedPreflight, null);
   assert.match(plan.readiness.label, /live readiness has not been checked/i);
   assert.equal(providerStub.calls.length, 0);
   assert.equal(await TriageResult.countDocuments({}), triageRowsBefore);
   assert.equal(await RecoveryOperation.countDocuments({}), 0);
+});
+
+test('recovery options are returned as one ordered grouped summary', async () => {
+  const noCostSeed = await seedConversation({ state: 'repersist', parserHistoryMissing: true });
+  const noCostRecovery = await getRecoveryOptions(app, noCostSeed.conversation._id);
+  assert.deepEqual(noCostRecovery.groups.map((group) => group.id), ['no-cost', 'human-review']);
+  assert.deepEqual(noCostRecovery.options.map((option) => option.group), ['no-cost', 'human-review']);
+  assert.match(noCostRecovery.recommendedOrderNote, /no-cost recoveries first/i);
+
+  const providerSeed = await seedConversation({ state: 'rerun', parserHistoryMissing: true });
+  const providerRecovery = await getRecoveryOptions(app, providerSeed.conversation._id);
+  assert.deepEqual(providerRecovery.groups.map((group) => group.id), ['provider-call', 'human-review']);
+  assert.deepEqual(providerRecovery.options.map((option) => option.group), ['provider-call', 'human-review']);
+});
+
+test('runtime defaults changed after review return RECOVERY_PLAN_CHANGED without creating or calling', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const reviewedPlan = triagePlan(recovery);
+  runtimeDefaultsStub = {
+    ...runtimeDefaultsStub,
+    provider: 'llm-gateway',
+    model: 'changed-after-review-model',
+    reasoningEffort: 'medium',
+    serviceTier: 'priority',
+  };
+
+  const confirmation = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    reviewedPlan,
+    'runtime-changed-after-review'
+  );
+  assert.equal(confirmation.status, 409, JSON.stringify(confirmation.body));
+  assert.equal(confirmation.body.code, 'RECOVERY_PLAN_CHANGED');
+  assert.match(confirmation.body.error, /review/i);
+  assert.equal(await RecoveryOperation.countDocuments({}), 0);
+  assert.equal(providerStub.calls.length, 0);
+});
+
+test('recovery execution keeps the reviewed runtime snapshot when live defaults change mid-flight', async () => {
+  providerStub.boundaryGate = deferred();
+  providerStub.entered = deferred();
+  providerStub.settled = deferred();
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const reviewedRuntime = clone(plan.runtimeSnapshot);
+
+  const confirmation = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    plan,
+    'stored-runtime-snapshot'
+  );
+  assert.equal(confirmation.status, 202, JSON.stringify(confirmation.body));
+  await withTimeout(providerStub.entered.promise, 'Recovery did not reach the provider boundary.');
+  runtimeDefaultsStub = {
+    ...runtimeDefaultsStub,
+    provider: 'llm-gateway',
+    model: 'live-defaults-changed-mid-flight',
+    fallbackProvider: 'openai',
+    fallbackModel: 'gpt-5.5',
+  };
+  providerStub.boundaryGate.resolve();
+  await withTimeout(providerStub.settled.promise, 'Recovery provider stub did not settle.');
+  const operation = await waitForOperation(
+    app,
+    seeded.conversation._id,
+    confirmation.body.operation.operationId,
+    'succeeded'
+  );
+
+  assert.equal(providerStub.calls.length, 1);
+  assert.equal(providerStub.calls[0].provider, reviewedRuntime.provider);
+  assert.equal(providerStub.calls[0].model, reviewedRuntime.model);
+  assert.equal(operation.runtimeSnapshot.provider, reviewedRuntime.provider);
+  assert.equal(operation.runtimeSnapshot.model, reviewedRuntime.model);
+});
+
+test('confirmation refuses a reviewed provider that server-side readiness knows is unsupported', async () => {
+  runtimeDefaultsStub = {
+    ...runtimeDefaultsStub,
+    provider: 'unsupported-recovery-provider',
+    model: 'unsupported-model',
+  };
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  assert.match(plan.readiness.label, /not supported/i);
+
+  const confirmation = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    plan,
+    'unsupported-readiness'
+  );
+  assert.equal(confirmation.status, 409, JSON.stringify(confirmation.body));
+  assert.equal(confirmation.body.code, 'RECOVERY_PROVIDER_NOT_READY');
+  assert.match(confirmation.body.error, /not supported/i);
+  assert.equal(await RecoveryOperation.countDocuments({}), 0);
+  assert.equal(providerStub.calls.length, 0);
+});
+
+test('post-write evidence recheck failure records an honest succeeded-unverified write-applied result', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  evidenceStub.failOnceAfterRecoveryWrite = true;
+
+  const confirmation = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    plan,
+    'write-applied-recheck-fails'
+  );
+  const operation = await waitForOperation(
+    app,
+    seeded.conversation._id,
+    confirmation.body.operation.operationId,
+    'succeeded-unverified'
+  );
+  assert.equal(operation.conversationWriteApplied, true);
+  assert.ok(operation.commitStartedAt);
+  assert.ok(operation.commitCompletedAt);
+  assert.equal(operation.errorCode, 'RECOVERY_WRITE_APPLIED_VERIFICATION_INCOMPLETE');
+  assert.match(operation.errorMessage, /write was applied/i);
+  assert.ok(operation.acceptedResult?.acceptedSha256);
+  const conversation = await Conversation.findById(seeded.conversation._id).lean();
+  assert.equal(
+    conversation.caseIntake.evidence.receipts.triage.recoveryOperationId,
+    operation.operationId
+  );
+
+  const retry = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    plan,
+    'write-applied-must-not-rerun'
+  );
+  assert.equal(retry.status, 200, JSON.stringify(retry.body));
+  assert.equal(retry.body.created, false);
+  assert.equal(retry.body.operation.operationId, operation.operationId);
+  assert.equal(providerStub.calls.length, 1);
+});
+
+test('stale reconciliation recognizes a matching conversation receipt as an applied write', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const old = new Date(Date.now() - 10 * 60 * 1000);
+  const operation = await createPlanAttempt({
+    seeded,
+    recovery,
+    plan,
+    status: 'running',
+    idempotencyKey: 'receipt-reconciliation',
+    overrides: {
+      executorId: 'stale-executor',
+      heartbeatAt: old,
+      commitStartedAt: old,
+      attempts: [{ attempt: 1, strategy: 'rerun-stage', status: 'running', startedAt: old }],
+    },
+  });
+  await Conversation.updateOne(
+    { _id: seeded.conversation._id },
+    {
+      $set: {
+        'caseIntake.evidence.receipts.triage.recoveryOperationId': operation.operationId,
+        'caseIntake.evidence.receipts.triage.completedAt': old,
+      },
+    }
+  );
+
+  const reconciled = await waitForOperation(
+    app,
+    seeded.conversation._id,
+    operation.operationId,
+    'succeeded-unverified'
+  );
+  assert.equal(reconciled.conversationWriteApplied, true);
+  assert.equal(reconciled.errorCode, 'RECOVERY_WRITE_APPLIED_VERIFICATION_INCOMPLETE');
+  assert.match(reconciled.errorMessage, /write was applied/i);
+  const durable = await RecoveryOperation.findOne({ operationId: operation.operationId }).lean();
+  assert.equal(durable.activePlanId, undefined);
+  assert.equal(durable.attempts[0].status, 'succeeded-unverified');
+});
+
+test('failed, cancelled, and interrupted plans allow one fresh numbered retry while the old key reattaches', async () => {
+  for (const status of ['failed', 'cancelled', 'interrupted']) {
+    const seeded = await seedConversation({ state: 'rerun' });
+    const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+    const plan = triagePlan(recovery);
+    const oldKey = `terminal-${status}-old-key`;
+    const prior = await createPlanAttempt({ seeded, recovery, plan, status, idempotencyKey: oldKey });
+    const callsBefore = providerStub.calls.length;
+
+    const sameKey = await confirmPlan(app, seeded.conversation._id, recovery, plan, oldKey);
+    assert.equal(sameKey.status, 200, JSON.stringify(sameKey.body));
+    assert.equal(sameKey.body.operation.operationId, prior.operationId);
+    assert.equal(sameKey.body.created, false);
+    assert.equal(providerStub.calls.length, callsBefore);
+
+    const fresh = await confirmPlan(
+      app,
+      seeded.conversation._id,
+      recovery,
+      plan,
+      `terminal-${status}-fresh-key`
+    );
+    assert.equal(fresh.status, 202, JSON.stringify(fresh.body));
+    assert.notEqual(fresh.body.operation.operationId, prior.operationId);
+    assert.equal(fresh.body.operation.attemptNumber, 2);
+    await waitForOperation(app, seeded.conversation._id, fresh.body.operation.operationId, 'succeeded');
+    assert.equal(providerStub.calls.length, callsBefore + 1);
+  }
+});
+
+test('succeeded, awaiting-acceptance, and manual-review plans remain attached and do not rerun', async () => {
+  for (const status of ['succeeded', 'awaiting-acceptance', 'manual-review']) {
+    const seeded = await seedConversation({ state: 'rerun' });
+    const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+    const plan = triagePlan(recovery);
+    const prior = await createPlanAttempt({ seeded, recovery, plan, status });
+    const callsBefore = providerStub.calls.length;
+
+    const confirmation = await confirmPlan(
+      app,
+      seeded.conversation._id,
+      recovery,
+      plan,
+      `blocked-${status}-fresh-key`
+    );
+    assert.equal(confirmation.status, 200, JSON.stringify(confirmation.body));
+    assert.equal(confirmation.body.created, false);
+    assert.equal(confirmation.body.operation.operationId, prior.operationId);
+    assert.equal(confirmation.body.operation.status, status);
+    assert.equal(providerStub.calls.length, callsBefore);
+  }
+});
+
+test('concurrent fresh retries after failure create only one active attempt and one provider call', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  await createPlanAttempt({ seeded, recovery, plan, status: 'failed' });
+
+  const confirmations = await Promise.all([
+    confirmPlan(app, seeded.conversation._id, recovery, plan, 'retry-race-a'),
+    confirmPlan(app, seeded.conversation._id, recovery, plan, 'retry-race-b'),
+    confirmPlan(app, seeded.conversation._id, recovery, plan, 'retry-race-c'),
+  ]);
+  assert.ok(confirmations.every((response) => [200, 202].includes(response.status)));
+  assert.equal(confirmations.filter((response) => response.body.created === true).length, 1);
+  const operationIds = new Set(confirmations.map((response) => response.body.operation.operationId));
+  assert.equal(operationIds.size, 1);
+  const [operationId] = operationIds;
+  await waitForOperation(app, seeded.conversation._id, operationId, 'succeeded');
+  assert.equal(await RecoveryOperation.countDocuments({ planId: plan.planId }), 2);
+  assert.equal(await RecoveryOperation.countDocuments({ activePlanId: plan.planId }), 0);
+  assert.equal(providerStub.calls.length, 1);
+});
+
+test('stale confirmed operation becomes interrupted and is not auto-resumed', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const operation = await createPlanAttempt({
+    seeded,
+    recovery,
+    plan,
+    status: 'confirmed',
+    idempotencyKey: 'orphaned-confirmed',
+  });
+  const old = new Date(Date.now() - 10 * 60 * 1000);
+  await RecoveryOperation.collection.updateOne(
+    { operationId: operation.operationId },
+    { $set: { heartbeatAt: null, createdAt: old, updatedAt: old } }
+  );
+
+  const interrupted = await waitForOperation(
+    app,
+    seeded.conversation._id,
+    operation.operationId,
+    'interrupted'
+  );
+  assert.equal(interrupted.errorCode, 'RECOVERY_INTERRUPTED');
+  assert.match(interrupted.errorMessage, /did not start/i);
+  assert.equal(providerStub.calls.length, 0);
+  const durable = await RecoveryOperation.findOne({ operationId: operation.operationId }).lean();
+  assert.equal(durable.activePlanId, undefined);
+});
+
+test('executor-start rejection is durably recorded instead of being discarded', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const realFindOne = RecoveryOperation.findOne;
+  let injected = false;
+  RecoveryOperation.findOne = function failExecutorStart(filter, ...args) {
+    if (!injected && filter?.operationId && filter?.status === 'confirmed') {
+      injected = true;
+      return { lean: async () => { throw new Error('Simulated executor-start failure.'); } };
+    }
+    return realFindOne.call(this, filter, ...args);
+  };
+  try {
+    const confirmation = await confirmPlan(
+      app,
+      seeded.conversation._id,
+      recovery,
+      plan,
+      'executor-start-error'
+    );
+    assert.equal(confirmation.status, 202, JSON.stringify(confirmation.body));
+    const failed = await waitForOperation(
+      app,
+      seeded.conversation._id,
+      confirmation.body.operation.operationId,
+      'failed'
+    );
+    assert.equal(injected, true);
+    assert.equal(failed.errorCode, 'RECOVERY_FAILED');
+    assert.match(failed.errorMessage, /server or database error/i);
+    assert.equal(providerStub.calls.length, 0);
+  } finally {
+    RecoveryOperation.findOne = realFindOne;
+  }
 });
 
 test('operation status is durable across repeated polls and a fresh service/router load', async () => {

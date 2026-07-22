@@ -28,7 +28,13 @@ const TRIAGE_RECOVERY_CODES = new Set(['TRIAGE_CARD', 'TRIAGE_RUN', 'TRIAGE_RESU
 const KEYED_PROVIDERS = new Set(['anthropic', 'openai', 'kimi', 'gemini']);
 const URL_BASED_PROVIDERS = new Set(['llm-gateway', 'lm-studio']);
 const ACTIVE_STATUSES = ['confirmed', 'running', 'cancel-requested', 'awaiting-acceptance'];
-const TERMINAL_STATUSES = new Set(['succeeded', 'failed', 'cancelled', 'interrupted', 'manual-review']);
+const RETRYABLE_TERMINAL_STATUSES = new Set(['failed', 'cancelled', 'interrupted']);
+const TERMINAL_STATUSES = new Set([
+  'succeeded',
+  'succeeded-unverified',
+  ...RETRYABLE_TERMINAL_STATUSES,
+  'manual-review',
+]);
 const STALE_HEARTBEAT_MS = 3 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const MAX_PROGRESS_EVENTS = 50;
@@ -99,6 +105,101 @@ function uniqueStrings(values) {
     .filter(Boolean))];
 }
 
+function sanitizeFailureText(value, maxLength = 1000) {
+  return safeString(value, '')
+    .replace(/\b(Bearer\s+)[^\s,;]+/gi, '$1[REDACTED]')
+    .replace(/\b(api[_ -]?key|token|secret|password)\s*[:=]\s*[^\s,;]+/gi, '$1=[REDACTED]')
+    .slice(0, maxLength);
+}
+
+function sanitizeOriginalEvidence(value) {
+  const original = clonePlain(value, {}) || {};
+  const failedRun = isObject(original.failedRun) ? original.failedRun : null;
+  const runDetail = isObject(failedRun?.detail) ? failedRun.detail : {};
+  const receipt = isObject(original.receipt) ? original.receipt : null;
+  return {
+    failureCode: safeString(original.failureCode, '').slice(0, 200),
+    failureMessage: sanitizeFailureText(original.failureMessage),
+    failedRun: failedRun ? {
+      id: safeString(failedRun.id, ''),
+      phase: safeString(failedRun.phase, ''),
+      status: safeString(failedRun.status, ''),
+      provider: safeString(failedRun.provider, ''),
+      model: safeString(failedRun.model, ''),
+      startedAt: failedRun.startedAt || null,
+      completedAt: failedRun.completedAt || null,
+      durationMs: failedRun.durationMs ?? null,
+      summary: sanitizeFailureText(failedRun.summary, 500),
+      traceId: safeString(failedRun.traceId, ''),
+      resultId: safeString(runDetail.savedResultId || runDetail.resultId, ''),
+      packageId: safeString(runDetail.providerPackageId || runDetail.packageId, ''),
+      standaloneRunId: safeString(runDetail.standaloneRunId, ''),
+    } : null,
+    receipt: receipt ? {
+      status: safeString(receipt.status, ''),
+      attempted: Boolean(receipt.attempted),
+      completed: Boolean(receipt.completed),
+      failed: Boolean(receipt.failed),
+      provider: safeString(receipt.provider, ''),
+      model: safeString(receipt.model, ''),
+      recordedAt: receipt.recordedAt || null,
+      completedAt: receipt.completedAt || null,
+      errorCode: safeString(receipt.errorCode || receipt.error?.code, '').slice(0, 200),
+      errorMessage: sanitizeFailureText(receipt.errorMessage || receipt.error?.message),
+      resultId: safeString(receipt.savedResultId, ''),
+      standaloneRunId: safeString(receipt.standaloneRunId, ''),
+      packageId: safeString(receipt.providerPackageId, ''),
+      repairPackageId: safeString(receipt.repairPackageId, ''),
+    } : null,
+    resultId: safeString(original.resultId, ''),
+    packageId: safeString(original.packageId, ''),
+    traceIds: uniqueStrings(original.traceIds),
+  };
+}
+
+const RECOVERY_GROUPS = [
+  {
+    id: 'no-cost',
+    label: 'No-cost recoveries',
+    description: 'Uses an already validated saved result and does not call the AI again.',
+    order: 1,
+  },
+  {
+    id: 'provider-call',
+    label: 'Provider-call recoveries',
+    description: 'Runs only the missing AI stage and may add provider cost.',
+    order: 2,
+  },
+  {
+    id: 'human-review',
+    label: 'Human-review items',
+    description: 'Cannot be recreated automatically without misrepresenting historical evidence.',
+    order: 3,
+  },
+];
+
+function recoveryGroupId(option) {
+  if (option?.strategy === 'manual-review') return 'human-review';
+  return option?.aiCallNeeded ? 'provider-call' : 'no-cost';
+}
+
+function finalizeRecoveryGroups(response) {
+  const orderById = new Map(RECOVERY_GROUPS.map((group) => [group.id, group.order]));
+  response.options = response.options
+    .map((option, index) => {
+      const group = recoveryGroupId(option);
+      return { ...option, group, groupOrder: orderById.get(group), optionOrder: index + 1 };
+    })
+    .sort((left, right) => left.groupOrder - right.groupOrder || left.optionOrder - right.optionOrder);
+  response.groups = RECOVERY_GROUPS.map((group) => ({
+    ...group,
+    optionPlanIds: response.options
+      .filter((option) => option.group === group.id)
+      .map((option) => option.planId),
+  })).filter((group) => group.optionPlanIds.length > 0);
+  return response;
+}
+
 function normalizeParseValue(key, value) {
   const text = safeString(value, '').replace(/\s+/g, ' ').trim();
   return key === 'category' || key === 'triedTestAccount' ? text.toLowerCase() : text;
@@ -165,14 +266,49 @@ function fingerprintMatches(left, right) {
   );
 }
 
-function buildDedupeKey({ conversationId, stage, strategy, inputHash, evidenceFingerprint }) {
+function normalizeRuntimeSnapshot(value) {
+  return {
+    provider: safeString(value?.provider, '').trim(),
+    model: safeString(value?.model, '').trim(),
+    fallbackProvider: safeString(value?.fallbackProvider, '').trim(),
+    fallbackModel: safeString(value?.fallbackModel, '').trim(),
+    reasoningEffort: safeString(value?.reasoningEffort, '').trim(),
+    serviceTier: safeString(value?.serviceTier, '').trim(),
+  };
+}
+
+function runtimeSnapshotsMatch(left, right) {
+  return stableJson(normalizeRuntimeSnapshot(left)) === stableJson(normalizeRuntimeSnapshot(right));
+}
+
+function buildDedupeKey({
+  conversationId,
+  stage,
+  strategy,
+  inputHash,
+  evidenceFingerprint,
+  runtimeSnapshot = null,
+}) {
   return sha256({
     conversationId: safeString(conversationId, ''),
     stage,
     strategy,
     inputHash,
     evidenceFingerprint: normalizeFingerprint(evidenceFingerprint),
+    runtimeSnapshot: normalizeRuntimeSnapshot(runtimeSnapshot),
   });
+}
+
+function operationPlanId(operation) {
+  return safeString(operation?.planId || operation?.dedupeKey, '').trim();
+}
+
+function planOperationFilter(planId) {
+  return { $or: [{ planId }, { dedupeKey: planId }] };
+}
+
+function buildAttemptDedupeKey(planId, attemptNumber) {
+  return `${planId}:${attemptNumber}`;
 }
 
 function getTriageReceipt(conversation) {
@@ -317,6 +453,30 @@ async function buildReadiness(runtimeSnapshot) {
   };
 }
 
+function assertRecoveryReadiness(readiness) {
+  if (!DIRECT_TRIAGE_PROVIDERS.includes(readiness?.provider)) {
+    throw createServiceError(
+      'RECOVERY_PROVIDER_NOT_READY',
+      'The reviewed provider is not supported by the triage stage. Update Runtime Defaults, then review recovery again.',
+      409
+    );
+  }
+  if (readiness.keyRequired && !readiness.keyConfigured) {
+    throw createServiceError(
+      'RECOVERY_PROVIDER_NOT_READY',
+      'The reviewed provider requires a key, but no key is configured. Add the key, then review recovery again.',
+      409
+    );
+  }
+  if (!readiness.recentHealth?.healthy || readiness.cachedPreflight?.ok === false) {
+    throw createServiceError(
+      'RECOVERY_PROVIDER_NOT_READY',
+      'Recent no-cost readiness signals show that the reviewed provider is unavailable. Check the provider, then review recovery again.',
+      409
+    );
+  }
+}
+
 function estimateDuration(conversation, sourceResult) {
   const values = [
     ...getTriageRuns(conversation).map((run) => run.durationMs),
@@ -334,8 +494,11 @@ function estimateDuration(conversation, sourceResult) {
 }
 
 async function buildDownstreamNote(conversation) {
-  const knowledgeCandidateExists = conversation?.escalationId
-    ? Boolean(await KnowledgeCandidate.exists({ escalationId: conversation.escalationId }))
+  const candidateFilters = [];
+  if (conversation?._id) candidateFilters.push({ conversationId: conversation._id });
+  if (conversation?.escalationId) candidateFilters.push({ escalationId: conversation.escalationId });
+  const knowledgeCandidateExists = candidateFilters.length > 0
+    ? Boolean(await KnowledgeCandidate.exists({ $or: candidateFilters }))
     : false;
   return {
     analyst: 'The existing analyst answer is unaffected because it does not depend on the saved triage card.',
@@ -343,6 +506,31 @@ async function buildDownstreamNote(conversation) {
       ? 'A knowledge draft exists for this escalation, so it may need human review after the triage result changes.'
       : 'No knowledge draft exists for this escalation, so there is no downstream draft to review.',
     knowledgeCandidateExists,
+  };
+}
+
+async function markKnowledgeDraftAfterMeaningfulRecovery(operation, conversation, markedAt) {
+  if (!operation?.candidateResult?.comparison?.meaningfullyDifferent) return null;
+  const candidateFilters = [];
+  if (conversation?._id) candidateFilters.push({ conversationId: conversation._id });
+  if (conversation?.escalationId) candidateFilters.push({ escalationId: conversation.escalationId });
+  if (candidateFilters.length === 0) return null;
+  const marker = {
+    recoveryOperationId: operation.operationId,
+    markedAt,
+    reason: 'An accepted recovery changed the triage card meaningfully. Review this knowledge draft before trusting or publishing it.',
+  };
+  const candidate = await KnowledgeCandidate.findOneAndUpdate(
+    { $or: candidateFilters },
+    { $set: { needsReviewAfterRecovery: marker } },
+    { returnDocument: 'after' }
+  )
+    .select('_id needsReviewAfterRecovery')
+    .lean();
+  if (!candidate) return null;
+  return {
+    ...marker,
+    knowledgeCandidateId: safeString(candidate._id, ''),
   };
 }
 
@@ -380,6 +568,8 @@ async function buildRecoveryOptions(conversationId) {
     settled: Boolean(evidence.settled),
     evidenceFingerprint: normalizeFingerprint(evidence.acknowledgementFingerprint),
     reason: '',
+    recommendedOrderNote: 'Review no-cost recoveries first, then provider-call recoveries, then any items that require human review.',
+    groups: [],
     options: [],
   };
 
@@ -467,6 +657,7 @@ async function buildRecoveryOptions(conversationId) {
       strategy,
       inputHash,
       evidenceFingerprint: response.evidenceFingerprint,
+      runtimeSnapshot,
     });
     response.options.push({
       planId,
@@ -483,6 +674,19 @@ async function buildRecoveryOptions(conversationId) {
       recommended: strategy !== 'manual-review',
       reason,
       aiCallNeeded: strategy === 'rerun-stage',
+      costEstimate: strategy === 'rerun-stage'
+        ? {
+            amountKnown: false,
+            amount: null,
+            currency: null,
+            message: 'A provider call is required, but the cost amount is unknown because no reliable estimate is available.',
+          }
+        : {
+            amountKnown: true,
+            amount: 0,
+            currency: 'USD',
+            message: 'No AI provider cost will be added because this reuses an already validated saved result.',
+          },
       acceptanceRequired: Boolean(strategy === 'repersist' && repersistNeedsAcceptance),
       comparison: strategy === 'repersist' && repersistNeedsAcceptance ? repersistComparison : null,
       runtimeSnapshot,
@@ -514,6 +718,7 @@ async function buildRecoveryOptions(conversationId) {
         strategy,
         inputHash,
         evidenceFingerprint: response.evidenceFingerprint,
+        runtimeSnapshot: null,
       }),
       action: strategy,
       targetStage: artifact.stage || 'pipeline',
@@ -524,6 +729,12 @@ async function buildRecoveryOptions(conversationId) {
       recommended: false,
       reason: manualRecoveryReason(artifact),
       aiCallNeeded: false,
+      costEstimate: {
+        amountKnown: true,
+        amount: 0,
+        currency: 'USD',
+        message: 'No automatic provider call will start for this item.',
+      },
       runtimeSnapshot: null,
       readiness: null,
       estimatedDurationMs: null,
@@ -538,7 +749,7 @@ async function buildRecoveryOptions(conversationId) {
   if (response.options.length === 0) {
     response.reason = 'No safely recoverable missing evidence was found.';
   }
-  return response;
+  return finalizeRecoveryGroups(response);
 }
 
 function publicAttempt(attempt) {
@@ -560,10 +771,20 @@ function publicAttempt(attempt) {
   };
 }
 
+function progressEventAt(operation, kinds) {
+  const wanted = new Set(kinds);
+  const event = (Array.isArray(operation?.progress) ? operation.progress : [])
+    .find((item) => wanted.has(safeString(item?.kind, '')));
+  return event?.at || null;
+}
+
 function serializeOperation(value) {
   const operation = clonePlain(value, {}) || {};
+  const knowledgeDraftNeedsReview = operation.postRecoveryEvidence?.knowledgeDraftNeedsReview || null;
   return {
     operationId: operation.operationId || '',
+    planId: operationPlanId(operation),
+    attemptNumber: Number(operation.attemptNumber) || 1,
     conversationId: safeString(operation.conversationId, ''),
     targetStage: operation.targetStage || '',
     strategy: operation.strategy || '',
@@ -575,12 +796,22 @@ function serializeOperation(value) {
       parseFieldsSha256: operation.inputSnapshot.parseFieldsSha256 || '',
       sourceRecordIds: operation.inputSnapshot.sourceRecordIds || {},
     } : null,
+    originalEvidence: sanitizeOriginalEvidence(operation.originalEvidence),
     runtimeSnapshot: operation.runtimeSnapshot || null,
     attempts: (operation.attempts || []).map(publicAttempt),
     candidateResult: operation.candidateResult?.card ? operation.candidateResult : null,
     acceptedResult: operation.acceptedResult?.acceptedSha256 ? operation.acceptedResult : null,
     progress: operation.progress || [],
     postRecoveryEvidence: operation.postRecoveryEvidence || null,
+    knowledgeDraftNeedsReview,
+    conversationWriteApplied: Boolean(operation.conversationWriteApplied),
+    providerHandoffAt: progressEventAt(operation, [
+      'triage.agent_handoff_to_provider',
+      'triage.generation_started',
+      'cancel-requested',
+    ]),
+    commitStartedAt: operation.commitStartedAt || null,
+    commitCompletedAt: operation.commitCompletedAt || null,
     heartbeatAt: operation.heartbeatAt || null,
     startedAt: operation.startedAt || null,
     completedAt: operation.completedAt || null,
@@ -591,6 +822,56 @@ function serializeOperation(value) {
     errorMessage: operation.errorMessage || '',
     createdAt: operation.createdAt || null,
     updatedAt: operation.updatedAt || null,
+  };
+}
+
+function serializeHistoryOperation(value) {
+  const operation = clonePlain(value, {}) || {};
+  const serialized = serializeOperation(operation);
+  return {
+    operationId: serialized.operationId,
+    planId: serialized.planId,
+    attemptNumber: serialized.attemptNumber,
+    targetStage: serialized.targetStage,
+    strategy: serialized.strategy,
+    status: serialized.status,
+    missingCodes: serialized.missingCodes,
+    originalEvidence: serialized.originalEvidence,
+    runtimeSnapshot: serialized.runtimeSnapshot ? {
+      provider: serialized.runtimeSnapshot.provider || '',
+      model: serialized.runtimeSnapshot.model || '',
+      actualProvider: serialized.runtimeSnapshot.actualProvider || '',
+      actualModel: serialized.runtimeSnapshot.actualModel || '',
+      actualProviderPackageId: serialized.runtimeSnapshot.actualProviderPackageId || '',
+      failoverUsed: Boolean(serialized.runtimeSnapshot.failoverUsed),
+      failoverFrom: serialized.runtimeSnapshot.failoverFrom || '',
+    } : null,
+    attempts: serialized.attempts,
+    comparison: operation.candidateResult?.comparison ? {
+      meaningfullyDifferent: Boolean(operation.candidateResult.comparison.meaningfullyDifferent),
+      differences: Array.isArray(operation.candidateResult.comparison.differences)
+        ? operation.candidateResult.comparison.differences
+        : [],
+      plainSummary: Array.isArray(operation.candidateResult.comparison.plainSummary)
+        ? operation.candidateResult.comparison.plainSummary
+        : [],
+      candidateSha256: safeString(operation.candidateResult.comparison.candidateSha256, ''),
+      previousSha256: safeString(operation.candidateResult.comparison.previousSha256, ''),
+    } : null,
+    acceptedAt: operation.acceptedResult?.acceptedAt || null,
+    confirmedAt: progressEventAt(operation, ['confirmed']) || operation.createdAt || null,
+    providerHandoffAt: serialized.providerHandoffAt,
+    conversationWriteApplied: serialized.conversationWriteApplied,
+    commitStartedAt: serialized.commitStartedAt,
+    commitCompletedAt: serialized.commitCompletedAt,
+    postRecoveryEvidence: serialized.postRecoveryEvidence,
+    knowledgeDraftNeedsReview: serialized.knowledgeDraftNeedsReview,
+    errorCode: serialized.errorCode,
+    errorMessage: serialized.errorMessage,
+    startedAt: serialized.startedAt,
+    completedAt: serialized.completedAt,
+    createdAt: serialized.createdAt,
+    updatedAt: serialized.updatedAt,
   };
 }
 
@@ -646,70 +927,180 @@ function createRecoveryEventBus(operationId, registryEntry) {
   };
 }
 
+function validDateOr(value, fallback) {
+  const date = value ? new Date(value) : null;
+  return date && Number.isFinite(date.getTime()) ? date : fallback;
+}
+
+async function findAppliedConversationWrite(operation) {
+  if (operation?.conversationWriteApplied) {
+    return {
+      appliedAt: validDateOr(operation.commitCompletedAt, new Date()),
+      receipt: null,
+    };
+  }
+  const conversation = await Conversation.findOne({
+    _id: operation.conversationId,
+    'caseIntake.evidence.receipts.triage.recoveryOperationId': operation.operationId,
+  })
+    .select('caseIntake.evidence.receipts.triage')
+    .lean();
+  if (!conversation) return null;
+  const receipt = getTriageReceipt(conversation);
+  if (safeString(receipt.recoveryOperationId, '') !== safeString(operation.operationId, '')) return null;
+  return {
+    appliedAt: validDateOr(receipt.completedAt || receipt.recordedAt, new Date()),
+    receipt,
+  };
+}
+
+async function markWriteAppliedUnverified(operation, {
+  executorId = '',
+  allowedStatuses = ['confirmed', 'running', 'cancel-requested'],
+  appliedAt = null,
+  errorCode = 'RECOVERY_WRITE_APPLIED_VERIFICATION_INCOMPLETE',
+  errorMessage = 'The recovery write was applied, but final evidence verification did not finish. Do not retry this plan.',
+} = {}) {
+  const completedAt = new Date();
+  const guard = {
+    operationId: operation.operationId,
+    status: { $in: allowedStatuses },
+  };
+  if (executorId) guard.executorId = executorId;
+  const result = await RecoveryOperation.updateOne(
+    guard,
+    {
+      $set: {
+        status: 'succeeded-unverified',
+        conversationWriteApplied: true,
+        commitCompletedAt: validDateOr(appliedAt || operation.commitCompletedAt, completedAt),
+        completedAt,
+        heartbeatAt: completedAt,
+        errorCode,
+        errorMessage,
+      },
+      $unset: { activePlanId: '' },
+      $push: {
+        progress: {
+          $each: [{ at: completedAt, kind: 'succeeded-unverified', message: errorMessage }],
+          $slice: -MAX_PROGRESS_EVENTS,
+        },
+      },
+    }
+  );
+  if (result.modifiedCount !== 1) return false;
+  await finishAttempt(operation.operationId, {
+    status: 'succeeded-unverified',
+    completedAt,
+    errorCode,
+    errorMessage,
+  });
+  return true;
+}
+
 async function markStaleRunningOperations() {
   if (!RecoveryOperation.db || RecoveryOperation.db.readyState !== 1) return;
   const now = new Date();
   const cutoff = new Date(now.getTime() - STALE_HEARTBEAT_MS);
   const liveOperationIds = [...inFlightOperations.keys()];
-  const commonFilter = {
-    ...(liveOperationIds.length > 0 ? { operationId: { $nin: liveOperationIds } } : {}),
-    $and: [
-      {
-        $or: [
-          { heartbeatAt: { $lt: cutoff } },
-          { heartbeatAt: null, updatedAt: { $lt: cutoff } },
-        ],
-      },
-      {
-        $or: [
-          { commitStartedAt: null },
-          { commitStartedAt: { $lt: cutoff } },
-        ],
-      },
-    ],
-  };
-  await RecoveryOperation.updateMany(
+  const staleConditions = [
     {
-      ...commonFilter,
-      status: 'running',
+      $or: [
+        { heartbeatAt: { $lt: cutoff } },
+        { heartbeatAt: null, createdAt: { $lt: cutoff } },
+      ],
     },
     {
-      $set: {
+      $or: [
+        { commitStartedAt: null },
+        { commitStartedAt: { $lt: cutoff } },
+      ],
+    },
+  ];
+  const staleOperations = await RecoveryOperation.find({
+    ...(liveOperationIds.length > 0 ? { operationId: { $nin: liveOperationIds } } : {}),
+    status: { $in: ['confirmed', 'running', 'cancel-requested'] },
+    $and: staleConditions,
+  }).lean();
+
+  for (const operation of staleOperations) {
+    const appliedWrite = await findAppliedConversationWrite(operation);
+    if (appliedWrite) {
+      await markWriteAppliedUnverified(operation, {
+        allowedStatuses: [operation.status],
+        appliedAt: appliedWrite.appliedAt,
+      });
+      continue;
+    }
+
+    const guard = {
+      operationId: operation.operationId,
+      status: operation.status,
+      $and: staleConditions,
+    };
+    if (operation.status === 'cancel-requested') {
+      const cancelled = await RecoveryOperation.updateOne(
+        guard,
+        {
+          $set: {
+            status: 'cancelled',
+            completedAt: now,
+            heartbeatAt: now,
+            cancellationAcknowledgedAt: now,
+            errorCode: '',
+            errorMessage: '',
+          },
+          $unset: { activePlanId: '' },
+          $push: {
+            progress: {
+              $each: [{ at: now, kind: 'cancelled', message: 'The stale cancellation request was closed without a matching conversation write receipt.' }],
+              $slice: -MAX_PROGRESS_EVENTS,
+            },
+          },
+        }
+      );
+      if (cancelled.modifiedCount === 1) {
+        await finishAttempt(operation.operationId, {
+          status: 'cancelled',
+          completedAt: now,
+          errorCode: 'RECOVERY_CANCELLED',
+          errorMessage: 'The stale cancellation request was closed without a matching conversation write receipt.',
+        });
+      }
+      continue;
+    }
+
+    const interruptedMessage = operation.status === 'confirmed'
+      ? 'Recovery was confirmed, but execution did not start before the server stopped tracking it. It was not resumed automatically.'
+      : 'The server stopped receiving recovery heartbeats. This operation was not resumed automatically.';
+    const interrupted = await RecoveryOperation.updateOne(
+      guard,
+      {
+        $set: {
+          status: 'interrupted',
+          completedAt: now,
+          heartbeatAt: now,
+          errorCode: 'RECOVERY_INTERRUPTED',
+          errorMessage: interruptedMessage,
+        },
+        $unset: { activePlanId: '' },
+        $push: {
+          progress: {
+            $each: [{ at: now, kind: 'interrupted', message: interruptedMessage }],
+            $slice: -MAX_PROGRESS_EVENTS,
+          },
+        },
+      }
+    );
+    if (interrupted.modifiedCount === 1) {
+      await finishAttempt(operation.operationId, {
         status: 'interrupted',
         completedAt: now,
         errorCode: 'RECOVERY_INTERRUPTED',
-        errorMessage: 'The server stopped receiving recovery heartbeats. This operation was not resumed automatically.',
-      },
-      $push: {
-        progress: {
-          $each: [{ at: now, kind: 'interrupted', message: 'Recovery was interrupted and was not resumed automatically.' }],
-          $slice: -MAX_PROGRESS_EVENTS,
-        },
-      },
+        errorMessage: interruptedMessage,
+      });
     }
-  );
-  await RecoveryOperation.updateMany(
-    {
-      ...commonFilter,
-      status: 'cancel-requested',
-    },
-    {
-      $set: {
-        status: 'cancelled',
-        completedAt: now,
-        heartbeatAt: now,
-        cancellationAcknowledgedAt: now,
-        errorCode: '',
-        errorMessage: '',
-      },
-      $push: {
-        progress: {
-          $each: [{ at: now, kind: 'cancelled', message: 'The stale cancellation request was closed without changing conversation evidence.' }],
-          $slice: -MAX_PROGRESS_EVENTS,
-        },
-      },
-    }
-  );
+  }
 }
 
 function startHeartbeat(operationId, executorId) {
@@ -970,7 +1361,56 @@ async function commitTriageResult(operation, currentState, sourceResult, resultL
   if (result.modifiedCount !== 1) {
     throw createServiceError('EVIDENCE_CHANGED', 'Conversation evidence changed before the recovery write could commit.', 409);
   }
-  return { card, resultId: receipt.savedResultId, runId: recoveryRun.id, committedAt: now };
+  const knowledgeDraftNeedsReview = await markKnowledgeDraftAfterMeaningfulRecovery(
+    operation,
+    conversation,
+    now
+  );
+  const writeMarker = await RecoveryOperation.updateOne(
+    {
+      operationId: operation.operationId,
+      status: 'running',
+      executorId: operation.executorId,
+      commitStartedAt,
+    },
+    {
+      $set: {
+        conversationWriteApplied: true,
+        commitCompletedAt: now,
+        heartbeatAt: now,
+        acceptedResult: {
+          acceptedSha256: sha256(card),
+          acceptedAt: now,
+        },
+        ...(knowledgeDraftNeedsReview ? {
+          postRecoveryEvidence: { knowledgeDraftNeedsReview },
+        } : {}),
+      },
+      $push: {
+        progress: {
+          $each: [{ at: now, kind: 'write-applied', message: 'The guarded conversation recovery write was applied.' }],
+          $slice: -MAX_PROGRESS_EVENTS,
+        },
+      },
+    }
+  );
+  if (writeMarker.modifiedCount !== 1) {
+    throw createServiceError(
+      'RECOVERY_WRITE_MARKER_FAILED',
+      'The conversation recovery write was applied, but its durable operation marker could not be saved.',
+      500
+    );
+  }
+  operation.conversationWriteApplied = true;
+  operation.commitCompletedAt = now;
+  operation.postRecoveryEvidence = knowledgeDraftNeedsReview ? { knowledgeDraftNeedsReview } : null;
+  return {
+    card,
+    resultId: receipt.savedResultId,
+    runId: recoveryRun.id,
+    committedAt: now,
+    knowledgeDraftNeedsReview,
+  };
 }
 
 async function finishAttempt(operationId, fields, guard = {}) {
@@ -1002,6 +1442,18 @@ async function failOperation(operationId, error, status = 'failed', {
     : 'Recovery could not be completed because of a server or database error.';
   const guard = { status: { $in: allowedStatuses } };
   if (executorId) guard.executorId = executorId;
+  const currentOperation = await RecoveryOperation.findOne({ operationId, ...guard }).lean();
+  if (currentOperation) {
+    const appliedWrite = await findAppliedConversationWrite(currentOperation);
+    if (appliedWrite) {
+      await markWriteAppliedUnverified(currentOperation, {
+        executorId,
+        allowedStatuses,
+        appliedAt: appliedWrite.appliedAt,
+      });
+      return;
+    }
+  }
   await finishAttempt(operationId, { status, completedAt, errorCode, errorMessage }, guard);
   await RecoveryOperation.updateOne(
     { operationId, ...guard },
@@ -1013,6 +1465,7 @@ async function failOperation(operationId, error, status = 'failed', {
         errorCode,
         errorMessage,
       },
+      $unset: { activePlanId: '' },
       $push: {
         progress: {
           $each: [{ at: completedAt, kind: status, message: errorMessage }],
@@ -1041,6 +1494,7 @@ async function markCancelled(operationId, message = 'Recovery was cancelled befo
         errorCode: '',
         errorMessage: '',
       },
+      $unset: { activePlanId: '' },
       $push: {
         progress: {
           $each: [{ at: now, kind: 'cancelled', message }],
@@ -1071,8 +1525,9 @@ async function finalizeCommittedOperation(operation, committed, startedAt) {
     confirmedTargetCodes: confirmedCodes,
     remainingMissingCodes: (evidence.missing || []).map((artifact) => artifact.code),
     checkedAt: evidence.checkedAt || completedAt,
+    knowledgeDraftNeedsReview: committed.knowledgeDraftNeedsReview || null,
   };
-  const status = allTargetedConfirmed ? 'succeeded' : 'failed';
+  const status = allTargetedConfirmed ? 'succeeded' : 'succeeded-unverified';
   const errorCode = allTargetedConfirmed ? '' : 'TARGET_EVIDENCE_NOT_CONFIRMED';
   const errorMessage = allTargetedConfirmed
     ? ''
@@ -1105,6 +1560,7 @@ async function finalizeCommittedOperation(operation, committed, startedAt) {
         errorCode,
         errorMessage,
       },
+      $unset: { activePlanId: '' },
       $push: {
         progress: {
           $each: [{
@@ -1421,18 +1877,24 @@ async function confirmRecovery(conversationId, { action, evidenceFingerprint, id
   if (operation) {
     if (
       safeString(operation.conversationId, '') !== safeString(conversationId, '')
-      || safeString(operation.dedupeKey, '') !== cleanAction
+      || operationPlanId(operation) !== cleanAction
     ) {
       throw createServiceError('IDEMPOTENCY_KEY_CONFLICT', 'That idempotency key belongs to a different recovery plan.', 409);
     }
     return { operation: serializeOperation(operation), created: false };
   }
-  operation = await RecoveryOperation.findOne({ dedupeKey: cleanAction }).lean();
-  if (operation) {
-    if (safeString(operation.conversationId, '') !== safeString(conversationId, '')) {
+
+  const existingOperations = await RecoveryOperation.find(planOperationFilter(cleanAction))
+    .sort({ attemptNumber: -1, createdAt: -1 })
+    .lean();
+  const blockingOperation = existingOperations.find((candidate) => (
+    !RETRYABLE_TERMINAL_STATUSES.has(candidate.status)
+  ));
+  if (blockingOperation) {
+    if (safeString(blockingOperation.conversationId, '') !== safeString(conversationId, '')) {
       throw createServiceError('IDEMPOTENCY_KEY_CONFLICT', 'That recovery plan belongs to a different conversation.', 409);
     }
-    return { operation: serializeOperation(operation), created: false };
+    return { operation: serializeOperation(blockingOperation), created: false };
   }
 
   if (!isObject(evidenceFingerprint)) {
@@ -1445,6 +1907,13 @@ async function confirmRecovery(conversationId, { action, evidenceFingerprint, id
   }
   const plan = plans.options.find((option) => option.planId === cleanAction);
   if (!plan) {
+    if (plans.options.some((option) => option.targetStage === 'triage')) {
+      throw createServiceError(
+        'RECOVERY_PLAN_CHANGED',
+        'The reviewed recovery plan changed, including its provider settings. Review the options again.',
+        409
+      );
+    }
     throw createServiceError('RECOVERY_PLAN_UNAVAILABLE', 'That recovery plan is no longer available. Review the options again.', 409);
   }
   if (plan.strategy === 'manual-review') {
@@ -1465,32 +1934,56 @@ async function confirmRecovery(conversationId, { action, evidenceFingerprint, id
     strategy: plan.strategy,
     inputHash: buildPlanInputHash(inputSnapshot),
     evidenceFingerprint: confirmationEvidence.acknowledgementFingerprint,
+    runtimeSnapshot: plan.runtimeSnapshot,
   });
   if (confirmationPlanId !== plan.planId) {
     throw createServiceError('RECOVERY_INPUT_CHANGED', 'The verified triage input changed. Review the recovery options again.', 409);
   }
   const sourceIdentity = triageProviderIdentity(sourceResult);
-  const runtimeSnapshot = plan.strategy === 'rerun-stage'
-    ? await resolveRuntimeSnapshot()
-    : {
-        provider: '',
-        model: '',
-        fallbackProvider: '',
-        fallbackModel: '',
-        reasoningEffort: '',
-        serviceTier: '',
-        actualProvider: sourceIdentity.provider,
-        actualModel: sourceIdentity.model,
-        actualProviderPackageId: sourceIdentity.providerPackageId,
-        failoverUsed: sourceIdentity.failoverUsed,
-        failoverFrom: sourceIdentity.failoverFrom,
-      };
+  let runtimeSnapshot;
+  if (plan.strategy === 'rerun-stage') {
+    const reviewedRuntimeSnapshot = normalizeRuntimeSnapshot(plan.runtimeSnapshot);
+    const currentRuntimeSnapshot = await resolveRuntimeSnapshot();
+    if (!runtimeSnapshotsMatch(reviewedRuntimeSnapshot, currentRuntimeSnapshot)) {
+      throw createServiceError(
+        'RECOVERY_PLAN_CHANGED',
+        'Runtime Defaults changed after this recovery plan was reviewed. Review the options again.',
+        409
+      );
+    }
+    const readiness = await buildReadiness(reviewedRuntimeSnapshot);
+    assertRecoveryReadiness(readiness);
+    runtimeSnapshot = reviewedRuntimeSnapshot;
+  } else {
+    runtimeSnapshot = {
+      provider: '',
+      model: '',
+      fallbackProvider: '',
+      fallbackModel: '',
+      reasoningEffort: '',
+      serviceTier: '',
+      actualProvider: sourceIdentity.provider,
+      actualModel: sourceIdentity.model,
+      actualProviderPackageId: sourceIdentity.providerPackageId,
+      failoverUsed: sourceIdentity.failoverUsed,
+      failoverFrom: sourceIdentity.failoverFrom,
+    };
+  }
+  const previousAttemptNumber = existingOperations.reduce(
+    (highest, candidate) => Math.max(highest, Number(candidate.attemptNumber) || 1),
+    0
+  );
+  const attemptNumber = previousAttemptNumber + 1;
+  const dedupeKey = buildAttemptDedupeKey(plan.planId, attemptNumber);
   const operationId = randomUUID();
   const createdAt = new Date();
   const operationRecord = {
     operationId,
     idempotencyKey: cleanIdempotencyKey,
-    dedupeKey: plan.planId,
+    dedupeKey,
+    planId: plan.planId,
+    attemptNumber,
+    activePlanId: plan.planId,
     conversationId,
     targetStage: 'triage',
     strategy: plan.strategy,
@@ -1508,7 +2001,7 @@ async function confirmRecovery(conversationId, { action, evidenceFingerprint, id
   let created = false;
   try {
     writeResult = await RecoveryOperation.updateOne(
-      { dedupeKey: plan.planId },
+      { dedupeKey },
       { $setOnInsert: operationRecord },
       { upsert: true, runValidators: true, setDefaultsOnInsert: true }
     );
@@ -1517,20 +2010,27 @@ async function confirmRecovery(conversationId, { action, evidenceFingerprint, id
     if (error?.code !== 11000) throw error;
   }
 
-  operation = await RecoveryOperation.findOne({ dedupeKey: plan.planId }).lean();
+  operation = await RecoveryOperation.findOne({ idempotencyKey: cleanIdempotencyKey }).lean();
   if (!operation) {
-    operation = await RecoveryOperation.findOne({ idempotencyKey: cleanIdempotencyKey }).lean();
+    operation = await RecoveryOperation.findOne({ activePlanId: plan.planId }).lean();
+  }
+  if (!operation) {
+    operation = await RecoveryOperation.findOne({ dedupeKey }).lean();
   }
   if (!operation) throw createServiceError('RECOVERY_CREATE_FAILED', 'The recovery operation could not be created.', 500);
   if (
     safeString(operation.conversationId, '') !== safeString(conversationId, '')
-    || safeString(operation.dedupeKey, '') !== plan.planId
+    || operationPlanId(operation) !== plan.planId
   ) {
     throw createServiceError('IDEMPOTENCY_KEY_CONFLICT', 'That idempotency key belongs to a different recovery plan.', 409);
   }
   if (created) {
     setImmediate(() => {
-      executeRecoveryOperation(operation.operationId).catch(() => {});
+      executeRecoveryOperation(operation.operationId)
+        .catch((error) => failOperation(operation.operationId, error, 'failed', {
+          allowedStatuses: ['confirmed', 'running', 'cancel-requested'],
+        }))
+        .catch(() => {});
     });
   }
   return { operation: serializeOperation(operation), created };
@@ -1541,6 +2041,17 @@ async function getOperation(conversationId, operationId) {
   const operation = await RecoveryOperation.findOne({ conversationId, operationId }).lean();
   if (!operation) throw createServiceError('RECOVERY_NOT_FOUND', 'Recovery operation not found.', 404);
   return serializeOperation(operation);
+}
+
+async function listConversationRecoveryHistory(conversationId) {
+  await markStaleRunningOperations();
+  const conversationExists = await Conversation.exists({ _id: conversationId });
+  if (!conversationExists) throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
+  const operations = await RecoveryOperation.find({ conversationId })
+    .sort({ createdAt: 1, attemptNumber: 1 })
+    .limit(100)
+    .lean();
+  return operations.map(serializeHistoryOperation);
 }
 
 async function acceptCandidate(conversationId, operationId, { candidateSha256, previousSha256 } = {}) {
@@ -1555,7 +2066,7 @@ async function acceptCandidate(conversationId, operationId, { candidateSha256, p
   const storedCandidateSha = safeString(operation.candidateResult?.comparison?.candidateSha256, '');
   const storedPreviousSha = safeString(operation.candidateResult?.comparison?.previousSha256, '');
 
-  if (operation.status === 'succeeded') {
+  if (operation.status === 'succeeded' || operation.status === 'succeeded-unverified') {
     if (operation.acceptedResult?.acceptedSha256 === cleanCandidateSha) {
       return { operation: serializeOperation(operation), idempotent: true };
     }
@@ -1627,7 +2138,10 @@ async function acceptCandidate(conversationId, operationId, { candidateSha256, p
   ).lean();
   if (!locked) {
     operation = await RecoveryOperation.findOne({ conversationId, operationId }).lean();
-    if (operation?.status === 'succeeded' && operation.acceptedResult?.acceptedSha256 === cleanCandidateSha) {
+    if (
+      (operation?.status === 'succeeded' || operation?.status === 'succeeded-unverified')
+      && operation.acceptedResult?.acceptedSha256 === cleanCandidateSha
+    ) {
       return { operation: serializeOperation(operation), idempotent: true };
     }
     throw createServiceError('RECOVERY_ALREADY_DECIDED', 'This recovery operation was already decided.', 409);
@@ -1673,7 +2187,7 @@ async function cancelOperation(conversationId, operationId) {
   if (!operation) throw createServiceError('RECOVERY_NOT_FOUND', 'Recovery operation not found.', 404);
   const registryEntry = inFlightOperations.get(operationId);
 
-  if (operation.status === 'succeeded') {
+  if (operation.status === 'succeeded' || operation.status === 'succeeded-unverified') {
     return { operation: serializeOperation(operation), alreadyCompleted: true };
   }
   if (operation.status === 'cancelled') {
@@ -1705,7 +2219,11 @@ async function cancelOperation(conversationId, operationId) {
     const cancelled = await markCancelled(operationId, 'Recovery was cancelled before the final conversation write.');
     if (!cancelled) {
       operation = await RecoveryOperation.findOne({ conversationId, operationId }).lean();
-      if (operation?.commitStartedAt || operation?.status === 'succeeded') {
+      if (
+        operation?.commitStartedAt
+        || operation?.status === 'succeeded'
+        || operation?.status === 'succeeded-unverified'
+      ) {
         return { operation: serializeOperation(operation), alreadyCompleted: true };
       }
       if (operation?.status === 'cancelled') {
@@ -1735,7 +2253,11 @@ async function cancelOperation(conversationId, operationId) {
       const latest = await RecoveryOperation.findOne({ conversationId, operationId })
         .select('status commitStartedAt')
         .lean();
-      if (latest?.commitStartedAt || latest?.status === 'succeeded') {
+      if (
+        latest?.commitStartedAt
+        || latest?.status === 'succeeded'
+        || latest?.status === 'succeeded-unverified'
+      ) {
         operation = await RecoveryOperation.findOne({ conversationId, operationId }).lean();
         return { operation: serializeOperation(operation), alreadyCompleted: true };
       }
@@ -1793,4 +2315,5 @@ module.exports = {
   confirmRecovery,
   getOperation,
   listActiveOperations,
+  listConversationRecoveryHistory,
 };

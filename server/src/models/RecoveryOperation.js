@@ -33,6 +33,9 @@ const recoveryOperationSchema = new mongoose.Schema({
   operationId: { type: String, required: true, unique: true },
   idempotencyKey: { type: String, required: true, unique: true },
   dedupeKey: { type: String, required: true, unique: true },
+  planId: { type: String, default: '' },
+  attemptNumber: { type: Number, default: 1, min: 1 },
+  activePlanId: { type: String },
   conversationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Conversation',
@@ -48,6 +51,7 @@ const recoveryOperationSchema = new mongoose.Schema({
       'running',
       'awaiting-acceptance',
       'succeeded',
+      'succeeded-unverified',
       'failed',
       'cancel-requested',
       'cancelled',
@@ -101,6 +105,8 @@ const recoveryOperationSchema = new mongoose.Schema({
   progress: { type: [progressEventSchema], default: [] },
   executorId: { type: String, default: '' },
   commitStartedAt: { type: Date, default: null },
+  conversationWriteApplied: { type: Boolean, default: false },
+  commitCompletedAt: { type: Date, default: null },
   heartbeatAt: { type: Date, default: null, index: true },
   startedAt: { type: Date, default: null },
   completedAt: { type: Date, default: null },
@@ -121,6 +127,8 @@ const recoveryOperationSchema = new mongoose.Schema({
 
 recoveryOperationSchema.index({ status: 1, updatedAt: -1 });
 recoveryOperationSchema.index({ conversationId: 1, createdAt: -1 });
+recoveryOperationSchema.index({ planId: 1, attemptNumber: -1 });
+recoveryOperationSchema.index({ activePlanId: 1 }, { unique: true, sparse: true });
 recoveryOperationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 module.exports = mongoose.model('RecoveryOperation', recoveryOperationSchema);

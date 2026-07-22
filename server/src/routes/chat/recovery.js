@@ -9,6 +9,7 @@ const {
   confirmRecovery,
   getOperation,
   listActiveOperations,
+  listConversationRecoveryHistory,
 } = require('../../services/evidence-recovery-service');
 
 const router = express.Router();
@@ -58,6 +59,15 @@ router.post('/:id/evidence/recovery', async (req, res) => {
     return res.status(result.created ? 202 : 200).json({ ok: true, ...result });
   } catch (error) {
     return sendRecoveryError(res, error, 'RECOVERY_CONFIRM_FAILED', 'Failed to confirm recovery.');
+  }
+});
+
+router.get('/:id/evidence/recovery/history', async (req, res) => {
+  try {
+    const operations = await listConversationRecoveryHistory(req.params.id);
+    return res.json({ ok: true, operations });
+  } catch (error) {
+    return sendRecoveryError(res, error, 'RECOVERY_HISTORY_FAILED', 'Failed to load recovery history.');
   }
 });
 

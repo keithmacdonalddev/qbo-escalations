@@ -172,6 +172,12 @@ const kbAgentContextSchema = new mongoose.Schema({
   lastBuiltAt: { type: Date, default: null },
 }, { _id: false });
 
+const recoveryReviewMarkerSchema = new mongoose.Schema({
+  recoveryOperationId: { type: String, required: true },
+  markedAt: { type: Date, required: true },
+  reason: { type: String, default: '' },
+}, { _id: false });
+
 const knowledgeCandidateSchema = new mongoose.Schema({
   escalationId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -252,6 +258,7 @@ const knowledgeCandidateSchema = new mongoose.Schema({
   kbAgent: { type: kbAgentContextSchema, default: () => ({}) },
   kbAgentMessages: { type: [kbAgentMessageSchema], default: [] },
   sourceSnapshot: { type: sourceSnapshotSchema, default: () => ({}) },
+  needsReviewAfterRecovery: { type: recoveryReviewMarkerSchema, default: null },
   generatedAt: { type: Date, default: null },
   publishedAt: { type: Date, default: null },
   publishedDocType: {

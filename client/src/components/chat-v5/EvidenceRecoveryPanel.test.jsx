@@ -80,6 +80,7 @@ function makeController(options, overrides = {}) {
     requestCancel: vi.fn(),
     acceptCandidate: vi.fn(),
     recoverLater: vi.fn(),
+    tryAgain: vi.fn(),
     ...overrides,
   };
 }
@@ -138,7 +139,7 @@ beforeEach(() => {
 });
 
 describe('EvidenceRecoveryPanel choices', () => {
-  it('shows the safest recommendation first and keeps alternate and technical details secondary', async () => {
+  it('renders one ordered grouped summary with no-cost recovery before provider calls and unknown-cost copy', async () => {
     const user = userEvent.setup();
     const safest = makeOption();
     const rerun = makeOption({
@@ -147,6 +148,11 @@ describe('EvidenceRecoveryPanel choices', () => {
       recommended: false,
       reason: 'Run triage again from the verified session information.',
       aiCallNeeded: true,
+      costEstimate: {
+        amountKnown: false,
+        amount: null,
+        message: 'A provider call is required, but the cost amount is unknown because no reliable estimate is available.',
+      },
       estimatedDuration: 'About 30–60 seconds.',
       cancellationBoundary: 'After provider handoff, cancellation is best effort and cost may still be incurred.',
       expectedWrites: ['Saves a newly validated triage result.'],
@@ -168,17 +174,15 @@ describe('EvidenceRecoveryPanel choices', () => {
 
     const panel = screen.getByRole('region', { name: 'Evidence recovery options' });
     expect(within(panel).getByText('Recommended')).toBeVisible();
+    const groupHeadings = within(panel).getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent);
+    expect(groupHeadings.indexOf('No-cost recoveries')).toBeLessThan(groupHeadings.indexOf('Provider-call recoveries'));
     expect(within(panel).getByRole('heading', { name: safest.reason })).toBeVisible();
     expect(within(panel).getByText('This does not call the AI again and will not add AI cost.')).toBeVisible();
-    expect(within(panel).getByText('Advanced options')).toBeVisible();
-    within(panel).getAllByText(rerun.reason).forEach((element) => expect(element).not.toBeVisible());
+    expect(within(panel).queryByText('Advanced options')).not.toBeInTheDocument();
+    expect(within(panel).getByRole('heading', { name: rerun.reason })).toBeVisible();
+    expect(within(panel).getByText(/cost amount is unknown/i)).toBeVisible();
     expect(within(panel).getByText('plan-repersist')).not.toBeVisible();
     expect(within(panel).getByText('repersist')).not.toBeVisible();
-
-    await user.click(within(panel).getByText('Advanced options'));
-
-    expect(within(panel).getByRole('heading', { name: rerun.reason })).toBeVisible();
-    expect(within(panel).getByText('One triage rerun can make up to three model requests and may add provider cost.')).toBeVisible();
     expect(within(panel).getByText(
       'Primary: openai · gpt-recovery-test; fallback: anthropic · claude-recovery-backup.',
     )).toBeVisible();
@@ -186,10 +190,10 @@ describe('EvidenceRecoveryPanel choices', () => {
     expect(within(panel).getByText(rerun.cancellationBoundary)).toBeVisible();
     expect(within(panel).getByText('plan-rerun')).not.toBeVisible();
 
-    const advanced = within(panel).getByText('Advanced options').closest('details');
-    await user.click(within(advanced).getByText('Technical details'));
-    expect(within(advanced).getByText('plan-rerun')).toBeVisible();
-    expect(within(advanced).getByText('rerun-stage')).toBeVisible();
+    const rerunSection = within(panel).getByRole('heading', { name: rerun.reason }).closest('section');
+    await user.click(within(rerunSection).getByText('Technical details'));
+    expect(within(rerunSection).getByText('plan-rerun')).toBeVisible();
+    expect(within(rerunSection).getByText('rerun-stage')).toBeVisible();
   });
 
   it('explains manual-review-only findings without offering a start action', () => {
@@ -248,6 +252,38 @@ describe('EvidenceRecoveryPanel choices', () => {
 });
 
 describe('EvidenceRecoveryPanel outcomes', () => {
+  it('uses neutral provider-call cancellation wording until durable handoff is reported', () => {
+    const option = makeOption({ strategy: 'rerun-stage', aiCallNeeded: true });
+    const baseController = makeController([option], {
+      selectedOption: option,
+      operation: {
+        operationId: 'operation-running',
+        attemptNumber: 2,
+        strategy: 'rerun-stage',
+        status: 'running',
+        progress: [],
+      },
+    });
+    const { rerender } = render(<EvidenceRecoveryPanel controller={baseController} />);
+
+    expect(screen.getByRole('button', {
+      name: 'Request cancel — if the AI call already started it may still complete and incur cost',
+    })).toBeVisible();
+    expect(screen.queryByText(/no cost incurred/i)).not.toBeInTheDocument();
+
+    rerender(<EvidenceRecoveryPanel controller={{
+      ...baseController,
+      operation: {
+        ...baseController.operation,
+        providerHandoffAt: '2026-07-22T12:00:01.000Z',
+      },
+    }} />);
+
+    expect(screen.getByRole('button', {
+      name: 'Request cancel — the AI call already started and may still complete and incur cost',
+    })).toBeVisible();
+  });
+
   it('shows cancellation as pending confirmation without falling back to recovery options', () => {
     const option = makeOption({ strategy: 'rerun-stage' });
     const controller = makeController([option], {
@@ -315,6 +351,42 @@ describe('EvidenceRecoveryPanel outcomes', () => {
     expect(within(result).getByText('What is now trustworthy')).toBeVisible();
     expect(within(result).getByText('Triage card')).toBeVisible();
     expect(within(result).getByText('Evidence complete')).toBeVisible();
+  });
+
+  it('renders succeeded-unverified as saved without retry or nothing-changed copy', async () => {
+    const user = userEvent.setup();
+    const option = makeOption();
+    const controller = makeController([option], {
+      selectedOption: option,
+      operation: {
+        operationId: 'operation-succeeded-unverified',
+        attemptNumber: 3,
+        strategy: 'repersist',
+        status: 'succeeded-unverified',
+        conversationWriteApplied: true,
+        knowledgeDraftNeedsReview: {
+          recoveryOperationId: 'operation-succeeded-unverified',
+          markedAt: '2026-07-22T12:00:02.000Z',
+        },
+        postRecoveryEvidence: {
+          status: 'incomplete',
+          confirmedTargetCodes: [],
+          remainingMissingCodes: ['TRIAGE_CARD'],
+        },
+      },
+    });
+
+    render(<EvidenceRecoveryPanel controller={controller} />);
+
+    const result = screen.getByRole('region', { name: 'Recovery saved; confirmation incomplete' });
+    expect(within(result).getByText(
+      'Recovery data was saved, but final confirmation could not be completed — check the evidence status.',
+    )).toBeVisible();
+    expect(within(result).getByText(/knowledge draft may need review/i)).toBeVisible();
+    expect(within(result).queryByText('No unreviewed replacement was applied.')).not.toBeInTheDocument();
+    expect(within(result).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    await user.click(within(result).getByText('Technical details'));
+    expect(within(result).getByText('3')).toBeVisible();
   });
 
   it.each([
