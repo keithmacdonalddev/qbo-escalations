@@ -21,6 +21,12 @@
       "ignoredModelIdPatterns": [
         "^claude-[1-3](?:\\.|-|$)",
         "^claude-(?:opus|sonnet)-4-[0-7](?:-|$)"
+      ],
+      "newModelVersionRules": [
+        { "line": "fable", "pattern": "^claude-fable-(\\d+)(?:-(\\d+))?" },
+        { "line": "opus", "pattern": "^claude-opus-(\\d+)(?:-(\\d+))?" },
+        { "line": "sonnet", "pattern": "^claude-sonnet-(\\d+)(?:-(\\d+))?" },
+        { "line": "haiku", "pattern": "^claude-haiku-(\\d+)(?:-(\\d+))?" }
       ]
     },
     "codex": {
@@ -45,6 +51,10 @@
         "^gpt-5\\.[0-3](?:-|$)",
         "^o[1-4](?:-|$)",
         "^chatgpt-[1-4](?:\\.|-|$)"
+      ],
+      "newModelVersionRules": [
+        { "line": "gpt", "pattern": "^gpt-(\\d+(?:\\.\\d+)?)" },
+        { "line": "o-series", "pattern": "^o(\\d+(?:\\.\\d+)?)", "catalogVersion": "4" }
       ]
     },
     "llm-gateway": {
@@ -67,6 +77,11 @@
         "^gemini-3-(?:flash|pro)-preview$",
         "^gemini-3\\.1-flash-lite(?:-preview)?$",
         "^gemini-(?:flash|flash-lite|pro)-latest$"
+      ],
+      "newModelVersionRules": [
+        { "line": "flash-lite", "pattern": "^gemini-(\\d+(?:\\.\\d+)?)-flash-lite(?:-|$)" },
+        { "line": "flash", "pattern": "^gemini-(\\d+(?:\\.\\d+)?)-flash(?:-|$)" },
+        { "line": "pro", "pattern": "^gemini-(\\d+(?:\\.\\d+)?)-pro(?:-|$)" }
       ]
     },
     "kimi": {
@@ -80,6 +95,10 @@
       "ignoredModelIdPatterns": [
         "^kimi-k2\\.[0-6](?:-|$)",
         "^moonshot-"
+      ],
+      "newModelVersionRules": [
+        { "line": "code", "pattern": "^kimi-k(\\d+(?:\\.\\d+)?)-code(?:-|$)" },
+        { "line": "general", "pattern": "^kimi-k(\\d+(?:\\.\\d+)?)(?:$|-(?!code))" }
       ]
     },
     "lm-studio": {

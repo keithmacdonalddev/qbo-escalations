@@ -210,9 +210,7 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
         <div className="agent-settings-header-text">
           <h2 className="agent-settings-title">AI Safety &amp; Context</h2>
           <p className="agent-settings-subtitle">
-            Cross-cutting cost, context, memory, and debug controls for the AI agents.
-            Each agent&apos;s provider and model are configured on its profile in the
-            Agents page.
+            Global cost, context, memory, and diagnostic limits.
           </p>
         </div>
       </motion.div>
@@ -464,39 +462,40 @@ export default function AiAssistantSettingsPanel({ aiProps, liveRegionRef }) {
 
       </motion.div>
 
-      {/* ── Dynamic Island Save Bar — always rendered, morphs dot → pill → checkmark ── */}
-      <div className="agent-savebar-wrap">
-        <div className={[
-          'agent-savebar',
-          isDirty ? 'agent-savebar--dirty' : '',
-          saveState === 'success' && !isDirty ? 'agent-savebar--saved' : '',
-        ].filter(Boolean).join(' ')}>
-          <div className="agent-savebar-content">
-            <span className="agent-savebar-dot" />
-            <span className="agent-savebar-label">
-              {saveState === 'success' && !isDirty ? '✓ Saved' : saveState === 'saving' ? 'Saving...' : 'Unsaved changes'}
-            </span>
-            <div className="agent-savebar-actions">
-              <button
-                type="button"
-                className="agent-savebar-btn agent-savebar-btn--discard"
-                onClick={handleDiscard}
-                disabled={saveState === 'saving'}
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                className="agent-savebar-btn agent-savebar-btn--save"
-                onClick={handleSave}
-                disabled={saveState === 'saving'}
-              >
-                {saveState === 'saving' ? 'Saving...' : 'Save Changes'}
-              </button>
+      {/* Save actions appear only when they carry information. */}
+      {(isDirty || saveState === 'success') && (
+        <div className="agent-savebar-wrap">
+          <div className={[
+            'agent-savebar',
+            isDirty ? 'agent-savebar--dirty' : '',
+            saveState === 'success' && !isDirty ? 'agent-savebar--saved' : '',
+          ].filter(Boolean).join(' ')}>
+            <div className="agent-savebar-content">
+              <span className="agent-savebar-label">
+                {saveState === 'success' && !isDirty ? '✓ Saved' : saveState === 'saving' ? 'Saving...' : 'Unsaved changes'}
+              </span>
+              <div className="agent-savebar-actions">
+                <button
+                  type="button"
+                  className="agent-savebar-btn agent-savebar-btn--discard"
+                  onClick={handleDiscard}
+                  disabled={saveState === 'saving'}
+                >
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  className="agent-savebar-btn agent-savebar-btn--save"
+                  onClick={handleSave}
+                  disabled={saveState === 'saving'}
+                >
+                  {saveState === 'saving' ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

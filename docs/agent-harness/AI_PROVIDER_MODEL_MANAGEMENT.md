@@ -38,9 +38,11 @@ Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/ge
 `server/data/ai-management.json` is local operational state and is intentionally ignored by Git. The curated shared files are reviewed source code and travel with the application.
 If an existing policy file is malformed, server startup fails with its exact path instead of silently re-enabling providers or models. A policy change also becomes live only after the file write succeeds.
 
-## Dynamic model discovery
+## Dynamic new-model discovery
 
-“Check provider lists” asks each configured provider for the models visible to the current account. It does not treat a provider announcement or a returned model ID as proof that the app can use that model correctly.
+“Check for new models” asks each configured provider for the models visible to the current account. It surfaces only models that can be proven newer than the reviewed application catalog. It does not treat a provider announcement or a returned model ID as proof that the app can use that model correctly.
+
+The global new-model check covers maintained cloud-provider catalogs. Operator-managed gateways and LM Studio use a separate **Refresh inventory** action inside their provider detail because arbitrary local IDs cannot be honestly ranked as newer or older than a vendor release line. Those unlisted models remain disabled until real harness evidence is recorded.
 
 | Provider | Discovery source | Notes |
 | --- | --- | --- |
@@ -54,7 +56,7 @@ If an existing policy file is malformed, server startup fails with its exact pat
 
 Official endpoint references: [OpenAI Models API](https://developers.openai.com/api/reference/resources/models/methods/list), [Anthropic Models API](https://platform.claude.com/docs/en/api/models/list), [Gemini models.list](https://ai.google.dev/api/models), [Kimi List Models](https://platform.kimi.ai/docs/api/list-models), and [LM Studio List Models](https://lmstudio.ai/docs/developer/openai-compat/models).
 
-Unknown discovered models enter the catalog as **Needs review**, disabled. They do not appear as selectable live models until the release procedure below is complete.
+Newer discovered models enter the catalog as **Needs review**, disabled. Older generations, same-generation aliases, and ambiguous IDs are not shown. They do not appear as selectable live models until the release procedure below is complete.
 
 A model-list response proves only that the account can see an ID. It often does not fully describe replacement status, deprecated request fields, reasoning requirements, fixed sampling parameters, pricing, or whether similarly named products use different credentials and base URLs. Every discovery therefore still requires the official-document and request-builder review below.
 
@@ -65,11 +67,11 @@ The app records the two kinds of evidence separately:
 
 A complete successful response that unexpectedly omits a reviewed model creates a warning; it does not silently remove or disable that model after one account-specific check. An empty, malformed, repeated-cursor, over-pagination, or entirely unusable success response fails closed and preserves the previous successful evidence. A failed attempt updates only the attempt time, never the last-successful time.
 
-The maintained review also records provider-specific ignore patterns for model generations and aliases already classified as superseded. Those known older IDs and non-agent surfaces do not flood **Needs review** after every check. A future model generation that does not match a reviewed ignore rule still appears as a quarantined candidate, so filtering old results does not hide genuinely new releases.
+The maintained review records both provider-specific ignore patterns and explicit version rules for each model line. A returned ID is new only when its parsed generation is higher than the newest matching catalog generation. If no version rule matches, a cloud model must carry a provider creation date later than the catalog review date; otherwise it is treated as ambiguous and hidden. This deliberately prefers missing an uncertain candidate over presenting an old model as new. Raw counts remain available in server evidence, while the Settings result reports only the number of newer candidates and any reviewed IDs missing from the account response.
 
 ## Required new-model release procedure
 
-1. **Discover availability.** Run “Check provider lists” for the provider. Record whether the current account can see the model and whether any reviewed IDs disappeared from the response.
+1. **Discover availability.** Run “Check for new models” for the provider. The newness floor excludes older and same-generation IDs; record whether any reviewed IDs disappeared from the response.
 2. **Confirm official support.** Read current provider documentation. Confirm the exact model ID, release channel, API surface, image input, reasoning controls, context window, output limit, pricing, and deprecation status.
 3. **Update request compatibility.** If the model needs a different request body, effort value, thinking mode, endpoint, or response parser, update the provider adapter and focused request-builder tests before approval.
 4. **Run the deterministic harness.** Test representative real fixtures for every role being considered. At minimum capture task accuracy, mandatory output contract, latency, cost, fallback behavior, provider package evidence, and any operator correction.
@@ -82,7 +84,7 @@ The maintained review also records provider-specific ignore patterns for model g
 
 Explicitly disabled providers and models are always blocked by the server.
 
-The **Approved models only** switch controls old custom model IDs that predate AI Management:
+The **Only listed models** switch controls old custom model IDs that predate AI Management:
 
 - Off (initial migration mode): an unknown custom ID may continue to run, but it is not offered by pickers.
 - On (strict mode): every live model ID must be approved and enabled in AI Management.
@@ -116,7 +118,7 @@ The reveal control shows only the value currently being typed. It cannot reveal 
 ## Verification checklist for catalog changes
 
 - Shared provider and model catalogs parse successfully.
-- AI Management route tests cover list, provider toggle, model approval, cloud release enforcement, key redaction, discovery pagination, irrelevant-surface filtering, missing-model warnings, and fail-closed discovery behavior.
+- AI Management route tests cover list, provider toggle, model approval, cloud release enforcement, key redaction, discovery pagination, newer-than-catalog filtering, irrelevant-surface filtering, missing-model warnings, and fail-closed discovery behavior.
 - Provider catalog tests cover default model and request compatibility.
 - Agent runtime saves reject disabled providers/models.
 - Chat, Copilot, Workspace, image parser, and Agent profile pickers show the same approved inventory.

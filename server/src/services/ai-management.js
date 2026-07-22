@@ -129,6 +129,71 @@ function isReviewedDiscoveryIgnore(providerId, modelId) {
   });
 }
 
+function parseVersionParts(value) {
+  return String(value || '')
+    .split(/[.-]/)
+    .filter(Boolean)
+    .filter((part) => !/^20\d{6}$/.test(part))
+    .map((part) => Number(part))
+    .filter(Number.isFinite);
+}
+
+function compareVersionParts(left, right) {
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = (left[index] || 0) - (right[index] || 0);
+    if (difference !== 0) return difference > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+function extractRuleVersion(modelId, pattern) {
+  try {
+    const match = new RegExp(pattern, 'i').exec(modelId);
+    if (!match) return null;
+    const parts = match.slice(1).flatMap(parseVersionParts);
+    return parts.length > 0 ? parts : null;
+  } catch {
+    return null;
+  }
+}
+
+function classifyDiscoveryModel(providerId, model = {}) {
+  const modelId = String(model?.id || '').trim();
+  if (!modelId) return 'not-new';
+  if (providerModelDefaults(providerId).some((entry) => entry.id === modelId)) return 'reviewed';
+  if (isReviewedDiscoveryIgnore(providerId, modelId)) return 'not-new';
+
+  const review = buildCatalogReview(providerId);
+  if (!review.requiresMaintainedCatalogRelease) return 'new';
+
+  const rules = modelCatalog.catalogReviews?.[providerId]?.newModelVersionRules;
+  if (Array.isArray(rules)) {
+    for (const rule of rules) {
+      const candidateVersion = extractRuleVersion(modelId, rule?.pattern);
+      if (!candidateVersion) continue;
+      const catalogVersions = providerModelDefaults(providerId)
+        .map((catalogModel) => extractRuleVersion(catalogModel.id, rule.pattern))
+        .filter(Boolean);
+      const configuredVersion = parseVersionParts(rule?.catalogVersion);
+      if (configuredVersion.length > 0) catalogVersions.push(configuredVersion);
+      if (catalogVersions.length === 0) return 'not-new';
+      const newestCatalogVersion = catalogVersions.reduce((newest, version) => (
+        compareVersionParts(version, newest) > 0 ? version : newest
+      ));
+      return compareVersionParts(candidateVersion, newestCatalogVersion) > 0 ? 'new' : 'not-new';
+    }
+  }
+
+  const createdAt = Date.parse(String(model?.createdAt || ''));
+  const reviewDayEnd = review.reviewedAt
+    ? Date.parse(`${review.reviewedAt}T23:59:59.999Z`)
+    : Number.NaN;
+  return Number.isFinite(createdAt) && Number.isFinite(reviewDayEnd) && createdAt > reviewDayEnd
+    ? 'new'
+    : 'not-new';
+}
+
 function reconcileModelPolicy(baseModel, modelState = {}) {
   const isCurated = Boolean(baseModel?.id);
   const source = String(modelState.source || '');
@@ -189,14 +254,33 @@ function mergeModel(providerId, baseModel, modelState = {}) {
   };
 }
 
+function sanitizeDiscoverySummary(providerId, savedModels, configuredSummary) {
+  if (!isPlainObject(configuredSummary)) return null;
+  const candidateModelIds = Array.isArray(configuredSummary.candidateModelIds)
+    ? configuredSummary.candidateModelIds.filter((modelId) => (
+      classifyDiscoveryModel(providerId, { ...(savedModels[modelId] || {}), id: modelId }) === 'new'
+    ))
+    : [];
+  const removedCandidates = Math.max(0, (Number(configuredSummary.candidates) || 0) - candidateModelIds.length);
+  return {
+    ...configuredSummary,
+    acceptedCount: (Number(configuredSummary.reviewedVisible) || 0) + candidateModelIds.length,
+    ignoredCount: (Number(configuredSummary.ignoredCount) || 0) + removedCandidates,
+    newModelsFound: candidateModelIds.length,
+    candidates: candidateModelIds.length,
+    candidateModelIds,
+  };
+}
+
 function buildProviderSnapshot(providerId) {
   const meta = PROVIDER_META[providerId] || {};
   const providerState = isPlainObject(state.providers[providerId]) ? state.providers[providerId] : {};
   const savedModels = isPlainObject(providerState.models) ? providerState.models : {};
   const catalogReview = buildCatalogReview(providerId);
+  const discoverySummary = sanitizeDiscoverySummary(providerId, savedModels, providerState.discoverySummary);
   const missingReviewedModelIds = new Set(
-    Array.isArray(providerState.discoverySummary?.missingReviewedModelIds)
-      ? providerState.discoverySummary.missingReviewedModelIds
+    Array.isArray(discoverySummary?.missingReviewedModelIds)
+      ? discoverySummary.missingReviewedModelIds
       : []
   );
   const models = [];
@@ -213,7 +297,7 @@ function buildProviderSnapshot(providerId) {
     if (seen.has(modelId)) continue;
     if (modelState?.source === 'provider-discovery'
       && !String(modelState.validationEvidence || '').trim()
-      && isReviewedDiscoveryIgnore(providerId, modelId)) continue;
+      && classifyDiscoveryModel(providerId, { ...modelState, id: modelId }) !== 'new') continue;
     models.push(mergeModel(providerId, null, { ...modelState, id: modelId }));
   }
 
@@ -224,6 +308,15 @@ function buildProviderSnapshot(providerId) {
     return String(left.label || left.id).localeCompare(String(right.label || right.id));
   });
 
+  let discoveryStatus = providerState.discoveryStatus || 'not-checked';
+  if (discoverySummary && !['failed', 'manual', 'not-checked'].includes(discoveryStatus)) {
+    discoveryStatus = discoverySummary.missingReviewed > 0
+      ? 'attention'
+      : discoverySummary.candidates > 0
+        ? 'review-needed'
+        : 'verified';
+  }
+
   return {
     id: providerId,
     label: meta.label || providerId,
@@ -233,12 +326,12 @@ function buildProviderSnapshot(providerId) {
     defaultModel: meta.model || '',
     enabled: providerState.enabled !== false,
     discoveryMode: modelCatalog.providers?.[providerId]?.discovery || 'manual',
-    discoveryStatus: providerState.discoveryStatus || 'not-checked',
+    discoveryStatus,
     lastCheckedAt: providerState.lastCheckedAt || '',
     lastAttemptedAt: providerState.lastAttemptedAt || providerState.lastCheckedAt || '',
     lastSuccessfulCheckAt: providerState.lastSuccessfulCheckAt || providerState.lastCheckedAt || '',
     discoveryError: providerState.discoveryError || '',
-    discoverySummary: isPlainObject(providerState.discoverySummary) ? providerState.discoverySummary : null,
+    discoverySummary,
     catalogReview,
     requiresMaintainedCatalogRelease: catalogReview.requiresMaintainedCatalogRelease,
     models,
@@ -448,6 +541,7 @@ function normalizeKimiModels(data) {
     .map((model) => ({
       id: model.id,
       label: model.id,
+      createdAt: Number.isFinite(model.created) ? new Date(model.created * 1000).toISOString() : '',
       owner: model.owned_by || '',
       contextWindowTokens: Number.isFinite(model.context_length) ? model.context_length : null,
       supportsImageInput: typeof model.supports_image_in === 'boolean' ? model.supports_image_in : null,
@@ -489,9 +583,16 @@ function finalizeDiscoveryResult(providerId, rawModels, normalizedModels, source
     );
   }
 
-  const reviewFilteredModels = normalizedModels.filter(
-    (model) => !isReviewedDiscoveryIgnore(providerId, String(model?.id || '').trim())
-  );
+  if (!Array.isArray(normalizedModels) || normalizedModels.length === 0) {
+    throw createDiscoveryError(
+      'DISCOVERY_RESPONSE_UNUSABLE',
+      `${providerId} returned models, but none matched this application's text-and-agent API surface. The previous successful result was preserved.`
+    );
+  }
+
+  const reviewFilteredModels = normalizedModels.filter((model) => (
+    classifyDiscoveryModel(providerId, model) !== 'not-new'
+  ));
   const uniqueModels = [];
   const seenIds = new Set();
   let duplicateCount = 0;
@@ -504,13 +605,6 @@ function finalizeDiscoveryResult(providerId, rawModels, normalizedModels, source
     }
     seenIds.add(modelId);
     uniqueModels.push({ ...model, id: modelId });
-  }
-
-  if (uniqueModels.length === 0) {
-    throw createDiscoveryError(
-      'DISCOVERY_RESPONSE_UNUSABLE',
-      `${providerId} returned models, but none matched this application's text-and-agent API surface. The previous successful result was preserved.`
-    );
   }
 
   return {
@@ -688,7 +782,7 @@ function mergeDiscoveryResult(providerId, result) {
   for (const [modelId, currentModel] of Object.entries(models)) {
     if (currentModel?.source === 'provider-discovery'
       && !String(currentModel.validationEvidence || '').trim()
-      && isReviewedDiscoveryIgnore(providerId, modelId)) {
+      && classifyDiscoveryModel(providerId, { ...currentModel, id: modelId }) !== 'new') {
       delete models[modelId];
       continue;
     }
@@ -742,6 +836,7 @@ function mergeDiscoveryResult(providerId, result) {
     ignoredCount: Number(result.ignoredCount) || 0,
     duplicateCount: Number(result.duplicateCount) || 0,
     reviewedVisible: reviewedVisibleModelIds.length,
+    newModelsFound: candidateModelIds.length,
     candidates: candidateModelIds.length,
     candidateModelIds,
     missingReviewed: missingReviewedModelIds.length,
@@ -764,7 +859,7 @@ function mergeDiscoveryResult(providerId, result) {
     providerId,
     ok: true,
     status: discoveryStatus,
-    found: discoveredIds.size,
+    found: candidateModelIds.length,
     ...discoverySummary,
   };
 }
@@ -907,6 +1002,7 @@ module.exports = {
 };
 
 module.exports._internal = {
+  classifyDiscoveryModel,
   isReviewedDiscoveryIgnore,
   mergeModel,
   reconcileModelPolicy,

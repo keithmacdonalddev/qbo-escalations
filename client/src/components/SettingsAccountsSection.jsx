@@ -30,13 +30,12 @@ export default function SettingsAccountsSection({
 }) {
   return (
     <div className="settings-panel">
-      <div className="settings-panel-header">
-        <h2 className="settings-panel-title">Connected Accounts</h2>
-      </div>
-      <p className="settings-section-desc">
-        Manage external service connections. Connected accounts enable Gmail inbox access,
-        email composition, and Google Calendar integration.
-      </p>
+      <header className="settings-v2-heading">
+        <div>
+          <h2>Connected Accounts</h2>
+          <p>Google access and default inbox or calendar.</p>
+        </div>
+      </header>
 
       <div className="settings-accounts-card">
         <div className="settings-accounts-card-header">
@@ -277,8 +276,7 @@ export default function SettingsAccountsSection({
           <line x1="12" y1="8" x2="12.01" y2="8" />
         </svg>
         <span>
-          Your credentials are stored locally in the database and never shared.
-          Disconnecting revokes the OAuth tokens with Google. You can reconnect at any time.
+          Credentials stay local. Disconnecting revokes Google access.
         </span>
       </div>
     </div>

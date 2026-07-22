@@ -39,18 +39,24 @@ function statusLabel(model) {
 
 function discoverySummaryText(provider) {
   const summary = provider?.discoverySummary;
+  const isOperatorManaged = provider?.requiresMaintainedCatalogRelease === false;
   if (!summary && provider?.lastSuccessfulCheckAt) {
-    return 'A prior successful check exists, but it predates detailed evidence counts. Run Check now to replace it with auditable results.';
+    return 'A prior check predates the new-only filter. Check again to replace it.';
   }
-  if (!summary) return 'No successful account model-list check has been recorded yet.';
-  const parts = [
-    `${summary.acceptedCount || 0} usable IDs returned`,
-    `${summary.reviewedVisible || 0} match the reviewed catalog`,
-  ];
-  if (summary.candidates) parts.push(`${summary.candidates} need maintained release review`);
-  if (summary.ignoredCount) parts.push(`${summary.ignoredCount} non-agent entries ignored`);
-  if (summary.missingReviewed) parts.push(`${summary.missingReviewed} reviewed IDs not returned`);
-  return `${parts.join(' · ')}. This proves account visibility only, not request compatibility or quality.`;
+  if (!summary) return isOperatorManaged
+    ? 'Not checked yet. Refresh to compare this user-managed inventory with its local catalog.'
+    : 'Not checked yet. Only models newer than the reviewed catalog will appear.';
+  const newCount = summary.newModelsFound ?? summary.candidates ?? 0;
+  if (isOperatorManaged) {
+    return newCount === 0
+      ? 'No unlisted models found in this user-managed inventory.'
+      : `${newCount} unlisted model${newCount === 1 ? '' : 's'} found. Review with the harness before approval.`;
+  }
+  const parts = [newCount === 0
+    ? 'No newer models found'
+    : `${newCount} new model${newCount === 1 ? '' : 's'} found`];
+  if (summary.missingReviewed) parts.push(`${summary.missingReviewed} listed model${summary.missingReviewed === 1 ? '' : 's'} not returned for this account`);
+  return `${parts.join(' · ')}. Older and same-generation IDs stay hidden.`;
 }
 
 function catalogReviewText(review) {
@@ -79,6 +85,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
     || null;
   const refreshableProviderIds = useMemo(() => providers
     .filter((provider) => provider.discoveryMode === 'api')
+    .filter((provider) => provider.requiresMaintainedCatalogRelease)
     .filter((provider) => provider.id === 'lm-studio' || keys[provider.id]?.configured)
     .map((provider) => provider.id), [providers, keys]);
 
@@ -121,10 +128,11 @@ export default function AiManagementSettings({ onOpenAgents }) {
     const messages = succeeded.map((entry) => {
       const provider = providers.find((candidate) => candidate.id === entry.providerId);
       const label = provider?.shortLabel || entry.providerId;
-      const details = [`${entry.found || 0} usable IDs`];
-      if (entry.candidates) details.push(`${entry.candidates} need review`);
+      const newCount = entry.newModelsFound ?? entry.candidates ?? entry.found ?? 0;
+      const details = [newCount === 0
+        ? 'no newer models found'
+        : `${newCount} new model${newCount === 1 ? '' : 's'} found`];
       if (entry.missingReviewed) details.push(`${entry.missingReviewed} reviewed IDs not returned`);
-      if (entry.ignoredCount) details.push(`${entry.ignoredCount} ignored`);
       return `${label}: ${details.join(', ')}`;
     });
     if (failed.length > 0) {
@@ -264,13 +272,8 @@ export default function AiManagementSettings({ onOpenAgents }) {
     <div className="settings-v2-panel ai-management-panel">
       <header className="settings-v2-heading">
         <div>
-          <span className="settings-v2-eyebrow">System source of truth</span>
           <h2>AI Management</h2>
-          <p>
-            Control which providers and models the application is allowed to use. Agent profiles still own each agent&apos;s
-            primary and fallback choices; this reviewed catalog governs what those profiles may choose. Provider-list checks
-            can find candidates, but cannot approve them or claim that their request contract is compatible.
-          </p>
+          <p>Providers, keys, and models available to every agent. Agent profiles still own their assignments.</p>
         </div>
         <button
           type="button"
@@ -278,39 +281,35 @@ export default function AiManagementSettings({ onOpenAgents }) {
           disabled={pending.startsWith('refresh:') || refreshableProviderIds.length === 0}
           onClick={() => refreshModels(refreshableProviderIds)}
         >
-          {pending.startsWith('refresh:') ? 'Checking…' : 'Check provider lists'}
+          {pending.startsWith('refresh:') ? 'Checking…' : 'Check for new models'}
         </button>
       </header>
 
-      <div className="ai-management-summary" aria-label="AI catalog summary">
-        <div><strong>{catalog?.summary?.enabledProviders || 0}</strong><span>enabled providers</span></div>
-        <div><strong>{catalog?.summary?.approvedModels || 0}</strong><span>available models</span></div>
-        <div className={catalog?.summary?.candidates ? 'needs-attention' : ''}>
-          <strong>{catalog?.summary?.candidates || 0}</strong><span>models need review</span>
+      <div className="ai-management-commandbar">
+        <div className="ai-management-summary" aria-label="AI catalog summary">
+          <div><strong>{catalog?.summary?.enabledProviders || 0}</strong><span>providers on</span></div>
+          <div><strong>{catalog?.summary?.approvedModels || 0}</strong><span>models available</span></div>
+          <div className={catalog?.summary?.candidates ? 'needs-attention' : ''}>
+            <strong>{catalog?.summary?.candidates || 0}</strong><span>needs review</span>
+          </div>
+          <div className={(catalog?.summary?.discoveryWarnings || catalog?.summary?.overdueCatalogReviews) ? 'needs-attention' : ''}>
+            <strong>{(catalog?.summary?.discoveryWarnings || 0) + (catalog?.summary?.overdueCatalogReviews || 0)}</strong><span>warnings</span>
+          </div>
         </div>
-        <div className={(catalog?.summary?.discoveryWarnings || catalog?.summary?.overdueCatalogReviews) ? 'needs-attention' : ''}>
-          <strong>{(catalog?.summary?.discoveryWarnings || 0) + (catalog?.summary?.overdueCatalogReviews || 0)}</strong><span>trust warnings</span>
-        </div>
+        <section className="ai-management-policy-card" title="When on, the server blocks custom model IDs that are not in the reviewed catalog. Disabled providers and models are always blocked.">
+          <div><strong>Only listed models</strong><p>Block custom model IDs</p></div>
+          <label className="settings-v2-switch">
+            <input
+              type="checkbox"
+              checked={catalog?.enforceApprovedModels === true}
+              disabled={pending === 'strict-policy'}
+              onChange={(event) => toggleStrictPolicy(event.target.checked)}
+              aria-label="Only allow models in the reviewed catalog"
+            />
+            <span aria-hidden="true" />
+          </label>
+        </section>
       </div>
-
-      <section className="ai-management-policy-card">
-        <div>
-          <strong>Approved models only</strong>
-          <p>
-            When on, the server also blocks old custom model IDs that are not in this catalog. Leave it off while you review
-            existing agent profiles; explicitly disabled providers and models are always blocked.
-          </p>
-        </div>
-        <label className="settings-v2-switch">
-          <input
-            type="checkbox"
-            checked={catalog?.enforceApprovedModels === true}
-            disabled={pending === 'strict-policy'}
-            onChange={(event) => toggleStrictPolicy(event.target.checked)}
-          />
-          <span aria-hidden="true" />
-        </label>
-      </section>
 
       {actionMessage && <div className="settings-v2-inline-message" role="status">{actionMessage}</div>}
 
@@ -359,7 +358,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
             {selectedProvider.discoveryMode === 'api' ? (
               <div className="ai-discovery-row">
                 <div>
-                  <strong>Account model-list check</strong>
+                  <strong>{selectedProvider.requiresMaintainedCatalogRelease ? 'New-model check' : 'Managed inventory check'}</strong>
                   <span>
                     {selectedProvider.discoveryError
                       ? `Latest attempt ${formatDate(selectedProvider.lastAttemptedAt)} failed: ${selectedProvider.discoveryError} Previous successful evidence is preserved.`
@@ -383,7 +382,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
                     || (selectedProvider.id !== 'lm-studio' && !keys[selectedProvider.id]?.configured)}
                   onClick={() => refreshModels([selectedProvider.id])}
                 >
-                  Check now
+                  {selectedProvider.requiresMaintainedCatalogRelease ? 'Check now' : 'Refresh inventory'}
                 </button>
               </div>
             ) : (
@@ -529,7 +528,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
           {onOpenAgents && <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenAgents}>Open Agent profiles</button>}
         </div>
         <ol>
-          <li><strong>Discover.</strong> Check every provider page. Unknown IDs enter “Needs review”; missing reviewed IDs become warnings.</li>
+          <li><strong>Discover.</strong> Check provider lists. Only IDs proven newer than the reviewed catalog enter “Needs review.”</li>
           <li><strong>Classify.</strong> Recheck official release, deprecation, pricing, capability, and exact request documentation.</li>
           <li><strong>Update and validate.</strong> Change request builders and focused tests, then run the deterministic harness on real fixtures.</li>
           <li><strong>Release together.</strong> Update the reviewed catalog, defaults, tests, and documentation in one maintained change.</li>

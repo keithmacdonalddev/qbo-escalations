@@ -20,6 +20,7 @@ const {
   updateSettings,
 } = require('../src/services/ai-management');
 const {
+  classifyDiscoveryModel,
   isReviewedDiscoveryIgnore,
   mergeModel,
   reconcileModelPolicy,
@@ -118,12 +119,19 @@ test('catalog refresh promotes newly curated discoveries and demotes superseded 
   }), {});
 });
 
-test('reviewed discovery filters suppress known obsolete and non-agent surfaces without hiding future candidates', () => {
+test('reviewed discovery filters surface only models newer than the catalog', () => {
   assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-3.1-flash-tts-preview'), true);
   assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-2.5-flash'), true);
   assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-3.5-flash'), false);
-  assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-3.7-flash'), false);
   assert.equal(isReviewedDiscoveryIgnore('openai', 'text-embedding-5-large'), true);
+  assert.equal(classifyDiscoveryModel('gemini', { id: 'gemini-3.7-flash' }), 'new');
+  assert.equal(classifyDiscoveryModel('gemini', { id: 'gemini-3.1-pro-preview-customtools' }), 'not-new');
+  assert.equal(classifyDiscoveryModel('openai', { id: 'gpt-5.7-terra' }), 'new');
+  assert.equal(classifyDiscoveryModel('openai', { id: 'gpt-5.6-experimental' }), 'not-new');
+  assert.equal(classifyDiscoveryModel('openai', { id: 'new-family-agent', createdAt: '2026-07-22T00:00:00.000Z' }), 'new');
+  assert.equal(classifyDiscoveryModel('openai', { id: 'old-family-agent', createdAt: '2026-07-20T00:00:00.000Z' }), 'not-new');
+  assert.equal(classifyDiscoveryModel('anthropic', { id: 'claude-sonnet-5-20260730' }), 'not-new');
+  assert.equal(classifyDiscoveryModel('anthropic', { id: 'claude-sonnet-6' }), 'new');
 });
 
 test('provider and approved-model switches are enforced at the server boundary', () => {
@@ -212,7 +220,9 @@ test('provider discovery adds new model IDs as disabled review candidates', asyn
       json: async () => ({
         data: [
           { id: 'gpt-5.6-terra', created: 1780000000, owned_by: 'openai' },
-          { id: 'gpt-future-candidate', created: 1780001000, owned_by: 'openai' },
+          { id: 'gpt-5.7-terra', created: 1780001000, owned_by: 'openai' },
+          { id: 'gpt-5.6-experimental', created: 1780001500, owned_by: 'openai' },
+          { id: 'gpt-4.1', created: 1740000000, owned_by: 'openai' },
           { id: 'text-embedding-future', created: 1780002000, owned_by: 'openai' },
         ],
       }),
@@ -222,12 +232,15 @@ test('provider discovery adds new model IDs as disabled review candidates', asyn
   try {
     const result = await refreshProviderModels(['openai']);
     const provider = result.snapshot.providers.find((entry) => entry.id === 'openai');
-    const candidate = provider.models.find((model) => model.id === 'gpt-future-candidate');
+    const candidate = provider.models.find((model) => model.id === 'gpt-5.7-terra');
 
-    assert.deepEqual(result.results.map((entry) => [entry.providerId, entry.ok, entry.found]), [['openai', true, 2]]);
+    assert.deepEqual(result.results.map((entry) => [entry.providerId, entry.ok, entry.found]), [['openai', true, 1]]);
+    assert.equal(result.results[0].newModelsFound, 1);
     assert.equal(candidate.approval, 'candidate');
     assert.equal(candidate.enabled, false);
     assert.equal(candidate.validationStatus, 'not-run');
+    assert.equal(provider.models.some((model) => model.id === 'gpt-5.6-experimental'), false);
+    assert.equal(provider.models.some((model) => model.id === 'gpt-4.1'), false);
     assert.equal(provider.models.some((model) => model.id === 'text-embedding-future'), false);
   } finally {
     global.fetch = originalFetch;
@@ -277,9 +290,15 @@ test('Gemini discovery follows pagination and ignores non-agent model surfaces',
       json: async () => ({
         models: [
           {
-            name: 'models/gemini-future-agent',
-            baseModelId: 'gemini-future-agent',
-            displayName: 'Gemini Future Agent',
+            name: 'models/gemini-3.7-flash',
+            baseModelId: 'gemini-3.7-flash',
+            displayName: 'Gemini 3.7 Flash',
+            supportedGenerationMethods: ['generateContent'],
+          },
+          {
+            name: 'models/gemini-3.1-pro-preview-customtools',
+            baseModelId: 'gemini-3.1-pro-preview-customtools',
+            displayName: 'Gemini 3.1 Pro Preview Custom Tools',
             supportedGenerationMethods: ['generateContent'],
           },
         ],
@@ -290,15 +309,16 @@ test('Gemini discovery follows pagination and ignores non-agent model surfaces',
   try {
     const result = await refreshProviderModels(['gemini']);
     const provider = result.snapshot.providers.find((entry) => entry.id === 'gemini');
-    const candidate = provider.models.find((model) => model.id === 'gemini-future-agent');
+    const candidate = provider.models.find((model) => model.id === 'gemini-3.7-flash');
 
     assert.deepEqual(urls, [
       'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
       'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&pageToken=page%20two',
     ]);
     assert.equal(result.results[0].ok, true);
-    assert.equal(result.results[0].found, 2);
-    assert.equal(result.results[0].ignoredCount, 2);
+    assert.equal(result.results[0].found, 1);
+    assert.equal(result.results[0].newModelsFound, 1);
+    assert.equal(result.results[0].ignoredCount, 3);
     assert.equal(result.results[0].candidates, 1);
     assert.equal(result.results[0].missingReviewed, 3);
     assert.equal(provider.discoveryStatus, 'attention');
@@ -307,6 +327,7 @@ test('Gemini discovery follows pagination and ignores non-agent model surfaces',
     assert.equal(candidate.enabled, false);
     assert.equal(provider.models.some((model) => model.id === 'gemini-3.1-flash-tts-preview'), false);
     assert.equal(provider.models.some((model) => model.id === 'gemini-2.5-flash'), false);
+    assert.equal(provider.models.some((model) => model.id === 'gemini-3.1-pro-preview-customtools'), false);
   } finally {
     global.fetch = originalFetch;
     if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
@@ -357,7 +378,7 @@ test('models absent from a later complete account list are marked not seen inste
   let responseData = {
     data: [
       { id: 'gpt-5.6-terra', owned_by: 'openai' },
-      { id: 'gpt-future-candidate', owned_by: 'openai' },
+      { id: 'gpt-5.7-terra', owned_by: 'openai' },
     ],
   };
   global.fetch = async () => ({
@@ -371,7 +392,7 @@ test('models absent from a later complete account list are marked not seen inste
     responseData = { data: [{ id: 'gpt-5.6-terra', owned_by: 'openai' }] };
     const result = await refreshProviderModels(['openai']);
     const provider = result.snapshot.providers.find((entry) => entry.id === 'openai');
-    const candidate = provider.models.find((model) => model.id === 'gpt-future-candidate');
+    const candidate = provider.models.find((model) => model.id === 'gpt-5.7-terra');
 
     assert.equal(candidate.availability, 'not-seen');
     assert.ok(candidate.missingSince);
