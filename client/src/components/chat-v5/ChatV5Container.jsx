@@ -2858,14 +2858,12 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
 
   const dismissUnsavedTriageWarning = useCallback(() => {
     if (!unsavedTriageRiskKey) return;
-    const confirmed = window.confirm('Dismiss this warning? The triage card has not been saved to the session.');
-    if (confirmed) setDismissedTriageRiskKey(unsavedTriageRiskKey);
+    setDismissedTriageRiskKey(unsavedTriageRiskKey);
   }, [unsavedTriageRiskKey]);
 
   const dismissUnsavedAnalystWarning = useCallback(() => {
     if (!unsavedAnalystRiskKey) return;
-    const confirmed = window.confirm('Dismiss this warning? The analyst answer has not been saved to the session.');
-    if (confirmed) setDismissedAnalystRiskKey(unsavedAnalystRiskKey);
+    setDismissedAnalystRiskKey(unsavedAnalystRiskKey);
   }, [unsavedAnalystRiskKey]);
 
   useEffect(() => {

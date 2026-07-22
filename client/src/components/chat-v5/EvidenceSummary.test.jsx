@@ -4,7 +4,7 @@ import EvidenceSummary from './EvidenceSummary.jsx';
 
 function makeEvidence(overrides = {}) {
   const summary = {
-    headline: '2 of 4 expected results safely saved.',
+    headline: '2 expected evidence items are not saved.',
     userResults: { savedCount: 2, expectedCount: 4 },
     supportingNote: 'The saved results remain available.',
     trusted: [],
@@ -37,7 +37,7 @@ function ready(evidence) {
 
 describe('EvidenceSummary', () => {
   it('shows one quiet confirmation with the exact saved-result count and supporting note', () => {
-    const headline = '3 of 3 expected results safely saved.';
+    const headline = 'Evidence complete — all 3 of 3 expected results were safely saved.';
     render(
       <EvidenceSummary
         runEvidence={ready(makeEvidence({
@@ -58,9 +58,29 @@ describe('EvidenceSummary', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('shows complete evidence for an honest workflow failure without calling the workflow successful', () => {
+    const headline = 'Workflow failed, but its evidence was safely recorded.';
+    render(
+      <EvidenceSummary
+        runEvidence={ready(makeEvidence({
+          status: 'complete',
+          summary: {
+            headline,
+            userResults: { savedCount: 2, expectedCount: 2 },
+            supportingNote: 'All applicable supporting records were verified.',
+          },
+        }))}
+      />,
+    );
+
+    expect(screen.getByText(`✓ ${headline}`)).toBeVisible();
+    expect(screen.queryByText(/Workflow complete/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /warning/i })).not.toBeInTheDocument();
+  });
+
   it('combines incomplete evidence into one summary with expandable missing and technical details', async () => {
     const user = userEvent.setup();
-    const headline = '2 of 4 expected results safely saved.';
+    const headline = '2 expected evidence items are not saved.';
     render(
       <EvidenceSummary
         runEvidence={ready(makeEvidence({
@@ -133,7 +153,7 @@ describe('EvidenceSummary', () => {
           status: 'unknown',
           settled: false,
           summary: {
-            headline: 'Evidence completeness is not known yet.',
+            headline: 'Evidence is still settling, so completeness is not known yet.',
             nextStep: 'Check again after the run settles.',
           },
         }))}
@@ -141,7 +161,7 @@ describe('EvidenceSummary', () => {
       />,
     );
 
-    expect(screen.getByText('Evidence completeness is not known yet. Check again after the run settles.')).toBeVisible();
+    expect(screen.getByText('Evidence is still settling, so completeness is not known yet. Check again after the run settles.')).toBeVisible();
     expect(screen.queryByRole('region', { name: /warning/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Check again' }));
@@ -207,12 +227,12 @@ describe('EvidenceSummary', () => {
           }],
           identifiers: { evidenceFingerprint: 'fingerprint-2' },
           acknowledged: false,
-          summary: { headline: '1 of 3 expected results safely saved.' },
+          summary: { headline: '2 expected evidence items are not saved.' },
         }))}
         onAcknowledge={onAcknowledge}
       />,
     );
-    expect(screen.getByText('1 of 3 expected results safely saved.')).toBeVisible();
+    expect(screen.getByText('2 expected evidence items are not saved.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Acknowledge' })).toBeEnabled();
   });
 });

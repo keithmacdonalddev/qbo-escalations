@@ -149,6 +149,44 @@ async function persistRetryAnalystFailure(conversation, {
   await saveConversationLenient(conversation).catch(() => {});
 }
 
+async function recordAnalystTraceWriteFailure(conversation, traceWriteError, { route } = {}) {
+  const message = traceWriteError?.message || 'Failed to save the supporting AI trace';
+  const recordedAt = new Date();
+
+  if (conversation.caseIntake && conversation.caseIntake.status !== 'none') {
+    try {
+      conversation.caseIntake = stampCaseIntakeEvidence(conversation.caseIntake, {
+        analyst: {
+          traceSaveOk: false,
+          traceSaveErrorCode: 'AI_TRACE_SAVE_FAILED',
+          traceSaveError: message,
+        },
+      }, { updatedAt: recordedAt });
+      conversation.markModified?.('caseIntake');
+      await Conversation.updateOne(
+        { _id: conversation._id },
+        { $set: { caseIntake: conversation.caseIntake } }
+      );
+    } catch (receiptError) {
+      reportServerError({
+        route,
+        message: receiptError?.message || 'Failed to record the AI trace evidence gap',
+        code: 'AI_TRACE_RECEIPT_SAVE_FAILED',
+        detail: receiptError?.stack || '',
+        severity: 'error',
+      });
+    }
+  }
+
+  reportServerError({
+    route,
+    message,
+    code: 'AI_TRACE_SAVE_FAILED',
+    detail: traceWriteError?.stack || '',
+    severity: 'error',
+  });
+}
+
 // Resolve the operator's CONFIGURED image-parser backup from the `image-analyst`
 // profile runtime so the chat image-parse leg fails over to it (not just the
 // neutral global alternate) when the primary provider fails. No client sends the
@@ -1571,39 +1609,43 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         }
 
         await saveConversationLenient(conversation);
-        await setTraceAttempts(trace?._id, attempts);
-        await setTraceUsage(trace?._id, compliantData.usage);
-        await patchTrace(trace?._id, {
-          status: 'ok',
-          responseChars: sumResponseChars(compliantData),
-          stats: buildTraceStats(traceStats),
-          outcome: buildOutcome({
-            providerUsed: compliantData.providerUsed || policy.primaryProvider,
-            modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
-            winner: compliantData.providerUsed || policy.primaryProvider,
-            fallbackUsed: Boolean(compliantData.fallbackUsed),
-            fallbackFrom: compliantData.fallbackFrom || null,
-            responseRepaired: Boolean(compliantData.responseRepaired),
-            totalMs: latencyMs,
-            firstThinkingMs,
-            firstChunkMs,
-            completedAt: new Date(),
-          }),
-        });
-        await appendTraceEvent(trace?._id, {
-          key: 'conversation_saved',
-          label: 'Conversation saved',
-          status: 'success',
-          provider: compliantData.providerUsed || policy.primaryProvider,
-          model: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
-          message: `Saved response and conversation state in ${latencyMs}ms.`,
-          elapsedMs: latencyMs,
-          detail: {
-            attempts: attempts.length,
-            responseRepaired: Boolean(compliantData.responseRepaired),
-            usage: summarizeUsage(compliantData.usage),
-          },
-        }, traceStartedAt);
+        try {
+          await setTraceAttempts(trace?._id, attempts);
+          await setTraceUsage(trace?._id, compliantData.usage);
+          await patchTrace(trace?._id, {
+            status: 'ok',
+            responseChars: sumResponseChars(compliantData),
+            stats: buildTraceStats(traceStats),
+            outcome: buildOutcome({
+              providerUsed: compliantData.providerUsed || policy.primaryProvider,
+              modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+              winner: compliantData.providerUsed || policy.primaryProvider,
+              fallbackUsed: Boolean(compliantData.fallbackUsed),
+              fallbackFrom: compliantData.fallbackFrom || null,
+              responseRepaired: Boolean(compliantData.responseRepaired),
+              totalMs: latencyMs,
+              firstThinkingMs,
+              firstChunkMs,
+              completedAt: new Date(),
+            }),
+          });
+          await appendTraceEvent(trace?._id, {
+            key: 'conversation_saved',
+            label: 'Conversation saved',
+            status: 'success',
+            provider: compliantData.providerUsed || policy.primaryProvider,
+            model: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+            message: `Saved response and conversation state in ${latencyMs}ms.`,
+            elapsedMs: latencyMs,
+            detail: {
+              attempts: attempts.length,
+              responseRepaired: Boolean(compliantData.responseRepaired),
+              usage: summarizeUsage(compliantData.usage),
+            },
+          }, traceStartedAt);
+        } catch (traceWriteError) {
+          await recordAnalystTraceWriteFailure(conversation, traceWriteError, { route: '/api/chat' });
+        }
 
         // Fire-and-forget: archive images to disk with full metadata
         if (normalizedImages.length > 0) {
@@ -2873,39 +2915,43 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           conversation.markModified?.('caseIntake');
         }
         await saveConversationLenient(conversation);
-        await setTraceAttempts(trace?._id, attempts);
-        await setTraceUsage(trace?._id, compliantData.usage);
-        await patchTrace(trace?._id, {
-          status: 'ok',
-          responseChars: sumResponseChars(compliantData),
-          stats: buildTraceStats(traceStats),
-          outcome: buildOutcome({
-            providerUsed: compliantData.providerUsed || policy.primaryProvider,
-            modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
-            winner: compliantData.providerUsed || policy.primaryProvider,
-            fallbackUsed: Boolean(compliantData.fallbackUsed),
-            fallbackFrom: compliantData.fallbackFrom || null,
-            responseRepaired: Boolean(compliantData.responseRepaired),
-            totalMs: latencyMs,
-            firstThinkingMs,
-            firstChunkMs,
-            completedAt: new Date(),
-          }),
-        });
-        await appendTraceEvent(trace?._id, {
-          key: 'conversation_saved',
-          label: 'Retry saved',
-          status: 'success',
-          provider: compliantData.providerUsed || policy.primaryProvider,
-          model: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
-          message: `Saved retried response in ${latencyMs}ms.`,
-          elapsedMs: latencyMs,
-          detail: {
-            attempts: attempts.length,
-            responseRepaired: Boolean(compliantData.responseRepaired),
-            usage: summarizeUsage(compliantData.usage),
-          },
-        }, traceStartedAt);
+        try {
+          await setTraceAttempts(trace?._id, attempts);
+          await setTraceUsage(trace?._id, compliantData.usage);
+          await patchTrace(trace?._id, {
+            status: 'ok',
+            responseChars: sumResponseChars(compliantData),
+            stats: buildTraceStats(traceStats),
+            outcome: buildOutcome({
+              providerUsed: compliantData.providerUsed || policy.primaryProvider,
+              modelUsed: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+              winner: compliantData.providerUsed || policy.primaryProvider,
+              fallbackUsed: Boolean(compliantData.fallbackUsed),
+              fallbackFrom: compliantData.fallbackFrom || null,
+              responseRepaired: Boolean(compliantData.responseRepaired),
+              totalMs: latencyMs,
+              firstThinkingMs,
+              firstChunkMs,
+              completedAt: new Date(),
+            }),
+          });
+          await appendTraceEvent(trace?._id, {
+            key: 'conversation_saved',
+            label: 'Retry saved',
+            status: 'success',
+            provider: compliantData.providerUsed || policy.primaryProvider,
+            model: safeString(compliantData.modelUsed, '') || (compliantData.usage && compliantData.usage.model) || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+            message: `Saved retried response in ${latencyMs}ms.`,
+            elapsedMs: latencyMs,
+            detail: {
+              attempts: attempts.length,
+              responseRepaired: Boolean(compliantData.responseRepaired),
+              usage: summarizeUsage(compliantData.usage),
+            },
+          }, traceStartedAt);
+        } catch (traceWriteError) {
+          await recordAnalystTraceWriteFailure(conversation, traceWriteError, { route: '/api/chat/retry' });
+        }
 
         // Fire-and-forget: archive images to disk with full metadata (retry)
         if (normalizedImages.length > 0) {

@@ -161,7 +161,7 @@ test('complete successful pipeline reports complete with correct saved and expec
   assert.equal(result.settled, true);
   assert.equal(result.contractVersion, 1);
   assert.deepEqual(result.summary.userResults, { savedCount: 5, expectedCount: 5 });
-  assert.equal(result.summary.headline, 'Workflow complete — 5 of 5 expected results safely saved.');
+  assert.equal(result.summary.headline, 'Evidence complete — all 5 of 5 expected results were safely saved.');
   assert.equal(result.summary.supportingNote, '2 supporting records could not be verified.');
   assert.equal(result.summary.trusted.length, 5);
   assert.deepEqual(result.summary.trusted.filter((label) => result.summary.noRepeatNeeded.includes(label)), []);
@@ -244,6 +244,7 @@ test('deliberately skipped triage and INV are not missing', () => {
   const result = evaluate(fixture);
 
   assert.equal(result.status, 'complete');
+  assert.equal(result.summary.headline, 'Evidence complete — all applicable results were safely saved.');
   assert.equal(artifactByCode(result, 'TRIAGE_CARD').state, 'not-applicable');
   assert.equal(artifactByCode(result, 'INV_SEARCH_RESULT').state, 'not-applicable');
   assert.equal(result.missing.some((item) => item.stage === 'triage'), false);
@@ -273,6 +274,7 @@ test('provider-mid-failure records honest failure without faking an answer artif
   const message = artifactByCode(result, 'ANALYST_MESSAGE');
 
   assert.equal(result.status, 'complete');
+  assert.equal(result.summary.headline, 'Workflow failed, but its evidence was safely recorded.');
   assert.equal(message.state, 'not-applicable');
   assert.equal(message.reason, 'not-produced');
   assert.equal(artifactByCode(result, 'ANALYST_RUN').state, 'confirmed');
@@ -325,6 +327,20 @@ test('only a trace matching the current analyst receipt confirms AI trace eviden
   });
   const matched = evaluate(fixture);
   assert.equal(artifactByCode(matched, 'AI_TRACE').state, 'confirmed');
+});
+
+test('trace write failure leaves the saved analyst answer confirmed and flags only supporting trace evidence', () => {
+  const fixture = makeCompleteFixture();
+  fixture.conversation.caseIntake.evidence.receipts.analyst.traceSaveOk = false;
+
+  const result = evaluate(fixture);
+
+  assert.equal(result.status, 'incomplete');
+  assert.equal(artifactByCode(result, 'ANALYST_MESSAGE').state, 'confirmed');
+  assert.equal(artifactByCode(result, 'AI_TRACE').state, 'missing');
+  assert.equal(artifactByCode(result, 'AI_TRACE').reason, 'produced-not-saved');
+  assert.equal(result.missing.some((item) => item.code === 'ANALYST_MESSAGE'), false);
+  assert.equal(result.missing.some((item) => item.code === 'AI_TRACE'), true);
 });
 
 test('acknowledgement applies only to the matching current finding fingerprint', () => {

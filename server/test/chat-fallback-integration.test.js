@@ -5,6 +5,7 @@ const request = require('supertest');
 const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const Conversation = require('../src/models/Conversation');
+const AiTrace = require('../src/models/AiTrace');
 const claude = require('../src/services/claude');
 const codex = require('../src/services/codex');
 
@@ -27,6 +28,25 @@ function setDefaultChatStubs() {
 function parseEvent(text, name) {
   const match = text.match(new RegExp(`event: ${name}\\s+data: (.+)`));
   return match ? JSON.parse(match[1]) : null;
+}
+
+async function withFailingFinalTraceWrite(run) {
+  const originalFindByIdAndUpdate = AiTrace.findByIdAndUpdate;
+  AiTrace.findByIdAndUpdate = function patchedFindByIdAndUpdate(traceId, update, options) {
+    if (Object.prototype.hasOwnProperty.call(update?.$set || {}, 'attempts')) {
+      return {
+        lean: async () => {
+          throw new Error('simulated final trace write failure');
+        },
+      };
+    }
+    return originalFindByIdAndUpdate.call(this, traceId, update, options);
+  };
+  try {
+    return await run();
+  } finally {
+    AiTrace.findByIdAndUpdate = originalFindByIdAndUpdate;
+  }
 }
 
 test('chat-fallback-integration suite', async (t) => {
@@ -169,6 +189,91 @@ test('chat-fallback-integration suite', async (t) => {
     assert.equal(saved.caseIntake.evidence.receipts.analyst.failed, false);
     assert.equal(saved.caseIntake.evidence.receipts.analyst.messageSaved, true);
     assert.equal(saved.caseIntake.evidence.receipts.analyst.errorCode, '');
+  });
+
+  await t.test('primary chat keeps the saved answer and sends done when its final trace write fails', async () => {
+    const response = await withFailingFinalTraceWrite(() => agent
+      .post('/api/chat')
+      .send({
+        message: 'Review this escalation without losing the answer.',
+        provider: 'claude',
+        parsedEscalationText: [
+          'COID/MID: 9341452197744835',
+          'CASE: 15154531492',
+          'CLIENT/CONTACT: Trace Failure Test',
+          'CX IS ATTEMPTING TO: Complete payroll setup.',
+          'EXPECTED OUTCOME: Setup completes.',
+          'ACTUAL OUTCOME: Setup is blocked.',
+          'KB/TOOLS USED: Help panel.',
+          'TRIED TEST ACCOUNT: n/a',
+          'TS STEPS: Reproduced the issue.',
+        ].join('\n'),
+        parsedEscalationSource: 'image-parser',
+        pipelineReceipts: { triage: { planned: false, skipReason: 'Not needed.' } },
+      }));
+
+    assert.match(response.text, /event: done/);
+    assert.doesNotMatch(response.text, /ONDONE_SAVE_FAILED/);
+    const done = parseEvent(response.text, 'done');
+    const saved = await Conversation.findById(done.conversationId).lean();
+    const receipt = saved.caseIntake.evidence.receipts.analyst;
+    assert.equal(saved.caseIntake.status, 'analyst-complete');
+    assert.equal(receipt.completed, true);
+    assert.equal(receipt.failed, false);
+    assert.equal(receipt.messageSaved, true);
+    assert.equal(receipt.traceSaveOk, false);
+    assert.ok(saved.messages.some((message) => message.role === 'assistant'));
+
+    const evidence = await agent.get(`/api/conversations/${done.conversationId}/evidence`);
+    const analystMessage = evidence.body.evidence.artifacts.find((item) => item.code === 'ANALYST_MESSAGE');
+    const aiTrace = evidence.body.evidence.artifacts.find((item) => item.code === 'AI_TRACE');
+    assert.equal(analystMessage.state, 'confirmed');
+    assert.equal(aiTrace.state, 'missing');
+    assert.equal(evidence.body.evidence.missing.some((item) => item.code === 'ANALYST_MESSAGE'), false);
+  });
+
+  await t.test('chat retry keeps the saved answer and sends done when its final trace write fails', async () => {
+    const first = await agent.post('/api/chat').send({ message: 'first', provider: 'claude' });
+    const start = parseEvent(first.text, 'start');
+    const conversation = await Conversation.findById(start.conversationId);
+    conversation.caseIntake = {
+      status: 'failed',
+      runs: [{
+        id: 'failed-analyst-run',
+        phase: 'analyst',
+        status: 'failed',
+        startedAt: new Date(Date.now() - 1_000),
+        completedAt: new Date(),
+      }],
+      evidence: {
+        contractVersion: 1,
+        receipts: {
+          analyst: {
+            attempted: true,
+            completed: false,
+            failed: true,
+            messageSaved: false,
+            errorCode: 'PROVIDER_EXEC_FAILED',
+          },
+        },
+      },
+    };
+    conversation.markModified('caseIntake');
+    await conversation.save();
+
+    const retry = await withFailingFinalTraceWrite(() => agent
+      .post('/api/chat/retry')
+      .send({ conversationId: start.conversationId, provider: 'claude' }));
+
+    assert.match(retry.text, /event: done/);
+    assert.doesNotMatch(retry.text, /ONDONE_SAVE_FAILED/);
+    const saved = await Conversation.findById(start.conversationId).lean();
+    const receipt = saved.caseIntake.evidence.receipts.analyst;
+    assert.equal(saved.caseIntake.status, 'analyst-complete');
+    assert.equal(receipt.completed, true);
+    assert.equal(receipt.failed, false);
+    assert.equal(receipt.messageSaved, true);
+    assert.equal(receipt.traceSaveOk, false);
   });
 
   await t.test('fallback mode flag disables fallback execution path', async () => {

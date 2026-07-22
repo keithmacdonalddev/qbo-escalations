@@ -130,7 +130,15 @@ function EvidenceStatusChip({ status }) {
     return <span className="sessions-evidence-chip is-complete" title="Evidence complete" aria-label="Evidence complete">✓</span>;
   }
   if (status === 'incomplete') {
-    return <span className="sessions-evidence-chip is-incomplete">Evidence</span>;
+    return (
+      <span
+        className="sessions-evidence-chip is-incomplete"
+        title="Evidence incomplete"
+        aria-label="Evidence incomplete"
+      >
+        Evidence incomplete
+      </span>
+    );
   }
   return null;
 }

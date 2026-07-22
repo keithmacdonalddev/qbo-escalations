@@ -1249,8 +1249,14 @@ function evaluateEvidenceCompleteness({
   const supportingNote = supportingIssues.length > 0
     ? `${supportingIssues.length} supporting record${supportingIssues.length === 1 ? '' : 's'} could not be verified.`
     : 'All applicable supporting records were verified.';
+  const workflowFailed = stages.some((stage) => stage.status === 'failed');
+  const workflowSkippedStages = stages.some((stage) => stage.status === 'skipped');
 
-  let headline = `Workflow complete — ${savedUserResults.length} of ${expectedUserResults.length} expected results safely saved.`;
+  let headline = workflowFailed
+    ? 'Workflow failed, but its evidence was safely recorded.'
+    : workflowSkippedStages
+      ? 'Evidence complete — all applicable results were safely saved.'
+      : `Evidence complete — all ${savedUserResults.length} of ${expectedUserResults.length} expected results were safely saved.`;
   let nextStep = 'No repeat is needed.';
   if (!settled) {
     headline = 'Evidence is still settling, so completeness is not known yet.';

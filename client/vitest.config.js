@@ -1,5 +1,5 @@
 import react from '@vitejs/plugin-react';
-import { configDefaults, defineConfig } from 'vitest/config';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
@@ -7,9 +7,5 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.js'],
-    exclude: [
-      ...configDefaults.exclude,
-      'src/lib/providerHandoffStatus.test.js',
-    ],
   },
 });
