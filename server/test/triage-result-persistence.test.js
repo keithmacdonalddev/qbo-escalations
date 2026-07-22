@@ -98,6 +98,9 @@ test('triage-result: persists card, run, duration, and events onto caseIntake', 
         durationMs: 8400,
         startedAt: Date.now() - 8400,
         completedAt: Date.now(),
+        savedResultId: 'saved-triage-result-123',
+        standaloneRunId: 'standalone-triage-run-123',
+        repairPackageId: 'triage-repair-package-123',
       });
 
     assert.equal(res.status, 200);
@@ -120,7 +123,17 @@ test('triage-result: persists card, run, duration, and events onto caseIntake', 
     assert.equal(triageRun.provider, 'codex');
     assert.equal(triageRun.model, 'gpt-5.5');
     assert.equal(triageRun.detail.providerPackageId, 'pkg-triage-123');
+    assert.equal(triageRun.detail.savedResultId, 'saved-triage-result-123');
+    assert.equal(triageRun.detail.standaloneRunId, 'standalone-triage-run-123');
+    assert.equal(triageRun.detail.repairPackageId, 'triage-repair-package-123');
     assert.ok(triageRun.summary.includes('P2'), 'summary derives from the card');
+
+    assert.equal(intake.evidence.contractVersion, 1);
+    assert.equal(intake.evidence.receipts.triage.cardSaved, true);
+    assert.equal(intake.evidence.receipts.triage.resultSaveOk, true);
+    assert.equal(intake.evidence.receipts.triage.savedResultId, 'saved-triage-result-123');
+    assert.equal(intake.evidence.receipts.triage.standaloneRunId, 'standalone-triage-run-123');
+    assert.equal(intake.evidence.receipts.triage.repairPackageId, 'triage-repair-package-123');
 
     // Stage events (incl. llm.thinking for the resume reasoning chip) are
     // appended with a truthful run-category eventCount.

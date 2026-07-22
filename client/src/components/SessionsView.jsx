@@ -1,9 +1,11 @@
 import './SessionsView.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  acknowledgeConversationEvidence,
   deleteConversation,
   exportConversation,
   getConversation,
+  getConversationEvidence,
   listConversations,
   updateConversation,
 } from '../api/chatApi.js';
@@ -123,6 +125,16 @@ function PlannedBadge({ children }) {
   return <span className="session-planned-badge">{children}</span>;
 }
 
+function EvidenceStatusChip({ status }) {
+  if (status === 'complete') {
+    return <span className="sessions-evidence-chip is-complete" title="Evidence complete" aria-label="Evidence complete">✓</span>;
+  }
+  if (status === 'incomplete') {
+    return <span className="sessions-evidence-chip is-incomplete">Evidence</span>;
+  }
+  return null;
+}
+
 export default function SessionsView({ sessionId = null }) {
   const toast = useToast();
   const [sessions, setSessions] = useState([]);
@@ -135,7 +147,38 @@ export default function SessionsView({ sessionId = null }) {
   const [editingId, setEditingId] = useState(null);
   const [editTitle, setEditTitle] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [evidenceState, setEvidenceState] = useState({ state: 'idle', evidence: null, error: '' });
+  const [evidenceAcknowledged, setEvidenceAcknowledged] = useState(false);
+  const [evidenceAcknowledging, setEvidenceAcknowledging] = useState(false);
   const fetchGenRef = useRef(0);
+  const evidenceFetchGenRef = useRef(0);
+
+  const loadEvidence = useCallback(async (id, preserveEvidence = false) => {
+    if (!id) {
+      setEvidenceState({ state: 'idle', evidence: null, error: '' });
+      return null;
+    }
+    const gen = ++evidenceFetchGenRef.current;
+    setEvidenceState((prev) => ({
+      state: 'loading',
+      evidence: preserveEvidence ? prev.evidence : null,
+      error: '',
+    }));
+    try {
+      const evidence = await getConversationEvidence(id);
+      if (gen !== evidenceFetchGenRef.current) return null;
+      setEvidenceState({ state: 'ready', evidence, error: '' });
+      return evidence;
+    } catch (err) {
+      if (gen !== evidenceFetchGenRef.current) return null;
+      setEvidenceState({
+        state: 'unavailable',
+        evidence: null,
+        error: err?.message || 'Evidence completeness could not be checked.',
+      });
+      return null;
+    }
+  }, []);
 
   const loadSessions = useCallback(async (searchTerm = search) => {
     const gen = ++fetchGenRef.current;
@@ -163,12 +206,14 @@ export default function SessionsView({ sessionId = null }) {
       setActiveSession(null);
       setTraces([]);
       setActiveTab('overview');
+      setEvidenceAcknowledged(false);
       return;
     }
 
     let cancelled = false;
     setLoadingDetail(true);
     setActiveTab('overview');
+    setEvidenceAcknowledged(false);
     Promise.all([
       getConversation(sessionId),
       getConversationTraces(sessionId).catch(() => []),
@@ -176,6 +221,7 @@ export default function SessionsView({ sessionId = null }) {
       if (cancelled) return;
       setActiveSession(session);
       setTraces(Array.isArray(traceList) ? traceList : []);
+      setEvidenceAcknowledged(Boolean(session?.caseIntake?.evidence?.acknowledgedAt));
     }).catch(() => {
       if (cancelled) return;
       setActiveSession(null);
@@ -189,6 +235,24 @@ export default function SessionsView({ sessionId = null }) {
       cancelled = true;
     };
   }, [sessionId, toast]);
+
+  useEffect(() => {
+    void loadEvidence(sessionId);
+  }, [loadEvidence, sessionId]);
+
+  const acknowledgeEvidence = useCallback(async () => {
+    if (!sessionId || evidenceAcknowledging) return;
+    setEvidenceAcknowledging(true);
+    try {
+      await acknowledgeConversationEvidence(sessionId);
+      setEvidenceAcknowledged(true);
+      await loadEvidence(sessionId, true);
+    } catch {
+      toast.error('The evidence warning could not be acknowledged.');
+    } finally {
+      setEvidenceAcknowledging(false);
+    }
+  }, [evidenceAcknowledging, loadEvidence, sessionId, toast]);
 
   const selectedListSession = useMemo(
     () => sessions.find((item) => String(item._id) === String(sessionId)) || null,
@@ -341,6 +405,11 @@ export default function SessionsView({ sessionId = null }) {
           loading={loadingDetail}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          evidenceState={evidenceState}
+          evidenceAcknowledged={evidenceAcknowledged}
+          evidenceAcknowledging={evidenceAcknowledging}
+          onAcknowledgeEvidence={acknowledgeEvidence}
+          onRefreshEvidence={() => loadEvidence(sessionId, true)}
         />
       )}
 
@@ -416,7 +485,10 @@ function SessionsTable({
                       autoFocus
                     />
                   ) : (
-                    <div className="sessions-title">{getSessionTitle(session)}</div>
+                    <div className="sessions-title">
+                      <span className="sessions-name">{getSessionTitle(session)}</span>
+                      <EvidenceStatusChip status={session.evidenceStatus} />
+                    </div>
                   )}
                 </td>
                 <td>
@@ -461,7 +533,19 @@ function SessionsTable({
   );
 }
 
-function SessionDetail({ session, traces, summary, loading, activeTab, setActiveTab }) {
+function SessionDetail({
+  session,
+  traces,
+  summary,
+  loading,
+  activeTab,
+  setActiveTab,
+  evidenceState,
+  evidenceAcknowledged,
+  evidenceAcknowledging,
+  onAcknowledgeEvidence,
+  onRefreshEvidence,
+}) {
   if (loading && !session) {
     return <div className="sessions-empty">Loading session...</div>;
   }
@@ -506,15 +590,21 @@ function SessionDetail({ session, traces, summary, loading, activeTab, setActive
       </div>
 
       <div className="session-tab-panel">
-        {renderTab(activeTab, session, traces, summary)}
+        {renderTab(activeTab, session, traces, summary, {
+          evidenceState,
+          evidenceAcknowledged,
+          evidenceAcknowledging,
+          onAcknowledgeEvidence,
+          onRefreshEvidence,
+        })}
       </div>
     </section>
   );
 }
 
-function renderTab(tab, session, traces, summary) {
+function renderTab(tab, session, traces, summary, evidenceProps) {
   const messages = Array.isArray(session.messages) ? session.messages : [];
-  if (tab === 'overview') return <OverviewTab session={session} summary={summary} />;
+  if (tab === 'overview') return <OverviewTab session={session} summary={summary} evidenceState={evidenceProps.evidenceState} />;
   if (tab === 'messages') return <MessagesTab messages={messages} />;
   if (tab === 'events') return <EventsTab traces={traces} />;
   if (tab === 'workflow') return <WorkflowLogTab session={session} />;
@@ -525,30 +615,33 @@ function renderTab(tab, session, traces, summary) {
   if (tab === 'cost') return <CostTab traces={traces} summary={summary} />;
   if (tab === 'attachments') return <AttachmentsTab messages={messages} traces={traces} />;
   if (tab === 'triage') return <TriageTab session={session} traces={traces} />;
-  if (tab === 'audit') return <AuditTab session={session} traces={traces} />;
-  return <OverviewTab session={session} summary={summary} />;
+  if (tab === 'audit') return <AuditTab session={session} traces={traces} {...evidenceProps} />;
+  return <OverviewTab session={session} summary={summary} evidenceState={evidenceProps.evidenceState} />;
 }
 
-function OverviewTab({ session, summary }) {
+function OverviewTab({ session, summary, evidenceState }) {
   return (
-    <div className="session-grid-two">
-      <MetadataTable rows={[
-        ['Title', getSessionTitle(session)],
-        ['Provider', getProviderLabel(session.provider || '')],
-        ['Created', formatDateTime(session.createdAt)],
-        ['Updated', formatDateTime(session.updatedAt)],
-        ['Linked escalation', session.escalationId || 'None'],
-        ['Forked from', session.forkedFrom || 'None'],
-        ['Fork message index', session.forkMessageIndex ?? 'None'],
-      ]} />
-      <MetadataTable rows={[
-        ['User messages', summary.userMessages],
-        ['Assistant messages', summary.assistantMessages],
-        ['Reasoning captures', summary.reasoningCount],
-        ['Trace events', summary.eventCount],
-        ['Total tokens', formatTokens(summary.totalTokens)],
-        ['Estimated cost', formatCostMicros(summary.totalCostMicros)],
-      ]} />
+    <div className="session-stack">
+      <EvidenceOverviewLine evidenceState={evidenceState} />
+      <div className="session-grid-two">
+        <MetadataTable rows={[
+          ['Title', getSessionTitle(session)],
+          ['Provider', getProviderLabel(session.provider || '')],
+          ['Created', formatDateTime(session.createdAt)],
+          ['Updated', formatDateTime(session.updatedAt)],
+          ['Linked escalation', session.escalationId || 'None'],
+          ['Forked from', session.forkedFrom || 'None'],
+          ['Fork message index', session.forkMessageIndex ?? 'None'],
+        ]} />
+        <MetadataTable rows={[
+          ['User messages', summary.userMessages],
+          ['Assistant messages', summary.assistantMessages],
+          ['Reasoning captures', summary.reasoningCount],
+          ['Trace events', summary.eventCount],
+          ['Total tokens', formatTokens(summary.totalTokens)],
+          ['Estimated cost', formatCostMicros(summary.totalCostMicros)],
+        ]} />
+      </div>
     </div>
   );
 }
@@ -749,9 +842,180 @@ function TriageTab({ session, traces }) {
   );
 }
 
-function AuditTab({ session, traces }) {
+function EvidenceOverviewLine({ evidenceState }) {
+  if (!evidenceState || evidenceState.state === 'idle') return null;
+  if (evidenceState.state === 'loading') {
+    return <div className="session-evidence-line is-neutral">Checking evidence completeness…</div>;
+  }
+  if (evidenceState.state === 'unavailable') {
+    return <div className="session-evidence-line is-neutral">Evidence completeness could not be checked.</div>;
+  }
+  const evidence = evidenceState.evidence;
+  if (!evidence?.summary?.headline) return null;
+  return (
+    <div className={`session-evidence-line is-${evidence.status}`}>
+      {evidence.status === 'complete' ? '✓ ' : ''}{evidence.summary.headline}
+    </div>
+  );
+}
+
+const EVIDENCE_STAGE_LABELS = {
+  'parse-template': 'Image Parser',
+  'known-issue-search': 'Known-issue search',
+  triage: 'Triage',
+  analyst: 'QBO Assistant',
+};
+
+function displayEvidenceStageStatus(value) {
+  const clean = typeof value === 'string' ? value.replace(/-/g, ' ') : 'unknown';
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
+}
+
+function SessionEvidenceTechnical({ evidence }) {
+  const identifiers = evidence?.identifiers && typeof evidence.identifiers === 'object'
+    ? Object.entries(evidence.identifiers)
+    : [];
+  const artifacts = Array.isArray(evidence?.artifacts) ? evidence.artifacts : [];
+  return (
+    <details className="session-evidence-technical">
+      <summary>Technical identifiers and artifact codes</summary>
+      {identifiers.length > 0 && (
+        <dl>
+          {identifiers.map(([key, value]) => (
+            <div key={key}>
+              <dt>{key}</dt>
+              <dd>{Array.isArray(value) ? value.join(', ') : String(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {artifacts.length > 0 && (
+        <ul>
+          {artifacts.map((artifact) => (
+            <li key={artifact.code}>
+              <code>{artifact.code}</code> — {artifact.label} — {artifact.state}
+              {artifact.ids && Object.keys(artifact.ids).length > 0
+                ? ` — ${Object.entries(artifact.ids).map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') : value}`).join('; ')}`
+                : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+}
+
+function EvidenceAuditSection({ evidenceState, acknowledged, acknowledging, onAcknowledge, onRefresh }) {
+  if (!evidenceState || evidenceState.state === 'idle' || evidenceState.state === 'loading') {
+    return (
+      <section className="session-evidence-audit">
+        <h3>Evidence completeness</h3>
+        <p className="session-evidence-note">Checking the saved evidence for this session…</p>
+      </section>
+    );
+  }
+  if (evidenceState.state === 'unavailable') {
+    return (
+      <section className="session-evidence-audit">
+        <h3>Evidence completeness</h3>
+        <p className="session-evidence-note">Evidence completeness could not be checked.</p>
+        <button type="button" className="session-evidence-action" onClick={onRefresh}>Check again</button>
+      </section>
+    );
+  }
+
+  const evidence = evidenceState.evidence;
+  const stages = Array.isArray(evidence?.stages) ? evidence.stages : [];
+  const artifacts = Array.isArray(evidence?.artifacts) ? evidence.artifacts : [];
+  const groups = [
+    ['confirmed', 'Confirmed'],
+    ['missing', 'Missing'],
+    ['unverifiable', 'Unverifiable'],
+  ];
+
+  return (
+    <section className={`session-evidence-audit is-${evidence.status}`}>
+      <div className="session-evidence-audit__head">
+        <div>
+          <h3>Evidence completeness</h3>
+          <p>{evidence.summary?.headline}</p>
+        </div>
+        {evidence.status === 'incomplete' && (
+          <button
+            type="button"
+            className="session-evidence-action"
+            disabled={acknowledging || acknowledged}
+            onClick={onAcknowledge}
+          >
+            {acknowledged ? 'Acknowledged' : acknowledging ? 'Acknowledging…' : 'Acknowledge'}
+          </button>
+        )}
+      </div>
+
+      {stages.length > 0 && (
+        <div className="session-evidence-grid-wrap">
+          <table className="table session-evidence-grid">
+            <thead>
+              <tr><th>Stage</th><th>Expected</th><th>Attempted</th><th>Status</th><th>Skip reason</th></tr>
+            </thead>
+            <tbody>
+              {stages.map((stage) => (
+                <tr key={stage.phase}>
+                  <td>{EVIDENCE_STAGE_LABELS[stage.phase] || stage.phase}</td>
+                  <td>{stage.expected ? 'Yes' : 'No'}</td>
+                  <td>{stage.attempted ? 'Yes' : 'No'}</td>
+                  <td>{displayEvidenceStageStatus(stage.status)}</td>
+                  <td>{stage.skipReason || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="session-evidence-groups">
+        {groups.map(([state, label]) => {
+          const items = artifacts.filter((artifact) => artifact.state === state);
+          if (items.length === 0) return null;
+          return (
+            <section key={state} className={`session-evidence-group is-${state}`}>
+              <h4>{label}</h4>
+              <ul>
+                {items.map((artifact) => (
+                  <li key={artifact.code}>
+                    <strong>{artifact.label}</strong>
+                    <span>{artifact.explanation}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
+
+      <SessionEvidenceTechnical evidence={evidence} />
+    </section>
+  );
+}
+
+function AuditTab({
+  session,
+  traces,
+  evidenceState,
+  evidenceAcknowledged,
+  evidenceAcknowledging,
+  onAcknowledgeEvidence,
+  onRefreshEvidence,
+}) {
   return (
     <div className="session-stack">
+      <EvidenceAuditSection
+        evidenceState={evidenceState}
+        acknowledged={evidenceAcknowledged}
+        acknowledging={evidenceAcknowledging}
+        onAcknowledge={onAcknowledgeEvidence}
+        onRefresh={onRefreshEvidence}
+      />
       <MetadataTable rows={[
         ['Session created', formatDateTime(session.createdAt)],
         ['Session updated', formatDateTime(session.updatedAt)],

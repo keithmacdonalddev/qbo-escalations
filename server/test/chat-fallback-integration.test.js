@@ -109,6 +109,32 @@ test('chat-fallback-integration suite', async (t) => {
     const start = parseEvent(first.text, 'start');
     assert.ok(start);
 
+    const conversation = await Conversation.findById(start.conversationId);
+    conversation.caseIntake = {
+      status: 'failed',
+      runs: [{
+        id: 'failed-analyst-run',
+        phase: 'analyst',
+        status: 'failed',
+        startedAt: new Date(Date.now() - 1_000),
+        completedAt: new Date(),
+      }],
+      evidence: {
+        contractVersion: 1,
+        receipts: {
+          analyst: {
+            attempted: true,
+            completed: false,
+            failed: true,
+            messageSaved: false,
+            errorCode: 'PROVIDER_EXEC_FAILED',
+          },
+        },
+      },
+    };
+    conversation.markModified('caseIntake');
+    await conversation.save();
+
     claude.chat = ({ onError }) => {
       const err = new Error('claude retry failed');
       err.code = 'PROVIDER_EXEC_FAILED';
@@ -136,6 +162,13 @@ test('chat-fallback-integration suite', async (t) => {
     assert.equal(done.providerUsed, 'gpt-5.5');
     assert.equal(done.fallbackUsed, true);
     assert.equal(done.fallbackFrom, 'claude');
+
+    const saved = await Conversation.findById(start.conversationId).lean();
+    assert.equal(saved.caseIntake.status, 'analyst-complete');
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.completed, true);
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.failed, false);
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.messageSaved, true);
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.errorCode, '');
   });
 
   await t.test('fallback mode flag disables fallback execution path', async () => {
@@ -208,5 +241,141 @@ test('chat-fallback-integration suite', async (t) => {
 
     const afterCount = await Conversation.countDocuments({});
     assert.equal(afterCount, beforeCount);
+  });
+
+  await t.test('chat failure waits for its analyst failure receipt save before settling SSE', async () => {
+    const originalSave = Conversation.prototype.save;
+    let releaseFailureSave;
+    let markFailureSaveStarted;
+    const failureSaveStarted = new Promise((resolve) => { markFailureSaveStarted = resolve; });
+    const releaseFailure = new Promise((resolve) => { releaseFailureSave = resolve; });
+    let gated = false;
+
+    Conversation.prototype.save = async function patchedSave(...args) {
+      if (!gated && this.caseIntake?.evidence?.receipts?.analyst?.failed === true) {
+        gated = true;
+        markFailureSaveStarted();
+        await releaseFailure;
+      }
+      return originalSave.apply(this, args);
+    };
+    claude.chat = ({ onError }) => {
+      const err = new Error('analyst failed');
+      err.code = 'PROVIDER_EXEC_FAILED';
+      onError(err);
+      return () => {};
+    };
+    codex.chat = ({ onError }) => {
+      const err = new Error('fallback analyst failed');
+      err.code = 'PROVIDER_EXEC_FAILED';
+      onError(err);
+      return () => {};
+    };
+
+    try {
+      let responseSettled = false;
+      const responsePromise = agent
+        .post('/api/chat')
+        .send({
+          message: 'Review this escalation.',
+          provider: 'claude',
+          parsedEscalationText: [
+            'COID/MID: 9341452197744835',
+            'CASE: 15154531492',
+            'CLIENT/CONTACT: Doug Mckensie',
+            'CX IS ATTEMPTING TO: Download a payroll XML file.',
+            'EXPECTED OUTCOME: The full file downloads.',
+            'ACTUAL OUTCOME: The summary is missing.',
+            'KB/TOOLS USED: HELP PANEL, KB ARTICLES, GOOGLE, SCREEN SHARE.',
+            'TRIED TEST ACCOUNT: n/a',
+            'TS STEPS: Reproduced the missing summary.',
+          ].join('\n'),
+          parsedEscalationSource: 'image-parser',
+          pipelineReceipts: { triage: { planned: false, skipReason: 'Not needed.' } },
+        })
+        .then((response) => {
+          responseSettled = true;
+          return response;
+        });
+
+      await Promise.race([
+        failureSaveStarted,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('failure receipt save was not attempted')), 5_000)),
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(responseSettled, false, 'SSE must remain open until the failure receipt save settles');
+      releaseFailureSave();
+
+      const response = await responsePromise;
+      assert.match(response.text, /event: error/);
+      const saved = await Conversation.findOne({}).lean();
+      assert.equal(saved?.caseIntake?.evidence?.receipts?.analyst?.failed, true);
+    } finally {
+      releaseFailureSave?.();
+      Conversation.prototype.save = originalSave;
+      setDefaultChatStubs();
+    }
+  });
+
+  await t.test('failed retry replaces the old completed analyst receipt with an honest failure', async () => {
+    setDefaultChatStubs();
+    const first = await agent.post('/api/chat').send({ message: 'first', provider: 'claude' });
+    const start = parseEvent(first.text, 'start');
+    const conversation = await Conversation.findById(start.conversationId);
+    conversation.caseIntake = {
+      status: 'analyst-complete',
+      runs: [{
+        id: 'old-analyst-run',
+        phase: 'analyst',
+        status: 'completed',
+        startedAt: new Date(Date.now() - 1_000),
+        completedAt: new Date(),
+      }],
+      evidence: {
+        contractVersion: 1,
+        receipts: {
+          analyst: {
+            attempted: true,
+            completed: true,
+            failed: false,
+            messageSaved: true,
+            errorCode: '',
+          },
+        },
+      },
+    };
+    conversation.markModified('caseIntake');
+    await conversation.save();
+
+    claude.chat = ({ onError }) => {
+      const err = new Error('retry provider failed');
+      err.code = 'PROVIDER_EXEC_FAILED';
+      onError(err);
+      return () => {};
+    };
+    codex.chat = ({ onError }) => {
+      const err = new Error('retry fallback failed');
+      err.code = 'PROVIDER_EXEC_FAILED';
+      onError(err);
+      return () => {};
+    };
+
+    try {
+      const retry = await agent
+        .post('/api/chat/retry')
+        .send({ conversationId: start.conversationId, provider: 'claude' });
+      assert.match(retry.text, /event: error/);
+
+      const saved = await Conversation.findById(start.conversationId).lean();
+      const receipt = saved.caseIntake.evidence.receipts.analyst;
+      assert.equal(saved.caseIntake.status, 'failed');
+      assert.equal(receipt.attempted, true);
+      assert.equal(receipt.completed, false);
+      assert.equal(receipt.failed, true);
+      assert.equal(receipt.messageSaved, false);
+      assert.equal(receipt.errorCode, 'PROVIDER_EXEC_FAILED');
+    } finally {
+      setDefaultChatStubs();
+    }
   });
 });

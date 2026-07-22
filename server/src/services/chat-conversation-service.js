@@ -3,12 +3,22 @@
 const mongoose = require('mongoose');
 const Conversation = require('../models/Conversation');
 const Escalation = require('../models/Escalation');
+const AiTrace = require('../models/AiTrace');
+const ImageParseResult = require('../models/ImageParseResult');
+const TriageResult = require('../models/TriageResult');
 const {
   normalizeProvider,
   getProviderLabel,
 } = require('./providers/registry');
 const { sumCaseIntakeEvents } = require('./event-stats-service');
-const { applyTriageResultToCaseIntake } = require('../lib/case-intake');
+const {
+  applyTriageResultToCaseIntake,
+  stampCaseIntakeEvidence,
+} = require('../lib/case-intake');
+const {
+  evaluateEvidenceCompleteness,
+  evaluateEvidenceStatusFromConversation,
+} = require('../lib/evidence-completeness');
 
 const PHASE_BY_STAGE = {
   parser: 'parse-template',
@@ -67,7 +77,7 @@ async function listConversations({ limit, skip, search, includeTotal }) {
     // caseIntake.runs is a Mixed subdocument so Mongo can't project nested
     // paths individually. Pull the whole array — sumCaseIntakeEvents only
     // touches each run's eventCount/events.length, which is cheap.
-    const listFields = 'title provider escalationId createdAt updatedAt messageCount lastMessagePreview forkedFrom forkMessageIndex caseIntake.runs';
+    const listFields = 'title provider escalationId createdAt updatedAt messageCount lastMessagePreview forkedFrom forkMessageIndex caseIntake.status caseIntake.runs caseIntake.evidence';
     const conversationsPromise = Conversation.find(filter)
       .select(listFields)
       .sort({ updatedAt: -1 })
@@ -96,6 +106,7 @@ async function listConversations({ limit, skip, search, includeTotal }) {
       : [];
     const escalationById = new Map(escalationDocs.map((escalation) => [escalation._id.toString(), escalation]));
 
+    const evidenceCheckedAt = new Date();
     const items = conversations.map((conversation) => ({
       _id: conversation._id,
       title: normalizeConversationListTitle(conversation.title, conversation.lastMessagePreview?.preview),
@@ -111,6 +122,7 @@ async function listConversations({ limit, skip, search, includeTotal }) {
       createdAt: conversation.createdAt,
       updatedAt: conversation.updatedAt,
       totalEventCount: sumCaseIntakeEvents(conversation.caseIntake),
+      evidenceStatus: evaluateEvidenceStatusFromConversation(conversation, evidenceCheckedAt),
     }));
 
     return includeTotal
@@ -142,6 +154,89 @@ async function getConversation(id) {
     throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
   }
   return conversation;
+}
+
+async function getConversationEvidence(id, { now = new Date() } = {}) {
+  const conversation = await Conversation.findById(id).lean();
+  if (!conversation) {
+    throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
+  }
+
+  const parserReceipt = conversation.caseIntake?.evidence?.receipts?.parser || {};
+  const triageReceipt = conversation.caseIntake?.evidence?.receipts?.triage || {};
+  const parseResultId = safeString(parserReceipt.resultId, '').trim();
+  const triageResultId = safeString(triageReceipt.savedResultId, '').trim();
+  const standaloneRunId = safeString(triageReceipt.standaloneRunId, '').trim();
+
+  // Phase 1 verifies the referenced parser row here; signed client receipts
+  // (full client-authenticity) are intentionally out of scope for this phase.
+  const imageParsePromise = parseResultId && mongoose.isValidObjectId(parseResultId)
+    ? ImageParseResult.findById(parseResultId).lean().catch(() => null)
+    : Promise.resolve(null);
+
+  const triageFilters = [];
+  if (triageResultId && mongoose.isValidObjectId(triageResultId)) {
+    triageFilters.push({ _id: triageResultId });
+  }
+  if (standaloneRunId) {
+    triageFilters.push({ runId: standaloneRunId });
+  }
+  const triageResultPromise = triageFilters.length > 0
+    ? TriageResult.findOne(triageFilters.length === 1 ? triageFilters[0] : { $or: triageFilters })
+      .lean()
+      .catch(() => null)
+    : Promise.resolve(null);
+
+  const tracesPromise = AiTrace.find({ conversationId: conversation._id })
+    .sort({ createdAt: -1 })
+    .lean()
+    .catch(() => []);
+
+  const [imageParseResult, triageResult, traces] = await Promise.all([
+    imageParsePromise,
+    triageResultPromise,
+    tracesPromise,
+  ]);
+
+  return evaluateEvidenceCompleteness({
+    conversation,
+    triageResult,
+    imageParseResult,
+    traces,
+    now,
+  });
+}
+
+async function acknowledgeConversationEvidence(id, { acknowledged, acknowledgedNote } = {}) {
+  if (acknowledged !== true) {
+    throw createServiceError('ACKNOWLEDGEMENT_REQUIRED', 'acknowledged must be true', 400);
+  }
+  if (acknowledgedNote !== undefined && typeof acknowledgedNote !== 'string') {
+    throw createServiceError('INVALID_ACKNOWLEDGEMENT_NOTE', 'acknowledgedNote must be a string', 400);
+  }
+
+  const acknowledgedAt = new Date();
+  const note = typeof acknowledgedNote === 'string'
+    ? acknowledgedNote.trim().slice(0, 1000)
+    : '';
+  const conversation = await Conversation.findByIdAndUpdate(
+    id,
+    {
+      $set: {
+        'caseIntake.evidence.acknowledgedAt': acknowledgedAt,
+        'caseIntake.evidence.acknowledgedNote': note,
+      },
+    },
+    { returnDocument: 'after' }
+  ).lean();
+  if (!conversation) {
+    throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
+  }
+
+  return {
+    acknowledgedAt: conversation.caseIntake?.evidence?.acknowledgedAt || acknowledgedAt,
+    acknowledgedNote: conversation.caseIntake?.evidence?.acknowledgedNote || '',
+  };
 }
 
 async function listConversationStageEvents({ stage = 'parser', limit = 50 } = {}) {
@@ -259,7 +354,8 @@ async function updateConversation(id, { title, escalationId }) {
 // this deferred write cannot be clobbered by the pipeline's own save. Only
 // real pipeline runs hit this path; the operator test harness never has a
 // conversationId. Capped events array; rejects when nothing to record.
-async function recordConversationTriageResult(id, {
+async function recordConversationTriageResult(id, input = {}) {
+  const {
   triageCard,
   triageMeta,
   error,
@@ -268,7 +364,11 @@ async function recordConversationTriageResult(id, {
   startedAt,
   completedAt,
   traceId,
-} = {}) {
+  } = input;
+  const savedResultIdProvided = Object.prototype.hasOwnProperty.call(input, 'savedResultId');
+  const savedResultId = safeString(input.savedResultId, '').trim().slice(0, 160);
+  const standaloneRunId = safeString(input.standaloneRunId, '').trim().slice(0, 160);
+  const repairPackageId = safeString(input.repairPackageId, '').trim().slice(0, 160);
   const hasCard = triageCard && typeof triageCard === 'object';
   const hasMeta = triageMeta && typeof triageMeta === 'object';
   const hasError = error && typeof error === 'object';
@@ -290,7 +390,29 @@ async function recordConversationTriageResult(id, {
     startedAt,
     completedAt,
     traceId: safeString(traceId, ''),
+    savedResultId,
+    standaloneRunId,
+    repairPackageId,
   });
+  const triageRun = conversation.caseIntake?.runs?.find((run) => run?.phase === 'triage');
+  const failed = triageRun?.status === 'failed';
+  conversation.caseIntake = stampCaseIntakeEvidence(conversation.caseIntake, {
+    triage: {
+      planned: true,
+      attempted: true,
+      completed: !failed,
+      failed,
+      cardSaved: Boolean(hasCard),
+      resultSaveOk: savedResultIdProvided ? Boolean(savedResultId) : undefined,
+      saveFailureReported: savedResultIdProvided && !savedResultId,
+      savedResultId,
+      standaloneRunId,
+      providerPackageId: safeString(triageMeta?.providerPackageId, '').slice(0, 160),
+      repairPackageId,
+      completedAt: completedAt || new Date(),
+      reportedVia: 'server',
+    },
+  }, { updatedAt: completedAt || new Date() });
   conversation.markModified('caseIntake');
   await conversation.save();
 
@@ -468,10 +590,12 @@ async function deleteConversation(id) {
 }
 
 module.exports = {
+  acknowledgeConversationEvidence,
   deleteConversation,
   exportConversation,
   forkConversation,
   getConversation,
+  getConversationEvidence,
   getConversationMeta,
   getForkTree,
   listConversationStageEvents,

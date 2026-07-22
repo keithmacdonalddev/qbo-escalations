@@ -25,6 +25,8 @@ const { createApiError, sendApiError } = require('../lib/api-errors');
 
 const router = express.Router();
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
+const HISTORY_SAVE_TIMEOUT_MS = 5_000;
+const HISTORY_SAVE_FAILED = 'HISTORY_SAVE_FAILED';
 const VALID_PARSE_PROVIDERS = VALID_IMAGE_PARSER_PROVIDERS;
 const VALID_KEY_PROVIDERS = [
   'llm-gateway',
@@ -85,44 +87,71 @@ function buildParserValidationRecord(parseMeta) {
   };
 }
 
-function persistParseResult(record, sourceImage, onArchived) {
-  return (async () => {
-    if (!ImageParseResult.db || ImageParseResult.db.readyState !== 1) {
-      return;
-    }
-    try {
-      const saved = await ImageParseResult.create(record);
-      const archived = archiveParserImage(saved._id, sourceImage);
-      if (!archived.ok) {
-        verboseWarn('[image-parser-save] Source image archive failed:', archived.error);
-        if (typeof onArchived === 'function') {
-          try { onArchived({ ok: false, error: archived.error || 'archive_failed' }); } catch { /* noop */ }
-        }
-        return;
-      }
+async function persistParseResult(record, sourceImage, onArchived) {
+  if (!ImageParseResult.db || ImageParseResult.db.readyState !== 1) {
+    return { attempted: false, ok: false, resultId: null, error: null };
+  }
 
-      saved.set('image.sourceFileName', archived.fileName);
-      saved.set('image.sourceContentType', archived.contentType);
-      saved.set('image.sourceSizeBytes', archived.sizeBytes);
-      saved.set('image.sourceStoredAt', new Date());
-      await saved.save();
-      if (typeof onArchived === 'function') {
-        try {
-          onArchived({
-            ok: true,
-            id: saved._id ? String(saved._id) : '',
-            sizeBytes: archived.sizeBytes || 0,
-            contentType: archived.contentType || '',
-          });
-        } catch { /* noop */ }
-      }
-    } catch (err) {
-      verboseError('[image-parser-save] FAILED to save:', err.message);
-      if (typeof onArchived === 'function') {
-        try { onArchived({ ok: false, error: err.message || 'save_failed' }); } catch { /* noop */ }
-      }
+  let saved;
+  try {
+    saved = await ImageParseResult.create(record);
+  } catch (err) {
+    const message = (typeof err?.message === 'string' ? err.message : 'save_failed').slice(0, 500);
+    verboseError('[image-parser-save] FAILED to save:', message);
+    if (typeof onArchived === 'function') {
+      try { onArchived({ ok: false, error: HISTORY_SAVE_FAILED }); } catch { /* noop */ }
     }
-  })();
+    return { attempted: true, ok: false, resultId: null, error: HISTORY_SAVE_FAILED };
+  }
+
+  const resultId = saved._id ? String(saved._id) : null;
+  const archived = archiveParserImage(saved._id, sourceImage);
+  if (!archived.ok) {
+    verboseWarn('[image-parser-save] Source image archive failed:', archived.error);
+    if (typeof onArchived === 'function') {
+      try { onArchived({ ok: false, error: HISTORY_SAVE_FAILED }); } catch { /* noop */ }
+    }
+    return { attempted: true, ok: true, resultId, error: null };
+  }
+
+  try {
+    saved.set('image.sourceFileName', archived.fileName);
+    saved.set('image.sourceContentType', archived.contentType);
+    saved.set('image.sourceSizeBytes', archived.sizeBytes);
+    saved.set('image.sourceStoredAt', new Date());
+    await saved.save();
+    if (typeof onArchived === 'function') {
+      try {
+        onArchived({
+          ok: true,
+          id: resultId || '',
+          sizeBytes: archived.sizeBytes || 0,
+          contentType: archived.contentType || '',
+        });
+      } catch { /* noop */ }
+    }
+  } catch (err) {
+    verboseWarn('[image-parser-save] History row saved, but source image metadata update failed:', err.message);
+    if (typeof onArchived === 'function') {
+      try { onArchived({ ok: false, error: HISTORY_SAVE_FAILED }); } catch { /* noop */ }
+    }
+  }
+
+  return { attempted: true, ok: true, resultId, error: null };
+}
+
+async function awaitHistorySave(savePromise, timeoutMs = HISTORY_SAVE_TIMEOUT_MS) {
+  let timeoutHandle;
+  const timedOut = new Promise((resolve) => {
+    timeoutHandle = setTimeout(() => {
+      resolve({ attempted: true, resultId: null, error: null });
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([savePromise, timedOut]);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
 }
 
 // Rate limit: 10 requests per 60s for parse endpoint
@@ -281,13 +310,15 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       fallbackFrom: result.fallbackFrom || '',
     });
 
-    // Fire-and-forget save to MongoDB + on-disk image archive
+    // Bound the non-fatal history save so database/archive latency cannot hold
+    // the parser response open indefinitely. The save keeps running after the
+    // timeout; the receipt then reports only that confirmation was unavailable.
     bus.emit('parser.result_save_started', {
       provider,
       model: result.usage?.model || model || '',
       role: result.role || '',
     });
-    persistParseResult({
+    responseBody.historySave = await awaitHistorySave(persistParseResult({
       provider: providerUsed,
       model: result.usage?.model || result.modelUsed || model || '',
       modelRequested: model || '',
@@ -323,7 +354,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
           error: archived.error || 'archive_failed',
         });
       }
-    });
+    }));
 
     if (streamMode) {
       if (result.providerTrace?.providerPackageId) {
@@ -380,8 +411,8 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       displayMessage: err.message || 'Image parse failed',
     });
 
-    // Fire-and-forget save error to MongoDB + on-disk image archive
-    persistParseResult({
+    // Error history remains non-fatal, but its receipt is returned too.
+    const historySave = await awaitHistorySave(persistParseResult({
       provider,
       modelRequested: model || '',
       parserPromptId: effectivePromptId,
@@ -399,7 +430,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
           contentType: archived.contentType || '',
         });
       }
-    });
+    }));
 
     return respondJson(status, {
       ok: false,
@@ -407,6 +438,7 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       error: err.message || 'Image parse failed',
       captureMode: err.captureMode || err.providerTrace?.captureMode || null,
       providerTrace: err.providerTrace || null,
+      historySave,
     });
   }
 });
@@ -663,5 +695,7 @@ router.get('/stats', async (req, res) => {
     },
   });
 });
+
+router._test = { awaitHistorySave };
 
 module.exports = router;

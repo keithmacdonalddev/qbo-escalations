@@ -309,6 +309,29 @@ export async function getConversation(id) {
   return data.conversation;
 }
 
+/** Get the server's deterministic evidence-completeness evaluation. */
+export async function getConversationEvidence(id) {
+  const data = await apiFetchJson(
+    `${BASE}/conversations/${encodeURIComponent(id)}/evidence`,
+    {},
+    'Could not check evidence completeness'
+  );
+  return data.evidence;
+}
+
+/** Record that the operator reviewed the current evidence warning. */
+export async function acknowledgeConversationEvidence(id, acknowledgedNote = '') {
+  const data = await apiFetchJson(`${BASE}/conversations/${encodeURIComponent(id)}/evidence/ack`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      acknowledged: true,
+      ...(acknowledgedNote ? { acknowledgedNote } : {}),
+    }),
+  }, 'Could not acknowledge the evidence warning');
+  return data.acknowledgement;
+}
+
 /** Get lightweight conversation metadata without message history */
 export async function getConversationMeta(id) {
   const data = await apiFetchJson(`${BASE}/conversations/${id}/meta`, {}, 'Conversation not found');

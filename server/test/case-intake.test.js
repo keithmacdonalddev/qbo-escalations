@@ -7,6 +7,8 @@ const {
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,
+  normalizePipelineReceipts,
+  stampCaseIntakeEvidence,
 } = require('../src/lib/case-intake');
 
 const STARTED_AT = new Date('2026-04-29T12:00:00.000Z');
@@ -277,4 +279,42 @@ test('appendCaseIntakeFollowUp stores parsed phone-agent chat context without ch
   assert.equal(updated.followUps[0].parserProvider, 'llm-gateway');
   assert.equal(updated.followUps[0].traceId, 'trace-2');
   assert.equal(updated.canonicalTemplate, intake.canonicalTemplate);
+});
+
+test('pipeline receipts ignore unknown fields, bound client strings, and preserve prior receipts', () => {
+  const normalized = normalizePipelineReceipts({
+    parser: {
+      runId: ` parser-${'x'.repeat(300)} `,
+      historySaveOk: false,
+      resultId: 'parse-result-1',
+      providerPackageId: 'package-1',
+      unknown: 'ignored',
+    },
+    triage: {
+      planned: false,
+      skipReason: `validation-${'y'.repeat(700)}`,
+      unknown: true,
+    },
+    unknown: { accepted: false },
+  });
+
+  assert.equal(normalized.parser.runId.length, 160);
+  assert.equal(normalized.parser.historySaveOk, false);
+  assert.equal(normalized.parser.unknown, undefined);
+  assert.equal(normalized.triage.planned, false);
+  assert.equal(normalized.triage.skipped, true);
+  assert.equal(normalized.triage.skipReason.length, 500);
+  assert.equal(normalized.unknown, undefined);
+
+  const stamped = stampCaseIntakeEvidence({ status: 'analyst-running', runs: [] }, normalized, {
+    updatedAt: STARTED_AT,
+  });
+  const restamped = stampCaseIntakeEvidence(stamped, {
+    analyst: { attempted: true, completed: true, messageSaved: true },
+  }, { updatedAt: COMPLETED_AT });
+
+  assert.equal(restamped.evidence.contractVersion, 1);
+  assert.equal(restamped.evidence.receipts.parser.historySaveOk, false);
+  assert.equal(restamped.evidence.receipts.triage.skipped, true);
+  assert.equal(restamped.evidence.receipts.analyst.messageSaved, true);
 });

@@ -356,6 +356,12 @@ test('POST /parse success response includes image metadata and structured fields
     assert.equal(res.payload.parseMeta.confidence, 'high');
     assert.equal(res.payload.meta.originalFormat, 'image/png');
     assert.equal(typeof res.payload.elapsedMs, 'number');
+    assert.deepEqual(res.payload.historySave, {
+      attempted: false,
+      ok: false,
+      resultId: null,
+      error: null,
+    });
   } finally {
     _mockParseImage = null;
   }
@@ -405,6 +411,10 @@ test('POST /parse persists validation record to parse history', async () => {
     const res = makeRes();
     await handler(makeReq({ image: 'not-valid-base64!!!!', provider: 'lm-studio' }), res);
     assert.equal(res.payload.ok, true);
+    assert.equal(res.payload.historySave.attempted, true);
+    assert.equal(res.payload.historySave.ok, true);
+    assert.ok(res.payload.historySave.resultId);
+    assert.equal(res.payload.historySave.error, null);
 
     let saved = null;
     for (let i = 0; i < 20; i += 1) {
@@ -414,6 +424,7 @@ test('POST /parse persists validation record to parse history', async () => {
     }
 
     assert.ok(saved, 'expected parse result history row to be saved');
+    assert.equal(saved._id.toString(), res.payload.historySave.resultId);
     assert.equal(saved.parsedText, 'COID/MID: 123\nCASE: CS-001');
     assert.deepEqual(saved.parseFields, { coid: '123', caseNumber: 'CS-001', category: 'technical' });
     assert.equal(saved.parseMeta.passed, false);
@@ -428,6 +439,44 @@ test('POST /parse persists validation record to parse history', async () => {
     await ImageParseResult.deleteMany({});
     await mongo.disconnect();
   }
+});
+
+test('POST /parse returns a generic history-save error instead of database details', async () => {
+  const handler = findHandler('post', '/parse');
+  const originalCreate = ImageParseResult.create;
+  await mongo.connect();
+  _mockParseImage = async () => ({
+    text: 'COID/MID: 123',
+    role: 'escalation',
+    usage: { model: 'test-model' },
+    parseFields: { coid: '123' },
+  });
+  ImageParseResult.create = async () => {
+    throw new Error('MongoServerError host=db.internal.example document={secret:true}');
+  };
+
+  try {
+    const res = makeRes();
+    await handler(makeReq({ image: 'AAAA', provider: 'lm-studio' }), res);
+    assert.equal(res.payload.ok, true);
+    assert.equal(res.payload.historySave.attempted, true);
+    assert.equal(res.payload.historySave.ok, false);
+    assert.equal(res.payload.historySave.error, 'HISTORY_SAVE_FAILED');
+    assert.doesNotMatch(JSON.stringify(res.payload.historySave), /db\.internal|secret/i);
+  } finally {
+    ImageParseResult.create = originalCreate;
+    _mockParseImage = null;
+    await mongo.disconnect();
+  }
+});
+
+test('parser history wait times out without claiming the save failed', async () => {
+  const result = await routerModule._test.awaitHistorySave(new Promise(() => {}), 10);
+
+  assert.equal(result.attempted, true);
+  assert.equal(Object.prototype.hasOwnProperty.call(result, 'ok'), false);
+  assert.equal(result.resultId, null);
+  assert.equal(result.error, null);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════

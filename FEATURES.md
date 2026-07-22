@@ -270,3 +270,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: medium
 Special Feature: Execution Identity Verification - Attach the provider, model, transport, and fallback path that actually produced each agent result, then compare that evidence with what the workflow was configured to use. Unexpected fallbacks or routing mismatches would be visibly flagged before a human trusts or publishes the result, turning provider identity from a decorative label into auditable evidence.
+
+Date: 2026-07-21
+Time: 21:16 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: high
+Special Feature: Evidence Recovery Workbench - When a completeness check finds a gap, inspect already-saved traces, provider packages, and still-visible local output, then offer a human-reviewed recovery plan that restores only provable artifacts with their original provenance. It would never silently rerun AI or change the verdict; the session becomes complete only after the repaired artifact is saved and the deterministic contract verifies it.

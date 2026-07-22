@@ -2791,3 +2791,200 @@
     transition: none !important;
   }
 }
+
+/* Evidence completeness: compact stage markers, one end-of-run summary, and
+   local protection for a triage card whose conversation write failed. */
+.v5-shell .v5-workflow-card__evidence-warning {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--v5-amber) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--v5-amber) 14%, transparent);
+  color: var(--v5-amber);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.v5-shell .v5-triage-unsaved {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--v5-amber) 54%, var(--v5-border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--v5-amber) 10%, var(--v5-panel));
+}
+
+.v5-shell .v5-triage-unsaved__copy {
+  display: grid;
+  gap: 3px;
+  color: var(--v5-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.v5-shell .v5-triage-unsaved__copy strong {
+  color: var(--v5-amber);
+  font-size: 12px;
+}
+
+.v5-shell .v5-triage-unsaved__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.v5-shell .v5-triage-unsaved__actions button,
+.v5-shell .v5-run-evidence__ack,
+.v5-shell .v5-run-evidence__retry {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--v5-border);
+  border-radius: 6px;
+  background: var(--v5-panel);
+  color: var(--v5-ink);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.v5-shell .v5-triage-unsaved__actions button:hover,
+.v5-shell .v5-run-evidence__ack:hover,
+.v5-shell .v5-run-evidence__retry:hover {
+  border-color: var(--v5-amber);
+}
+
+.v5-shell .v5-triage-unsaved__feedback {
+  color: var(--v5-muted);
+  font-size: 10px;
+}
+
+.v5-shell .v5-run-evidence {
+  flex: none;
+  width: min(100%, 760px);
+  align-self: center;
+  color: var(--v5-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.v5-shell .v5-run-evidence--complete,
+.v5-shell .v5-run-evidence--neutral {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 2px;
+}
+
+.v5-shell .v5-run-evidence--complete {
+  color: color-mix(in srgb, var(--v5-green) 72%, var(--v5-muted));
+}
+
+.v5-shell .v5-run-evidence--incomplete {
+  display: grid;
+  gap: 10px;
+  padding: 13px 14px;
+  border: 1px solid color-mix(in srgb, var(--v5-amber) 58%, var(--v5-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--v5-amber) 9%, var(--v5-panel));
+  color: var(--v5-ink);
+}
+
+.v5-shell .v5-run-evidence__heading {
+  color: var(--v5-amber);
+  font-size: 13px;
+}
+
+.v5-shell .v5-run-evidence__body,
+.v5-shell .v5-run-evidence__answer {
+  display: grid;
+  gap: 6px;
+}
+
+.v5-shell .v5-run-evidence__answer > strong {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.v5-shell .v5-run-evidence__answer p {
+  margin: 0;
+  color: var(--v5-muted);
+}
+
+.v5-shell .v5-run-evidence__missing-list {
+  display: grid;
+  gap: 5px;
+}
+
+.v5-shell .v5-run-evidence__missing-list details,
+.v5-shell .v5-run-evidence__technical {
+  border: 1px solid var(--v5-border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--v5-panel) 82%, transparent);
+}
+
+.v5-shell .v5-run-evidence__missing-list summary,
+.v5-shell .v5-run-evidence__technical > summary,
+.v5-shell .v5-run-evidence--acknowledged > summary {
+  padding: 7px 9px;
+  cursor: pointer;
+  font-weight: 650;
+}
+
+.v5-shell .v5-run-evidence__missing-list p {
+  padding: 0 9px 8px;
+}
+
+.v5-shell .v5-run-evidence__technical dl,
+.v5-shell .v5-run-evidence__technical ul {
+  margin: 0;
+  padding: 0 10px 10px;
+}
+
+.v5-shell .v5-run-evidence__technical dl > div {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.35fr) 1fr;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.v5-shell .v5-run-evidence__technical dt,
+.v5-shell .v5-run-evidence__technical code {
+  color: var(--v5-amber);
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.v5-shell .v5-run-evidence__technical dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.v5-shell .v5-run-evidence__technical ul {
+  padding-left: 28px;
+}
+
+.v5-shell .v5-run-evidence--acknowledged {
+  padding: 5px 0;
+  border-top: 1px solid var(--v5-border);
+  border-bottom: 1px solid var(--v5-border);
+  opacity: 0.8;
+}
+
+.v5-shell .v5-run-evidence--acknowledged .v5-run-evidence__body {
+  padding: 8px 10px 10px;
+}
+
+.v5-shell .v5-run-evidence__ack {
+  justify-self: start;
+  border-color: color-mix(in srgb, var(--v5-amber) 55%, var(--v5-border));
+}
+
+.v5-shell .v5-run-evidence__ack-error {
+  margin: 0;
+  color: var(--v5-red);
+}

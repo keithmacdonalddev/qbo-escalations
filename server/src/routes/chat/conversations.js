@@ -3,10 +3,12 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const {
+  acknowledgeConversationEvidence,
   deleteConversation,
   exportConversation,
   forkConversation,
   getConversation,
+  getConversationEvidence,
   getConversationMeta,
   getForkTree,
   listConversationStageEvents,
@@ -106,6 +108,24 @@ router.get('/:id/meta', async (req, res) => {
     return res.json({ ok: true, conversation });
   } catch (err) {
     return sendConversationError(res, err, 'NOT_FOUND', 'Conversation not found');
+  }
+});
+
+router.get('/:id/evidence', async (req, res) => {
+  try {
+    const evidence = await getConversationEvidence(req.params.id);
+    return res.json({ ok: true, evidence });
+  } catch (err) {
+    return sendConversationError(res, err, 'EVIDENCE_FAILED', 'Failed to evaluate conversation evidence');
+  }
+});
+
+router.post('/:id/evidence/ack', async (req, res) => {
+  try {
+    const acknowledgement = await acknowledgeConversationEvidence(req.params.id, req.body || {});
+    return res.json({ ok: true, acknowledgement });
+  } catch (err) {
+    return sendConversationError(res, err, 'EVIDENCE_ACK_FAILED', 'Failed to acknowledge conversation evidence');
   }
 });
 

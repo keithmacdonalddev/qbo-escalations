@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sendChatMessage } from '../../api/chatApi.js';
-import { apiFetch } from '../../api/http.js';
+import { getConversationEvidence, sendChatMessage } from '../../api/chatApi.js';
+import { apiFetch, readApiResponse } from '../../api/http.js';
 import { consumeSSEStream } from '../../api/sse.js';
 import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
 import {
@@ -31,6 +31,9 @@ const INITIAL_STAGE_STATE = {
   inv: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
   main: { status: 'pending', startedAt: null, finishedAt: null, durationMs: null, error: null, fallbackUsed: false },
 };
+
+const INITIAL_TRIAGE_CONVERSATION_SAVE = { state: 'idle', error: null, retryAllowed: false };
+const INITIAL_RUN_EVIDENCE = { state: 'idle', evidence: null, error: null };
 
 const PARSED_FIELD_LABELS = [
   { key: 'coid', label: 'COID' },
@@ -191,6 +194,26 @@ function buildPipelineChatPayload(basePayload, runtimeByStage = {}) {
   };
 }
 
+function getTriagePlan(parseResult) {
+  const text = (parseResult?.sourceText || parseResult?.text || '').trim();
+  const role = cleanRuntimeValue(parseResult?.role).toLowerCase();
+  if (!text) {
+    return {
+      planned: false,
+      skipReason: 'Parser returned no escalation text for triage.',
+      skipCode: 'TRIAGE_EMPTY_INPUT',
+    };
+  }
+  if (role && role !== 'escalation') {
+    return {
+      planned: false,
+      skipReason: `Parser classified this image as ${role}.`,
+      skipCode: 'TRIAGE_NON_ESCALATION_ROLE',
+    };
+  }
+  return { planned: true, skipReason: '', skipCode: '' };
+}
+
 async function readPipelineRuntimeForExecution() {
   try {
     return await readPipelineProfileRuntimeStates();
@@ -231,6 +254,7 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
 
   let data;
   let sawFailureStageEvent = false;
+  let parserRunId = '';
   if (isSse) {
     // The /parse SSE route delivers every terminal outcome — success AND
     // failure — as a single `parse_complete` frame ({ ok:false, code, error }
@@ -240,6 +264,7 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
     let completed = null;
     await consumeSSEStream(res, (eventType, payload) => {
       if (eventType === 'stage_event') {
+        if (payload?.runId) parserRunId = payload.runId;
         if (
           payload?.kind === 'error'
           || /fail|error|timeout/i.test(String(payload?.data?.status || ''))
@@ -290,6 +315,8 @@ async function parseImageWithApi(imageDataUrl, signal, parserRuntime = null, onS
     modelUsed: data.modelUsed || data.usage?.model || cfg.model || '',
     reasoningEffortUsed: cfg.reasoningEffort || '',
     providerTrace: data.providerTrace || null,
+    historySave: data.historySave || null,
+    runId: data.runId || parserRunId,
     role: data.role || '',
     elapsedMs: Date.now() - start,
   };
@@ -322,6 +349,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
   // pipeline-card popout can show terminal-style logs for whichever card the
   // user clicks. Cleared on reset().
   const [stageEvents, setStageEvents] = useState({});
+  const [triageConversationSave, setTriageConversationSave] = useState(INITIAL_TRIAGE_CONVERSATION_SAVE);
+  const [runEvidence, setRunEvidence] = useState(INITIAL_RUN_EVIDENCE);
 
   const abortRef = useRef(null);
   const parseAbortRef = useRef(null);
@@ -349,6 +378,7 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
   const chatLegSettledRef = useRef(false);
   const conversationIdRef = useRef(null);
   const tokenRef = useRef(0);
+  const evidenceFetchSequenceRef = useRef(0);
   const streamingTextRef = useRef('');
   const toastedStageKeysRef = useRef(new Set());
   // Deferred widget-switch timer scheduled in captureImage(). Tracked so it can
@@ -397,6 +427,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     setRequestError(null);
     setChatLog([]);
     setStageEvents({});
+    setTriageConversationSave(INITIAL_TRIAGE_CONVERSATION_SAVE);
+    setRunEvidence(INITIAL_RUN_EVIDENCE);
   }, []);
 
   // True resume: when the chat is opened at #/chat/{id} (a saved session),
@@ -454,6 +486,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     if (imageCapturedRef.current || abortRef.current || caseIntakeSourceRef.current === 'live') return;
     const record = savedCaseIntake && typeof savedCaseIntake === 'object' ? savedCaseIntake : null;
     const runs = Array.isArray(record?.runs) ? record.runs : [];
+    evidenceFetchSequenceRef.current += 1;
+    setRunEvidence(INITIAL_RUN_EVIDENCE);
     caseIntakeSourceRef.current = record ? 'saved' : null;
     setCaseIntake(record);
     setTriageCard(record?.triageCard && typeof record.triageCard === 'object' ? record.triageCard : null);
@@ -655,9 +689,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     if (data?.caseIntake) handleCaseIntake(data.caseIntake);
   }, [handleCaseIntake]);
 
-  // POST the settled triage result onto the saved conversation. Fire-and-
-  // forget: a failure here only means the resumed session shows the honest
-  // "Waiting" triage state, exactly as before this persistence existed.
+  // POST the settled triage result onto the saved conversation and preserve an
+  // honest local save state so the visible card is protected if this write fails.
   // Runs at most once per pipeline run, only when a conversation id exists
   // (so the operator test harness, which has no conversation, can never
   // write), and only after both the triage stream and the chat leg settle.
@@ -666,16 +699,42 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     if (!pending || pending.posted) return;
     if (!chatLegSettledRef.current) return;
     const conversationIdForPersist = conversationIdRef.current;
-    if (!conversationIdForPersist) return;
+    if (!conversationIdForPersist) {
+      if (tokenRef.current !== pending.token) return;
+      pending.posted = true;
+      setTriageConversationSave({
+        state: 'failed',
+        error: 'The session was never created, so the triage card could not be saved.',
+        retryAllowed: false,
+      });
+      return;
+    }
     pending.posted = true;
-    apiFetch(`/api/conversations/${encodeURIComponent(conversationIdForPersist)}/triage-result`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(pending.payload),
-      timeout: 15_000,
-      noRetry: true,
-    }).catch(() => { /* non-fatal — resume shows honest Waiting */ });
-  }, []);
+    setTriageConversationSave({ state: 'pending', error: null, retryAllowed: false });
+    void (async () => {
+      try {
+        const response = await apiFetch(`/api/conversations/${encodeURIComponent(conversationIdForPersist)}/triage-result`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pending.payload),
+          timeout: 15_000,
+          noRetry: true,
+        });
+        const data = await readApiResponse(response, 'The triage card could not be saved to this session.');
+        if (tokenRef.current !== pending.token) return;
+        if (data?.caseIntake) handleCaseIntake(data.caseIntake);
+        setTriageConversationSave({ state: 'saved', error: null, retryAllowed: false });
+      } catch (err) {
+        if (tokenRef.current !== pending.token) return;
+        const normalized = normalizeError(err);
+        setTriageConversationSave({
+          state: 'failed',
+          error: normalized?.message || 'The triage card could not be saved to this session.',
+          retryAllowed: false,
+        });
+      }
+    })();
+  }, [handleCaseIntake]);
 
   const handleChunk = useCallback((data) => {
     const piece = data?.text || '';
@@ -774,19 +833,16 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     abortRef.current = abort;
   }, [handleCaseIntake, handleChunk, handleDone, handleError, handleInit, handleInvMatches, handleStageEvent]);
 
-  const startTriageStream = useCallback((parseResult, runtimeByStage, token) => {
+  const startTriageStream = useCallback((parseResult, runtimeByStage, token, triagePlan = getTriagePlan(parseResult)) => {
     const text = (parseResult?.sourceText || parseResult?.text || '').trim();
-    const role = cleanRuntimeValue(parseResult?.role).toLowerCase();
     const now = Date.now();
 
-    if (!text || (role && role !== 'escalation')) {
-      const reason = !text
-        ? 'Parser returned no escalation text for triage.'
-        : `Parser classified this image as ${role}.`;
+    if (!triagePlan.planned) {
       pushLocalStageEvent('triage', 'stage.skipped', {
-        code: !text ? 'TRIAGE_EMPTY_INPUT' : 'TRIAGE_NON_ESCALATION_ROLE',
-        reason,
+        code: triagePlan.skipCode,
+        reason: triagePlan.skipReason,
       });
+      setTriageConversationSave({ state: 'skipped', error: null, retryAllowed: false });
       setStageState((prev) => ({
         ...prev,
         triage: {
@@ -825,6 +881,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     // so the settled result persists onto the conversation with the same
     // event fidelity the parser/INV stages get from their server-side buses.
     const triageStreamEvents = [];
+    let standaloneRunId = '';
+    setTriageConversationSave({ state: 'pending', error: null, retryAllowed: false });
 
     setStageState((prev) => ({
       ...prev,
@@ -868,6 +926,7 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     }, {
       onStageEvent: (data) => {
         if (tokenRef.current !== token) return;
+        if (data?.runId) standaloneRunId = data.runId;
         if (triageStreamEvents.length < 250) triageStreamEvents.push(data);
         handleStageEvent(data);
       },
@@ -908,19 +967,28 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
         }));
         // Stash the settled result for deferred persistence onto the
         // conversation (failed and fallback outcomes persist honestly too).
+        const persistedPayload = {
+          triageCard: card || null,
+          triageMeta: data?.triageMeta || null,
+          error: failed
+            ? { code: data?.code || 'TRIAGE_FAILED', message: data?.error || 'Triage failed.' }
+            : null,
+          events: triageStreamEvents,
+          durationMs: data?.elapsedMs ?? (finishedAt - startedAt),
+          startedAt,
+          completedAt: finishedAt,
+        };
+        if (typeof data?.savedResultId === 'string') {
+          persistedPayload.savedResultId = data.savedResultId;
+        }
+        const completedRunId = cleanRuntimeValue(data?.runId) || standaloneRunId;
+        if (completedRunId) persistedPayload.standaloneRunId = completedRunId;
+        const repairPackageId = cleanRuntimeValue(data?.triageMeta?.repair?.packageId);
+        if (repairPackageId) persistedPayload.repairPackageId = repairPackageId;
         pendingTriagePersistRef.current = {
           posted: false,
-          payload: {
-            triageCard: card || null,
-            triageMeta: data?.triageMeta || null,
-            error: failed
-              ? { code: data?.code || 'TRIAGE_FAILED', message: data?.error || 'Triage failed.' }
-              : null,
-            events: triageStreamEvents,
-            durationMs: data?.elapsedMs ?? (finishedAt - startedAt),
-            startedAt,
-            completedAt: finishedAt,
-          },
+          token,
+          payload: persistedPayload,
         };
         persistTriageResult();
       },
@@ -954,20 +1022,23 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
         });
         // Persist the failure honestly (status 'failed' + summary) so a
         // resumed session reflects what actually happened.
+        const persistedPayload = {
+          triageCard: null,
+          triageMeta: null,
+          error: {
+            code: normalized.code || 'TRIAGE_FAILED',
+            message: normalized.message || 'Triage failed',
+          },
+          events: triageStreamEvents,
+          durationMs: failedAt - startedAt,
+          startedAt,
+          completedAt: failedAt,
+        };
+        if (standaloneRunId) persistedPayload.standaloneRunId = standaloneRunId;
         pendingTriagePersistRef.current = {
           posted: false,
-          payload: {
-            triageCard: null,
-            triageMeta: null,
-            error: {
-              code: normalized.code || 'TRIAGE_FAILED',
-              message: normalized.message || 'Triage failed',
-            },
-            events: triageStreamEvents,
-            durationMs: failedAt - startedAt,
-            startedAt,
-            completedAt: failedAt,
-          },
+          token,
+          payload: persistedPayload,
         };
         persistTriageResult();
       },
@@ -992,6 +1063,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     // previous run so this run's result is stashed and posted on its own.
     pendingTriagePersistRef.current = null;
     chatLegSettledRef.current = false;
+    setTriageConversationSave(INITIAL_TRIAGE_CONVERSATION_SAVE);
+    setRunEvidence(INITIAL_RUN_EVIDENCE);
     setRequestError(null);
     setAnalyst(buildEmptyAnalystState());
     // Mark parser as running while the image-parser HTTP call runs.
@@ -1149,7 +1222,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
       elapsedMs: parseResult.elapsedMs ?? 0,
       textLength: (parseResult.sourceText || parseResult.text || '').length,
     });
-    startTriageStream(parseResult, runtimeByStage, token);
+    const triagePlan = getTriagePlan(parseResult);
+    startTriageStream(parseResult, runtimeByStage, token, triagePlan);
 
     // Submit to /api/chat with parsedEscalationText.
     const payload = buildPipelineChatPayload({
@@ -1163,6 +1237,24 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
       parsedEscalationProvider: parseResult.providerUsed,
       parsedEscalationModel: parseResult.modelUsed,
       parsedEscalationElapsedMs: parseResult.elapsedMs,
+      pipelineReceipts: {
+        parser: {
+          runId: cleanRuntimeValue(parseResult.runId),
+          ...(parseResult.historySave
+            ? {
+                ...(typeof parseResult.historySave.ok === 'boolean'
+                  ? { historySaveOk: parseResult.historySave.ok }
+                  : {}),
+                resultId: cleanRuntimeValue(parseResult.historySave.resultId),
+              }
+            : {}),
+          providerPackageId: cleanRuntimeValue(parseResult.providerTrace?.providerPackageId),
+        },
+        triage: {
+          planned: triagePlan.planned,
+          skipReason: triagePlan.skipReason,
+        },
+      },
     }, runtimeByStage);
     runChatStream(payload, token);
   }, [conversationId, resumeTargetId, handleStageEvent, pushLocalStageEvent, runChatStream, startTriageStream]);
@@ -1419,6 +1511,46 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     && (stageState.inv.status === 'done' || stageState.inv.status === 'failed')
     && (stageState.main.status === 'done' || stageState.main.status === 'failed');
 
+  const refreshRunEvidence = useCallback(async () => {
+    const id = conversationIdRef.current || conversationId || resumeTargetId;
+    const runToken = tokenRef.current;
+    const sequence = ++evidenceFetchSequenceRef.current;
+    if (!id) {
+      if (tokenRef.current !== runToken || evidenceFetchSequenceRef.current !== sequence) return null;
+      setRunEvidence({
+        state: 'unavailable',
+        evidence: null,
+        error: 'Evidence completeness is unavailable because the session was never created.',
+      });
+      return null;
+    }
+    setRunEvidence((prev) => ({ state: 'loading', evidence: prev.evidence, error: null }));
+    try {
+      const evidence = await getConversationEvidence(id);
+      if (tokenRef.current !== runToken || evidenceFetchSequenceRef.current !== sequence) return null;
+      setRunEvidence({ state: 'ready', evidence, error: null });
+      return evidence;
+    } catch (err) {
+      if (tokenRef.current !== runToken || evidenceFetchSequenceRef.current !== sequence) return null;
+      const normalized = normalizeError(err);
+      setRunEvidence({
+        state: 'unavailable',
+        evidence: null,
+        error: normalized?.message || 'Evidence completeness could not be checked.',
+      });
+      return null;
+    }
+  }, [conversationId, resumeTargetId]);
+
+  useEffect(() => {
+    const mainSettled = stageState.main.status === 'done' || stageState.main.status === 'failed';
+    const triageSettled = ['saved', 'failed', 'skipped'].includes(triageConversationSave.state);
+    const resumedSessionSettled = caseIntakeSourceRef.current === 'saved'
+      && ['analyst-complete', 'failed'].includes(caseIntake?.status);
+    if ((!resumedSessionSettled && (!mainSettled || !triageSettled)) || runEvidence.state !== 'idle') return;
+    void refreshRunEvidence();
+  }, [caseIntake?.status, refreshRunEvidence, runEvidence.state, stageState.main.status, triageConversationSave.state]);
+
   return {
     imageCaptured,
     captureImage,
@@ -1437,6 +1569,9 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     capturedFileMeta,
     caseIntake,
     triageCard,
+    triageConversationSave,
+    runEvidence,
+    refreshRunEvidence,
     invMatches,
     parsedFields,
     analyst,

@@ -59,7 +59,10 @@ const {
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,
+  normalizePipelineReceipts,
+  stampCaseIntakeEvidence,
 } = require('../../lib/case-intake');
+const { isProviderCallPackageCaptureEnabled } = require('../../services/provider-call-package-recorder');
 const { createStageEventBus } = require('../../lib/stage-events');
 const { createLinkedEscalationFromConversation } = require('../../lib/escalation-dedup');
 const { triggerKnowledgeDraftForEscalation } = require('../../services/knowledgebase-draft-trigger');
@@ -97,6 +100,50 @@ const CHAT_ACTIVITY_AGENT_ID = 'chat';
 // `image-analyst`). Its persisted profile runtime carries the operator's
 // configured backup.
 const IMAGE_PARSER_AGENT_ID = 'image-analyst';
+
+async function persistRetryAnalystFailure(conversation, {
+  provider,
+  model,
+  traceId,
+  requestId,
+  packageCaptureEnabled,
+  errorCode,
+  errorMessage,
+  directUpdate = false,
+} = {}) {
+  if (!conversation.caseIntake || conversation.caseIntake.status === 'none') return;
+  const completedAt = new Date();
+  conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
+    provider,
+    model,
+    traceId,
+    error: { code: errorCode, message: errorMessage },
+    evidenceReceipt: {
+      attempted: true,
+      completed: false,
+      failed: true,
+      messageSaved: false,
+      thinkingCaptured: false,
+      traceId: safeString(traceId, ''),
+      requestId,
+      provider,
+      packageCaptureEnabled,
+      errorCode,
+      completedAt,
+      reportedVia: 'server',
+    },
+    completedAt,
+  });
+  conversation.markModified?.('caseIntake');
+  if (directUpdate) {
+    await Conversation.updateOne(
+      { _id: conversation._id },
+      { $set: { caseIntake: conversation.caseIntake } }
+    ).catch(() => {});
+    return;
+  }
+  await saveConversationLenient(conversation).catch(() => {});
+}
 
 // Resolve the operator's CONFIGURED image-parser backup from the `image-analyst`
 // profile runtime so the chat image-parse leg fails over to it (not just the
@@ -367,6 +414,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     parsedEscalationProvider,
     parsedEscalationModel,
     parsedEscalationElapsedMs,
+    pipelineReceipts,
     followUpContextText,
     followUpContextSource,
     followUpContextProvider,
@@ -375,6 +423,8 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     timeoutMs,
     settings: rawSettings,
   } = req.body || {};
+  const normalizedPipelineReceipts = normalizePipelineReceipts(pipelineReceipts);
+  const packageCaptureEnabled = isProviderCallPackageCaptureEnabled();
   const reasoningEffort = req.body?.reasoningEffort;
   const runtimeSettings = normalizeChatRuntimeSettings(rawSettings);
   const normalizedImagesResult = normalizeChatImages(requestedImages);
@@ -765,6 +815,68 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     // events when the live SSE channel has already closed.
     conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'parser', parserEventBus.flush());
     conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'inv', knownIssueEventBus.flush());
+    const parserRun = conversation.caseIntake.runs.find((run) => run?.phase === 'parse-template');
+    const invRun = conversation.caseIntake.runs.find((run) => run?.phase === 'known-issue-search');
+    const invSkipCode = imageTriageContext?.error?.code
+      || (nonEscalationIntent ? 'NOT_APPLICABLE' : 'PARSE_VALIDATION_FAILED');
+    const invSkipReason = imageTriageContext?.error?.message
+      || (nonEscalationIntent
+        ? 'Known-issue search did not apply to this non-escalation request.'
+        : 'Parsed escalation validation did not pass, so known-issue search was skipped.');
+    conversation.caseIntake = stampCaseIntakeEvidence(conversation.caseIntake, {
+      parser: {
+        ...(normalizedPipelineReceipts.parser || {}),
+        attempted: true,
+        completed: parserRun?.status === 'completed',
+        failed: parserRun?.status === 'failed',
+        contentProduced: Boolean(parsedEscalationCanonicalText),
+        canonicalTemplateSaved: Boolean(conversation.caseIntake.canonicalTemplate),
+        parsedFieldsSaved: Boolean(
+          conversation.caseIntake.parseFields
+          && Object.keys(conversation.caseIntake.parseFields).length > 0
+        ),
+        provider: parserRun?.provider || parsedEscalationProvider || '',
+        packageCaptureEnabled,
+        reportedVia: normalizedPipelineReceipts.parser ? 'client-and-server' : 'server',
+      },
+      inv: invRun
+        ? {
+            attempted: true,
+            completed: invRun.status === 'completed',
+            failed: invRun.status === 'failed',
+            resultSaved: Boolean(conversation.caseIntake.knownIssueSearchResult),
+            provider: invRun.provider || '',
+            packageCaptureEnabled,
+            reportedVia: 'server',
+          }
+        : {
+            attempted: false,
+            skipped: true,
+            skipReason: invSkipCode,
+            skipExplanation: invSkipReason,
+            packageCaptureEnabled,
+            reportedVia: 'server',
+          },
+      triage: normalizedPipelineReceipts.triage
+        ? {
+            ...normalizedPipelineReceipts.triage,
+            packageCaptureEnabled,
+          }
+        : imageTriageContext?.parseFields && Object.keys(imageTriageContext.parseFields).length > 0
+          ? {
+              planned: true,
+              packageCaptureEnabled,
+              reportedVia: 'server-inferred',
+            }
+          : {
+              planned: false,
+              attempted: false,
+              skipped: true,
+              skipReason: invSkipCode,
+              packageCaptureEnabled,
+              reportedVia: 'server-inferred',
+            },
+    }, { updatedAt: traceStartedAt });
     conversation.markModified?.('caseIntake');
     recordCaseIntakeWorkflowActivities(conversation.caseIntake, {
       conversationId: conversation._id ? conversation._id.toString() : '',
@@ -968,7 +1080,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
   // SSE safety timeout — force-close if stream never settles
-  sseSafetyTimeout = setTimeout(() => {
+  sseSafetyTimeout = setTimeout(async () => {
     if (streamSettled || responseClosed) return;
     console.error('[chat] SSE safety timeout hit after %dms — force-closing hung stream', SSE_SAFETY_TIMEOUT_MS);
     streamSettled = true;
@@ -992,11 +1104,25 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           code: 'SSE_STREAM_TIMEOUT',
           message: 'Request timed out - please try again',
         },
+        evidenceReceipt: {
+          attempted: true,
+          completed: false,
+          failed: true,
+          messageSaved: false,
+          thinkingCaptured: false,
+          traceId: trace ? trace._id.toString() : '',
+          requestId: req.requestId,
+          provider: policy.primaryProvider,
+          packageCaptureEnabled,
+          errorCode: 'SSE_STREAM_TIMEOUT',
+          completedAt: new Date(),
+          reportedVia: 'server',
+        },
         completedAt: new Date(),
       });
       conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
       conversation.markModified?.('caseIntake');
-      saveConversationLenient(conversation).catch(() => {});
+      await saveConversationLenient(conversation).catch(() => {});
     }
     try {
       res.write('event: error\ndata: ' + JSON.stringify({
@@ -1418,6 +1544,22 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
               fallbackFrom: compliantData.fallbackFrom || null,
               attempts: attempts.length,
             },
+            evidenceReceipt: {
+              attempted: true,
+              completed: true,
+              failed: false,
+              messageSaved: true,
+              thinkingCaptured: Boolean(
+                safeString(compliantData.thinking, '').trim()
+                || Object.values(providerThinking).some((value) => safeString(value, '').trim())
+              ),
+              traceId: trace ? trace._id.toString() : '',
+              requestId: req.requestId,
+              provider: compliantData.providerUsed || policy.primaryProvider,
+              packageCaptureEnabled,
+              completedAt: new Date(),
+              reportedVia: 'server',
+            },
             completedAt: new Date(),
           });
           conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
@@ -1530,6 +1672,38 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           res.end();
         } catch { /* client gone */ }
       } catch (onDoneErr) {
+        if (conversation.caseIntake?.evidence?.receipts) {
+          const failedAt = new Date();
+          conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
+            provider: policy.primaryProvider,
+            model: primaryTraceModel,
+            traceId: trace ? trace._id.toString() : null,
+            error: {
+              code: 'ONDONE_SAVE_FAILED',
+              message: onDoneErr.message || 'Failed to save chat conversation',
+            },
+            evidenceReceipt: {
+              attempted: true,
+              completed: false,
+              failed: true,
+              messageSaved: false,
+              thinkingCaptured: false,
+              traceId: trace ? trace._id.toString() : '',
+              requestId: req.requestId,
+              provider: policy.primaryProvider,
+              packageCaptureEnabled,
+              errorCode: 'ONDONE_SAVE_FAILED',
+              completedAt: failedAt,
+              reportedVia: 'server',
+            },
+            completedAt: failedAt,
+          });
+          conversation.markModified?.('caseIntake');
+          await Conversation.updateOne(
+            { _id: conversation._id },
+            { $set: { caseIntake: conversation.caseIntake } }
+          ).catch(() => {});
+        }
         patchTrace(trace?._id, {
           status: 'error',
           stats: buildTraceStats(traceStats),
@@ -1571,7 +1745,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         deleteAiOperation(runtimeOperationId);
       }
     },
-    onError: (err) => {
+    onError: async (err) => {
       streamSettled = true;
       clearInterval(heartbeat);
       clearTimeout(sseSafetyTimeout);
@@ -1669,11 +1843,25 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             message: err.message || 'Chat failed',
             detail: err.detail || '',
           },
+          evidenceReceipt: {
+            attempted: true,
+            completed: false,
+            failed: true,
+            messageSaved: false,
+            thinkingCaptured: false,
+            traceId: trace ? trace._id.toString() : '',
+            requestId: req.requestId,
+            provider: policy.primaryProvider,
+            packageCaptureEnabled,
+            errorCode: err.code || 'PROVIDER_EXEC_FAILED',
+            completedAt: new Date(),
+            reportedVia: 'server',
+          },
           completedAt: new Date(),
         });
         conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
         conversation.markModified?.('caseIntake');
-        saveConversationLenient(conversation).catch(() => {});
+        await saveConversationLenient(conversation).catch(() => {});
       }
       if (requestTurnId && policy.mode === 'parallel') {
         ParallelCandidateTurn.findOneAndUpdate(
@@ -1712,7 +1900,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       } catch { /* client disconnected */ }
       deleteAiOperation(runtimeOperationId);
     },
-    onAbort: (abortData) => {
+    onAbort: async (abortData) => {
       if (streamSettled) return;
       streamSettled = true;
       clearInterval(heartbeat);
@@ -1769,11 +1957,25 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             code: 'CLIENT_ABORT',
             message: 'Chat request aborted before completion',
           },
+          evidenceReceipt: {
+            attempted: true,
+            completed: false,
+            failed: true,
+            messageSaved: false,
+            thinkingCaptured: false,
+            traceId: trace ? trace._id.toString() : '',
+            requestId: req.requestId,
+            provider: policy.primaryProvider,
+            packageCaptureEnabled,
+            errorCode: 'CLIENT_ABORT',
+            completedAt: new Date(),
+            reportedVia: 'server',
+          },
           completedAt: new Date(),
         });
         conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
         conversation.markModified?.('caseIntake');
-        saveConversationLenient(conversation).catch(() => {});
+        await saveConversationLenient(conversation).catch(() => {});
       }
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
@@ -1790,7 +1992,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     },
   });
   attachAiOperationController(runtimeOperationId, {
-    abort: (reason = 'Chat request aborted by supervisor') => {
+    abort: async (reason = 'Chat request aborted by supervisor') => {
       if (streamSettled) return;
       streamSettled = true;
       clearInterval(heartbeat);
@@ -1813,10 +2015,24 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
             code: 'AUTO_ABORT',
             message: reason,
           },
+          evidenceReceipt: {
+            attempted: true,
+            completed: false,
+            failed: true,
+            messageSaved: false,
+            thinkingCaptured: false,
+            traceId: trace ? trace._id.toString() : '',
+            requestId: req.requestId,
+            provider: policy.primaryProvider,
+            packageCaptureEnabled,
+            errorCode: 'AUTO_ABORT',
+            completedAt: new Date(),
+            reportedVia: 'server',
+          },
           completedAt: new Date(),
         });
         conversation.markModified?.('caseIntake');
-        saveConversationLenient(conversation).catch(() => {});
+        await saveConversationLenient(conversation).catch(() => {});
       }
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
@@ -1849,6 +2065,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   } = req.body || {};
   const reasoningEffort = req.body?.reasoningEffort;
   const runtimeSettings = normalizeChatRuntimeSettings(rawSettings);
+  const retryPackageCaptureEnabled = isProviderCallPackageCaptureEnabled();
 
   if (!conversationId) {
     return res.status(400).json({ ok: false, code: 'MISSING_FIELD', error: 'conversationId required' });
@@ -2330,11 +2547,20 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
   // SSE safety timeout — force-close if retry stream never settles
-  const sseSafetyTimeout = setTimeout(() => {
+  const sseSafetyTimeout = setTimeout(async () => {
     if (retryStreamSettled || responseClosed) return;
     console.error('[chat/retry] SSE safety timeout hit after %dms — force-closing hung stream', SSE_SAFETY_TIMEOUT_MS);
     retryStreamSettled = true;
     clearInterval(heartbeat);
+    await persistRetryAnalystFailure(conversation, {
+      provider: policy.primaryProvider,
+      model: primaryTraceModel,
+      traceId: trace ? trace._id.toString() : '',
+      requestId: req.requestId,
+      packageCaptureEnabled: retryPackageCaptureEnabled,
+      errorCode: 'SSE_STREAM_TIMEOUT',
+      errorMessage: 'Request timed out - please try again',
+    });
     try {
       res.write('event: error\ndata: ' + JSON.stringify({
         error: 'Request timed out — please try again',
@@ -2605,6 +2831,42 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         if (Array.isArray(compliantData.toolActions) && compliantData.toolActions.length > 0) {
           await recordAgentToolUsage('chat', compliantData.toolActions, { surface: 'chat' }).catch(() => {});
         }
+        if (conversation.caseIntake?.status && conversation.caseIntake.status !== 'none') {
+          conversation.caseIntake = completeCaseIntakeAnalystRun(conversation.caseIntake, {
+            provider: compliantData.providerUsed || policy.primaryProvider,
+            model: safeString(compliantData.modelUsed, '')
+              || (compliantData.usage && compliantData.usage.model)
+              || getProviderModelId(compliantData.providerUsed || policy.primaryProvider),
+            traceId: trace ? trace._id.toString() : null,
+            summary: 'Deep support guidance completed after retry.',
+            detail: {
+              usage: compliantData.usage || null,
+              fallbackUsed: Boolean(compliantData.fallbackUsed),
+              fallbackFrom: compliantData.fallbackFrom || null,
+              attempts: attempts.length,
+              retry: true,
+            },
+            evidenceReceipt: {
+              attempted: true,
+              completed: true,
+              failed: false,
+              messageSaved: true,
+              thinkingCaptured: Boolean(
+                safeString(compliantData.thinking, '').trim()
+                || Object.values(providerThinking).some((value) => safeString(value, '').trim())
+              ),
+              traceId: trace ? trace._id.toString() : '',
+              requestId: req.requestId,
+              provider: compliantData.providerUsed || policy.primaryProvider,
+              packageCaptureEnabled: retryPackageCaptureEnabled,
+              errorCode: '',
+              completedAt: new Date(),
+              reportedVia: 'server',
+            },
+            completedAt: new Date(),
+          });
+          conversation.markModified?.('caseIntake');
+        }
         await saveConversationLenient(conversation);
         await setTraceAttempts(trace?._id, attempts);
         await setTraceUsage(trace?._id, compliantData.usage);
@@ -2739,6 +3001,16 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           detail: onDoneErr.stack || '',
           severity: 'error',
         });
+        await persistRetryAnalystFailure(conversation, {
+          provider: policy.primaryProvider,
+          model: primaryTraceModel,
+          traceId: trace ? trace._id.toString() : '',
+          requestId: req.requestId,
+          packageCaptureEnabled: retryPackageCaptureEnabled,
+          errorCode: 'ONDONE_SAVE_FAILED',
+          errorMessage: onDoneErr.message || 'Failed to save retried chat conversation',
+          directUpdate: true,
+        });
         try {
           res.write('event: error\ndata: ' + JSON.stringify({
             error: onDoneErr.message || 'Failed to save conversation',
@@ -2750,7 +3022,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         deleteAiOperation(retryRuntimeOperationId);
       }
     },
-    onError: (err) => {
+    onError: async (err) => {
       retryStreamSettled = true;
       clearInterval(heartbeat);
       clearTimeout(sseSafetyTimeout);
@@ -2852,6 +3124,15 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           { upsert: true, setDefaultsOnInsert: true }
         ).catch((err2) => console.warn('ParallelCandidateTurn update failed (retry error):', err2.message));
       }
+      await persistRetryAnalystFailure(conversation, {
+        provider: policy.primaryProvider,
+        model: safeString(err && err.modelUsed, '') || primaryTraceModel,
+        traceId: trace ? trace._id.toString() : '',
+        requestId: req.requestId,
+        packageCaptureEnabled: retryPackageCaptureEnabled,
+        errorCode: err.code || 'PROVIDER_EXEC_FAILED',
+        errorMessage: err.message || 'Chat retry failed',
+      });
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
           error: err.message || 'Chat retry failed',
@@ -2865,7 +3146,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
       } catch { /* gone */ }
       deleteAiOperation(retryRuntimeOperationId);
     },
-    onAbort: (abortData) => {
+    onAbort: async (abortData) => {
       if (retryStreamSettled) return;
       retryStreamSettled = true;
       clearInterval(heartbeat);
@@ -2903,6 +3184,15 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         message: 'Chat retry aborted before completion',
         detail: { attempts: abortData.attempts || [] },
       }, traceStartedAt).catch(() => {});
+      await persistRetryAnalystFailure(conversation, {
+        provider: policy.primaryProvider,
+        model: primaryTraceModel,
+        traceId: trace ? trace._id.toString() : '',
+        requestId: req.requestId,
+        packageCaptureEnabled: retryPackageCaptureEnabled,
+        errorCode: 'CLIENT_ABORT',
+        errorMessage: 'Chat retry aborted before completion',
+      });
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
           error: 'Chat retry aborted before completion',
@@ -2917,7 +3207,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     },
   });
   attachAiOperationController(retryRuntimeOperationId, {
-    abort: (reason = 'Chat retry aborted by supervisor') => {
+    abort: async (reason = 'Chat retry aborted by supervisor') => {
       if (retryStreamSettled) return;
       retryStreamSettled = true;
       clearInterval(heartbeat);
@@ -2931,6 +3221,15 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
         },
       });
       if (cleanupFn) cleanupFn();
+      await persistRetryAnalystFailure(conversation, {
+        provider: policy.primaryProvider,
+        model: primaryTraceModel,
+        traceId: trace ? trace._id.toString() : '',
+        requestId: req.requestId,
+        packageCaptureEnabled: retryPackageCaptureEnabled,
+        errorCode: 'AUTO_ABORT',
+        errorMessage: reason,
+      });
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
           error: reason,

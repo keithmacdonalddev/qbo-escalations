@@ -2,6 +2,7 @@
 
 const { randomUUID } = require('node:crypto');
 const { categoryForKind } = require('./stage-events');
+const { EVIDENCE_CONTRACT_VERSION } = require('./evidence-completeness');
 
 const CASE_STATUS = {
   NONE: 'none',
@@ -27,6 +28,10 @@ function clonePlain(value, fallback = null) {
   } catch {
     return fallback;
   }
+}
+
+function boundedString(value, maxLength) {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
 function normalizeDate(value, fallback = new Date()) {
@@ -88,10 +93,82 @@ function normalizeExistingIntake(existing) {
     parseMeta: clonePlain(base.parseMeta, null),
     knownIssueSearchResult: clonePlain(base.knownIssueSearchResult, null),
     triageCard: clonePlain(base.triageCard, null),
+    evidence: clonePlain(base.evidence, null),
     followUps: Array.isArray(base.followUps) ? base.followUps : [],
     runs: Array.isArray(base.runs) ? base.runs : [],
     activeRunId: safeString(base.activeRunId, ''),
     updatedAt: base.updatedAt || null,
+  };
+}
+
+function normalizePipelineReceipts(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized = {};
+
+  if (value.parser && typeof value.parser === 'object' && !Array.isArray(value.parser)) {
+    const parser = {
+      attempted: true,
+      reportedVia: 'client',
+    };
+    const runId = boundedString(value.parser.runId, 160);
+    const resultId = boundedString(value.parser.resultId, 160);
+    const providerPackageId = boundedString(value.parser.providerPackageId, 160);
+    if (runId) parser.runId = runId;
+    if (resultId) parser.resultId = resultId;
+    if (providerPackageId) parser.providerPackageId = providerPackageId;
+    if (typeof value.parser.historySaveOk === 'boolean') {
+      parser.historySaveOk = value.parser.historySaveOk;
+    }
+    normalized.parser = parser;
+  }
+
+  if (value.triage && typeof value.triage === 'object' && !Array.isArray(value.triage)) {
+    const triage = { reportedVia: 'client' };
+    if (typeof value.triage.planned === 'boolean') {
+      triage.planned = value.triage.planned;
+      if (!value.triage.planned) {
+        triage.attempted = false;
+        triage.skipped = true;
+      }
+    }
+    const skipReason = boundedString(value.triage.skipReason, 500);
+    if (skipReason) triage.skipReason = skipReason;
+    normalized.triage = triage;
+  }
+
+  return normalized;
+}
+
+function stampCaseIntakeEvidence(existing, receiptUpdates, { updatedAt } = {}) {
+  const intake = normalizeExistingIntake(existing);
+  const now = normalizeDate(updatedAt);
+  const previousEvidence = intake.evidence && typeof intake.evidence === 'object'
+    ? clonePlain(intake.evidence, {})
+    : {};
+  const previousReceipts = previousEvidence.receipts && typeof previousEvidence.receipts === 'object'
+    ? previousEvidence.receipts
+    : {};
+  const nextReceipts = { ...previousReceipts };
+
+  for (const key of ['parser', 'inv', 'triage', 'analyst']) {
+    const update = receiptUpdates?.[key];
+    if (!update || typeof update !== 'object' || Array.isArray(update)) continue;
+    nextReceipts[key] = {
+      ...(previousReceipts[key] && typeof previousReceipts[key] === 'object' ? previousReceipts[key] : {}),
+      ...clonePlain(update, {}),
+      recordedAt: update.recordedAt || now,
+    };
+  }
+
+  return {
+    ...intake,
+    evidence: {
+      ...previousEvidence,
+      contractVersion: EVIDENCE_CONTRACT_VERSION,
+      receipts: nextReceipts,
+      updatedAt: now,
+    },
+    updatedAt: now,
   };
 }
 
@@ -376,6 +453,7 @@ function completeCaseIntakeAnalystRun(existing, {
   traceId,
   summary,
   detail,
+  evidenceReceipt,
   completedAt,
 } = {}) {
   const intake = normalizeExistingIntake(existing);
@@ -401,13 +479,16 @@ function completeCaseIntakeAnalystRun(existing, {
     detail: clonePlain(detail, previous.detail || null),
   };
 
-  return {
+  const next = {
     ...intake,
     status: CASE_STATUS.ANALYST_COMPLETE,
     runs: replacePhaseRun(intake.runs, completedRun),
     activeRunId: '',
     updatedAt: now,
   };
+  return evidenceReceipt
+    ? stampCaseIntakeEvidence(next, { analyst: evidenceReceipt }, { updatedAt: now })
+    : next;
 }
 
 function failCaseIntakeAnalystRun(existing, {
@@ -415,6 +496,7 @@ function failCaseIntakeAnalystRun(existing, {
   model,
   traceId,
   error,
+  evidenceReceipt,
   completedAt,
 } = {}) {
   const intake = normalizeExistingIntake(existing);
@@ -440,13 +522,16 @@ function failCaseIntakeAnalystRun(existing, {
     detail: clonePlain(error, null),
   };
 
-  return {
+  const next = {
     ...intake,
     status: CASE_STATUS.FAILED,
     runs: replacePhaseRun(intake.runs, failedRun),
     activeRunId: '',
     updatedAt: now,
   };
+  return evidenceReceipt
+    ? stampCaseIntakeEvidence(next, { analyst: evidenceReceipt }, { updatedAt: now })
+    : next;
 }
 
 const MAX_EVENTS_PER_RUN = 200;
@@ -552,6 +637,9 @@ function applyTriageResultToCaseIntake(existing, {
   startedAt,
   completedAt,
   traceId,
+  savedResultId,
+  standaloneRunId,
+  repairPackageId,
 } = {}) {
   const intake = normalizeExistingIntake(existing);
   const card = clonePlain(triageCard, null);
@@ -588,7 +676,12 @@ function applyTriageResultToCaseIntake(existing, {
       : fallbackUsed
         ? fallbackReason
         : summarizeTriageCard(card),
-    detail: failed ? triageError : {
+    detail: failed ? {
+      ...triageError,
+      savedResultId: safeString(savedResultId, ''),
+      standaloneRunId: safeString(standaloneRunId, ''),
+      repairPackageId: safeString(repairPackageId, ''),
+    } : {
       confidence: card?.confidence || '',
       missingInfo: Array.isArray(card?.missingInfo) ? card.missingInfo : [],
       source: card?.source || '',
@@ -596,6 +689,9 @@ function applyTriageResultToCaseIntake(existing, {
       fallback: clonePlain(card?.fallback, null),
       runtime: clonePlain(card?.runtime, null),
       providerPackageId: safeString(meta?.providerPackageId, ''),
+      savedResultId: safeString(savedResultId, ''),
+      standaloneRunId: safeString(standaloneRunId, ''),
+      repairPackageId: safeString(repairPackageId, ''),
       validation: meta?.validation || null,
     },
   });
@@ -620,5 +716,7 @@ module.exports = {
   buildCaseIntakeFromParsedEscalation,
   completeCaseIntakeAnalystRun,
   failCaseIntakeAnalystRun,
+  normalizePipelineReceipts,
   normalizeExistingIntake,
+  stampCaseIntakeEvidence,
 };
