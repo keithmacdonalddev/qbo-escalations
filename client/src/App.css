@@ -1171,6 +1171,24 @@ a:hover {
   box-shadow: 0 0 0 2px var(--bg-raised);
 }
 
+.app-header-settings-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--warning, #f0a940);
+  color: var(--bg, #0a0a0f);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 2px var(--bg-raised);
+}
+
 /* Mobile sidebar toggle in header */
 .app-header .sidebar-toggle-header {
   display: none;

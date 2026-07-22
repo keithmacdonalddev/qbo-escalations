@@ -7,6 +7,7 @@ import { dispatchGmailMutations, GMAIL_MESSAGES_MUTATED_EVENT } from '../lib/gma
 import { apiFetch } from '../lib/gmail/gmailApi.js';
 import { CATEGORY_LABEL_BY_TAB } from '../lib/gmail/gmailInboxHelpers.jsx';
 import { buildFolderSuggestions } from '../lib/gmail/folderSuggestions.js';
+import { getDefaultSendingAccount, resolveConnectedAccount } from '../lib/accountDefaults.js';
 import { dispatchWorkspaceAgentRequest } from '../lib/workspaceAgentEvents.js';
 import useGmailAccounts from '../hooks/useGmailAccounts.js';
 import GmailHeaderChrome from './gmail/GmailHeaderChrome.jsx';
@@ -251,6 +252,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
   const [localShowAiPanel, setLocalShowAiPanel] = useState(true);
   const [aiPanelEmailContext, setAiPanelEmailContext] = useState(null);
   const [composeDefaults, setComposeDefaults] = useState(null);
+  const [preferredSendingAccount, setPreferredSendingAccount] = useState(() => getDefaultSendingAccount());
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
   const showToast = useCallback((message, duration = 3000) => {
@@ -318,6 +320,15 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
     setActiveLabel,
     setActiveCategory,
   });
+  useEffect(() => {
+    const handleDefaultSendingChange = (event) => setPreferredSendingAccount(event.detail || '');
+    window.addEventListener('default-sending-account-changed', handleDefaultSendingChange);
+    return () => window.removeEventListener('default-sending-account-changed', handleDefaultSendingChange);
+  }, []);
+  const defaultSendingAccount = useMemo(
+    () => resolveConnectedAccount(accounts, preferredSendingAccount, activeAccount || ''),
+    [accounts, activeAccount, preferredSendingAccount],
+  );
 
   // Account-aware fetch helper — automatically injects the active account
   const acctFetch = useCallback((path, opts = {}) => {
@@ -905,7 +916,12 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
       // Escape: close things
       if (e.key === 'Escape') {
         if (showShortcutHelp) { setShowShortcutHelp(false); return; }
-        if (showCompose || composeMode) { setShowCompose(false); setComposeMode(null); return; }
+        if (showCompose || composeMode) {
+          setShowCompose(false);
+          setComposeDefaults(null);
+          setComposeMode(null);
+          return;
+        }
         if (contextMenu) { setContextMenu(null); return; }
         if (selectedMessageId) { setSelectedMessageId(null); return; }
         if (selectedIds.size > 0) { setSelectedIds(new Set()); return; }
@@ -917,7 +933,13 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
       if (e.defaultPrevented) return; // respect stopPropagation from child components
 
       // c = compose
-      if (e.key === 'c') { e.preventDefault(); setShowCompose(true); return; }
+      if (e.key === 'c') {
+        e.preventDefault();
+        setComposeDefaults(null);
+        setComposeMode(null);
+        setShowCompose(true);
+        return;
+      }
 
       if (selectedMessageId) {
         // In reader view
@@ -1080,7 +1102,11 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
         onRefresh={handleRefresh}
         showUnsubPanel={showUnsubPanel}
         onToggleSubscriptions={() => setShowUnsubPanel((prev) => !prev)}
-        onCompose={() => setShowCompose(true)}
+        onCompose={() => {
+          setComposeDefaults(null);
+          setComposeMode(null);
+          setShowCompose(true);
+        }}
         showAiPanel={showAiPanel}
         onToggleAiPanel={handleToggleAiPanel}
         onDisconnectAccount={(email) => {
@@ -1112,7 +1138,10 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
                 messageId={selectedMessageId}
                 onBack={() => setSelectedMessageId(null)}
                 onOpenCompose={(defaults) => {
-                  setComposeDefaults(defaults);
+                  setComposeDefaults({
+                    ...defaults,
+                    account: isUnifiedMode ? (getMessageAccount(selectedMessageId) || activeAccount) : activeAccount,
+                  });
                   setShowCompose(true);
                 }}
                 onOpenAiPanel={(request) => {
@@ -1216,7 +1245,7 @@ export default function GmailInbox({ chat = null, agentDock = null, isActive = t
             inReplyTo={composeMode?.inReplyTo}
             references={composeMode?.references}
             mode={composeMode?.mode || 'new'}
-            activeAccount={composeMode?.account || activeAccount}
+            activeAccount={composeMode?.account || composeDefaults?.account || defaultSendingAccount || activeAccount}
           />
         )}
       </AnimatePresence>

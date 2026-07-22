@@ -12,6 +12,8 @@ const gmailAuthSchema = new mongoose.Schema({
   refreshToken: { type: String, required: true, select: false },
   tokenExpiry:  { type: Date, required: true },
   scope:        { type: String, default: '' },
+  lastGmailAccessAt:    { type: Date, default: null },
+  lastCalendarAccessAt: { type: Date, default: null },
 }, {
   timestamps: true,
 });
@@ -73,6 +75,19 @@ gmailAuthSchema.statics.touchAccount = async function (email) {
     { email: email.toLowerCase().trim() },
     { $set: { updatedAt: new Date() } },
     { returnDocument: 'after', lean: true }
+  );
+};
+
+/** Record verified API access without changing which account is considered active. */
+gmailAuthSchema.statics.recordSuccessfulAccess = async function (email, service) {
+  const field = service === 'calendar' ? 'lastCalendarAccessAt' : 'lastGmailAccessAt';
+  const query = email
+    ? { email: email.toLowerCase().trim() }
+    : {};
+  return this.findOneAndUpdate(
+    query,
+    { $set: { [field]: new Date() } },
+    { sort: { updatedAt: -1 }, returnDocument: 'after', lean: true }
   );
 };
 

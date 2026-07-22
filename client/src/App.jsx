@@ -63,7 +63,8 @@ const AGENT_MODAL_TITLES = {
 function App() {
   // Consuming the catalog version makes every mounted provider/model picker
   // re-render immediately after AI Management changes the governed inventory.
-  useProviderCatalog();
+  const { catalog: managedAiCatalog } = useProviderCatalog();
+  const aiManagementAlertCount = managedAiCatalog?.summary?.notificationsNeedingReview || 0;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -400,6 +401,7 @@ function App() {
         activeAgentTab={globalDockTab}
         agentModalOpen={agentModalOpen}
         onOpenAgent={openAgentModal}
+        aiManagementAlertCount={aiManagementAlertCount}
       />
 
       <main

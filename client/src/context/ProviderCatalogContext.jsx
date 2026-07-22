@@ -49,6 +49,19 @@ export function ProviderCatalogProvider({ children }) {
     reload();
   }, [reload]);
 
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'hidden') return;
+      request('').catch(() => {});
+    };
+    const interval = window.setInterval(refresh, 5 * 60 * 1000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [request]);
+
   const value = useMemo(() => ({
     catalog,
     keys,

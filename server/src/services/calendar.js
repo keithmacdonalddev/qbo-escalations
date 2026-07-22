@@ -1,7 +1,7 @@
 'use strict';
 
 const { google } = require('googleapis');
-const { getAuth } = require('./gmail');
+const { getAuth, recordSuccessfulAccess } = require('./gmail');
 const { runIfStubbed } = require('../lib/harness-service-gate');
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ function notConnected() {
  * @param {string} [email] - Google account email to use. Falls back to primary if omitted.
  */
 async function getCalendarClient(email) {
-  const auth = await getAuth(email || undefined);
+  const auth = await getAuth(email || undefined, 'calendar');
   if (!auth) return null;
   return google.calendar({ version: 'v3', auth });
 }
@@ -322,7 +322,23 @@ function wrapHarnessedCalendarFunction(kind, impl) {
   return function wrappedHarnessedCalendarFunction(...args) {
     const stubbed = runIfStubbed('calendar', kind, args);
     if (stubbed.handled) return stubbed.value;
-    return impl(...args);
+    const result = impl(...args);
+    if (!result?.then) return result;
+    return result.then(async (value) => {
+      if (value?.ok !== false) {
+        const account = kind === 'listCalendars'
+          ? args[0]
+          : kind === 'listEvents'
+            ? args[0]?.account
+            : kind === 'findFreeTime'
+              ? args[4]
+              : kind === 'updateEvent'
+                ? args[3]
+                : args[2];
+        await recordSuccessfulAccess(account || undefined, 'calendar');
+      }
+      return value;
+    });
   };
 }
 

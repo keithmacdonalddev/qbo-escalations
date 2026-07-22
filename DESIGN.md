@@ -27,7 +27,7 @@ The interface is not a marketing site and should not behave like one. Large hero
 | Settings composition | `client/src/components/Settings.jsx` | Section navigation and compact control group patterns |
 | Settings-specific reconciliation | `client/src/settings-v2.css` | Must alias global tokens; must not invent a second theme |
 | AI catalog workspace | `client/src/components/AiManagementSettings.jsx` | Provider/model management and new-model review |
-| Connected accounts | `client/src/components/SettingsAccountsSection.jsx` | Account connection and default selection |
+| Connected accounts | `client/src/components/SettingsAccountsSection.jsx` | Account health, permissions, repair, and purpose-specific defaults |
 | AI safety controls | `client/src/components/AiAssistantSettingsPanel.jsx` | Accordion-based advanced configuration |
 
 Prototypes under `prototypes/` are deliberately excluded from the production design contract unless a later maintained change explicitly promotes them.
@@ -260,11 +260,12 @@ AI Management is a catalog workspace, not an explanatory landing page.
 
 Priority order:
 
-1. Check for new models
-2. See whether providers, available models, review candidates, or warnings need attention
-3. Select a provider
-4. Manage its connection, key, and models
-5. Read the release procedure when a candidate exists or the process is unfamiliar
+1. See whether a saved alert needs review
+2. Check for new models or test all connections
+3. Set the automatic-check cadence and see truthful last/next times
+4. Select a provider and manage its connection, key, and models
+5. See affected agents before disabling a provider/model
+6. Download the release packet or read the procedure when a candidate exists
 
 Discovery text must distinguish:
 
@@ -274,6 +275,16 @@ Discovery text must distinguish:
 - **Account visibility:** proof that an account can list an ID, not proof the app can call it correctly
 
 The primary button is “Check for new models,” not “Check provider lists,” because the former describes the user’s goal. Operator-managed gateways and local runtimes use a separate “Refresh inventory” action because arbitrary local IDs cannot be truthfully ranked by vendor generation.
+
+Automatic checks, timestamps, notification preferences, and the review queue belong in one compact strip above the catalog workspace. They must not become another page or a tall introductory card. The Settings gear may carry a small warning badge so a background finding is visible elsewhere in the app; the detailed evidence stays in AI Management.
+
+Impact information is shown at the moment of risk. A model row may state which agents use it, and the disable confirmation names saved primary/fallback assignments. Do not rely on a generic warning when exact affected profiles are available.
+
+## Connected Accounts pattern
+
+Connected Accounts answers four questions in this order: does access work, what permission is missing, which account handles each purpose, and how can access be repaired? Show each account in one compact health row with last successful Gmail/Calendar access. Translate OAuth scopes into plain-English permissions; do not claim access from a hard-coded list. Reauthorization is the repair action and must not require disconnecting first.
+
+Inbox, sending, and calendar defaults are independent. Keep their selects together in one grid and let the same defaults guide visible UI actions and background agent calls.
 
 ## Buttons and controls
 

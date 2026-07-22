@@ -37,8 +37,11 @@ router.get('/auth/status', async (req, res) => {
 // GET /api/gmail/auth/url — get Google OAuth consent URL
 router.get('/auth/url', async (req, res) => {
   try {
-    const { returnTo } = req.query;
-    const url = gmail.getAuthUrl(returnTo || undefined);
+    const { returnTo, account, reauthorize } = req.query;
+    const url = gmail.getAuthUrl(returnTo || undefined, {
+      loginHint: reauthorize === 'true' ? account : '',
+      reauthorize: reauthorize === 'true',
+    });
     if (!url) {
       return res.status(500).json({
         ok: false,

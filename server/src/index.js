@@ -11,6 +11,7 @@ const { reportServerError, stopErrorPipeline } = require('./lib/server-error-pip
 const { startScheduler: startBriefingScheduler, stopScheduler: stopBriefingScheduler } = require('./services/workspace-scheduler');
 const { startScheduler: startKbAgentScheduler, stopScheduler: stopKbAgentScheduler } = require('./services/knowledgebase-agent-scheduler');
 const { startMonitor: startWorkspaceMonitor, stopMonitor: stopWorkspaceMonitor } = require('./services/workspace-monitor');
+const { startScheduler: startAiManagementScheduler, stopScheduler: stopAiManagementScheduler } = require('./services/ai-management-scheduler');
 const {
   startBackgroundTask,
   completeBackgroundTask,
@@ -278,6 +279,11 @@ async function start(options = {}) {
           console.log('[startup] Workspace monitor disabled');
         }
 
+        // The operator-controlled schedule defaults to Off. Starting this
+        // lightweight coordinator also keeps overdue catalog-review notices
+        // current without making provider requests unless a check is due.
+        startAiManagementScheduler();
+
         if (startupControls.agentHealthCheck) {
           startAgentHealthMonitor();
         } else {
@@ -401,6 +407,7 @@ function shutdown(signal, { exitCode = 0 } = {}) {
   stopBriefingScheduler();
   stopKbAgentScheduler();
   stopWorkspaceMonitor();
+  stopAiManagementScheduler();
   stopRealtimeServer();
   stopLiveCallAssistServer();
   stopAiPruning();

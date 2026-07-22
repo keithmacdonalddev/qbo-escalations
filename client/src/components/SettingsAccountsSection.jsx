@@ -11,21 +11,32 @@ function GoogleLogo({ size = 18 }) {
   );
 }
 
+function formatAccess(value) {
+  if (!value) return 'No successful access recorded';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'No successful access recorded';
+  return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+}
+
 export default function SettingsAccountsSection({
   googleAuth,
   connectedAccounts,
-  primaryGoogleAccount,
   selectedDefaultEmailAccount,
+  selectedDefaultSendingAccount,
   selectedDefaultCalendarAccount,
   defaultFallbackLabel,
   missingDefaultEmailAccount,
+  missingDefaultSendingAccount,
   missingDefaultCalendarAccount,
   savedFlash,
+  savingDefault,
   onGoogleConnect,
+  onGoogleReauthorize,
   onGoogleDisconnect,
   googleConnecting,
   googleDisconnecting,
   onDefaultEmailAccountChange,
+  onDefaultSendingAccountChange,
   onDefaultCalendarAccountChange,
 }) {
   return (
@@ -33,7 +44,7 @@ export default function SettingsAccountsSection({
       <header className="settings-v2-heading">
         <div>
           <h2>Connected Accounts</h2>
-          <p>Google access and default inbox or calendar.</p>
+          <p>Google access and defaults for reading, sending, and calendar.</p>
         </div>
       </header>
 
@@ -85,49 +96,36 @@ export default function SettingsAccountsSection({
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2 }}
             >
-              <div className="settings-accounts-email-row">
-                <div className="settings-accounts-email-stack">
-                  <div className="settings-accounts-email-badge">
-                    <span className="settings-accounts-email-dot" />
-                    <span className="settings-accounts-email-text">{primaryGoogleAccount || googleAuth.email}</span>
-                  </div>
-                  {connectedAccounts.length > 1 && (
-                    <span className="settings-accounts-connected-count">
-                      {connectedAccounts.length} connected Google accounts
-                    </span>
-                  )}
-                </div>
-                {googleAuth.connectedAt && (
-                  <span className="settings-accounts-connected-since">
-                    Connected {new Date(googleAuth.connectedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
-                  </span>
-                )}
-              </div>
-
-              {connectedAccounts.length > 0 && (
-                <div className="settings-accounts-connected-list" aria-label="Connected Google accounts">
-                  {connectedAccounts.map((account) => {
-                    const isDefault = selectedDefaultEmailAccount
-                      ? account.email === selectedDefaultEmailAccount
-                      : account.email === connectedAccounts[0]?.email;
-                    return (
-                      <span
-                        key={account.email}
-                        className={`settings-accounts-connected-chip${isDefault ? ' is-primary' : ''}`}
-                      >
-                        {account.email}
-                        {isDefault ? ' \u2713 Default' : ''}
-                      </span>
-                    );
-                  })}
+              {connectedAccounts.some((account) => account.missingPermissions?.length > 0) && (
+                <div className="settings-accounts-warning settings-accounts-access-warning" role="alert">
+                  <span>Google access is incomplete for at least one account. Use Reauthorize on that account to restore the missing permissions.</span>
                 </div>
               )}
+
+              <div className="settings-account-health-list" aria-label="Google account access health">
+                {connectedAccounts.map((account) => (
+                  <div className="settings-account-health-row" key={account.email}>
+                    <div className="settings-account-health-name">
+                      <span className="settings-accounts-email-dot" />
+                      <strong>{account.email}</strong>
+                    </div>
+                    <div><span>Gmail access</span><strong>{formatAccess(account.lastGmailAccessAt)}</strong></div>
+                    <div><span>Calendar access</span><strong>{formatAccess(account.lastCalendarAccessAt)}</strong></div>
+                    <div className="settings-account-health-actions">
+                      <span className={`settings-account-permission-state${account.missingPermissions?.length ? ' is-warning' : ''}`}>
+                        {account.missingPermissions?.length ? `${account.missingPermissions.length} missing` : 'Access ready'}
+                      </span>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onGoogleReauthorize(account.email)} disabled={googleConnecting} aria-label={`Reauthorize ${account.email}`}>Reauthorize</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
               <div className="settings-accounts-defaults">
                 <div className="settings-accounts-defaults-header">
                   <span className="settings-accounts-scopes-label">Default accounts</span>
                   <p className="settings-accounts-defaults-desc">
-                    Choose which account to use by default across inbox and calendar.
+                    Choose accounts independently for reading, sending, and calendar work.
                   </p>
                 </div>
 
@@ -142,6 +140,7 @@ export default function SettingsAccountsSection({
                     <select
                       className="settings-accounts-default-select"
                       value={selectedDefaultEmailAccount}
+                      disabled={savingDefault === 'email'}
                       onChange={onDefaultEmailAccountChange}
                     >
                       <option value="">{defaultFallbackLabel}</option>
@@ -160,6 +159,29 @@ export default function SettingsAccountsSection({
 
                   <label className="settings-accounts-default-field">
                     <span className="settings-accounts-default-label">
+                      Default sending
+                      {savedFlash === 'sending' && (
+                        <span className="settings-accounts-saved-flash">{'✓'} Saved</span>
+                      )}
+                    </span>
+                    <select
+                      className="settings-accounts-default-select"
+                      value={selectedDefaultSendingAccount}
+                      disabled={savingDefault === 'sending'}
+                      onChange={onDefaultSendingAccountChange}
+                    >
+                      <option value="">{defaultFallbackLabel}</option>
+                      {connectedAccounts.map((account) => (
+                        <option key={account.email} value={account.email}>{account.email}</option>
+                      ))}
+                    </select>
+                    {missingDefaultSendingAccount && (
+                      <span className="settings-accounts-default-note">The saved sending account is no longer connected.</span>
+                    )}
+                  </label>
+
+                  <label className="settings-accounts-default-field">
+                    <span className="settings-accounts-default-label">
                       Default calendar
                       {savedFlash === 'calendar' && (
                         <span className="settings-accounts-saved-flash">{'\u2713'} Saved</span>
@@ -168,6 +190,7 @@ export default function SettingsAccountsSection({
                     <select
                       className="settings-accounts-default-select"
                       value={selectedDefaultCalendarAccount}
+                      disabled={savingDefault === 'calendar'}
                       onChange={onDefaultCalendarAccountChange}
                     >
                       <option value="">{defaultFallbackLabel}</option>
@@ -189,22 +212,17 @@ export default function SettingsAccountsSection({
               <div className="settings-accounts-scopes">
                 <span className="settings-accounts-scopes-label">Granted permissions</span>
                 <ul className="settings-accounts-scopes-list">
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                    <span>Gmail — read, send, compose, manage labels</span>
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                    <span>Google Calendar — read &amp; write events</span>
-                  </li>
-                  <li>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-                    <span>User profile — email address</span>
-                  </li>
+                  {(googleAuth.permissions || []).map((permission) => (
+                    <li key={permission.id} className={permission.granted ? '' : 'is-missing'}>
+                      <span aria-hidden="true">{permission.granted ? '✓' : '!'}</span>
+                      <span>{permission.label}</span>
+                    </li>
+                  ))}
                 </ul>
               </div>
 
               <div className="settings-accounts-actions">
+                <button className="btn btn-ghost btn-sm" onClick={onGoogleConnect} disabled={googleConnecting} type="button">Add account</button>
                 <button
                   className="settings-accounts-disconnect-btn"
                   onClick={onGoogleDisconnect}

@@ -4,14 +4,19 @@ const express = require('express');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const {
   MANAGED_PROVIDER_IDS,
+  buildModelReleaseReviewPacket,
+  getAgentUsageSnapshot,
   getManagementSnapshot,
+  recordConnectionTestResults,
   refreshProviderModels,
+  reviewNotification,
   updateModelPolicy,
   updateProviderPolicy,
   updateSettings,
 } = require('../services/ai-management');
 const {
   clearProviderAvailabilityCache,
+  checkProviderAvailability,
   getAllStoredKeys,
   resolveApiKey,
   setStoredApiKey,
@@ -29,7 +34,7 @@ const KEY_ENVIRONMENT_VARIABLES = Object.freeze({
 });
 
 function sendKnownError(res, err) {
-  const status = err?.code === 'INVALID_PROVIDER' || err?.code === 'INVALID_MODEL' ? 400
+  const status = ['INVALID_PROVIDER', 'INVALID_MODEL', 'INVALID_SCHEDULE', 'INVALID_NOTIFICATION'].includes(err?.code) ? 400
     : err?.code === 'MODEL_VALIDATION_REQUIRED' || err?.code === 'MODEL_CATALOG_RELEASE_REQUIRED' ? 409
       : 500;
   return res.status(status).json({
@@ -112,6 +117,66 @@ router.post('/refresh', refreshRateLimit, async (req, res) => {
       : MANAGED_PROVIDER_IDS;
     const result = await refreshProviderModels(requested);
     res.json(await buildResponse({ results: result.results }));
+  } catch (err) {
+    sendKnownError(res, err);
+  }
+});
+
+router.get('/usage', async (req, res) => {
+  try {
+    const usage = await getAgentUsageSnapshot();
+    res.json({ ok: true, usage });
+  } catch (err) {
+    sendKnownError(res, err);
+  }
+});
+
+router.put('/notifications/:notificationId/review', async (req, res) => {
+  try {
+    reviewNotification(req.params.notificationId);
+    res.json(await buildResponse());
+  } catch (err) {
+    sendKnownError(res, err);
+  }
+});
+
+router.get('/review-packet', async (req, res) => {
+  try {
+    const providerId = String(req.query.providerId || '').trim();
+    const modelId = String(req.query.modelId || '').trim();
+    const usage = await getAgentUsageSnapshot();
+    const modelUsage = usage.models?.[`${providerId}:${modelId}`] || [];
+    const packet = buildModelReleaseReviewPacket(providerId, modelId, modelUsage);
+    const filenameModel = modelId.replace(/[^a-z0-9._-]+/gi, '-').slice(0, 100) || 'model';
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filenameModel}-release-review.md"`);
+    res.send(packet);
+  } catch (err) {
+    sendKnownError(res, err);
+  }
+});
+
+const testConnectionsRateLimit = createRateLimiter({ name: 'ai-management-test-connections', limit: 3, windowMs: 60_000 });
+router.post('/connections/test', testConnectionsRateLimit, async (req, res) => {
+  try {
+    clearProviderAvailabilityCache();
+    const availability = await checkProviderAvailability({ forceRefresh: true });
+    const snapshot = getManagementSnapshot();
+    const results = snapshot.providers.map((provider) => {
+      const result = availability?.[provider.id] || availability?.[provider.defaultModel] || null;
+      const disabled = provider.enabled === false || result?.code === 'AI_PROVIDER_DISABLED';
+      return {
+        providerId: provider.id,
+        ok: result?.available === true || result?.ok === true,
+        skipped: disabled,
+        code: disabled ? 'DISABLED' : result?.code || (result ? 'UNAVAILABLE' : 'NO_RESULT'),
+        message: disabled
+          ? 'Provider is disabled.'
+          : result?.reason || result?.detail || (result ? 'Connection unavailable.' : 'No connection result was returned.'),
+      };
+    });
+    recordConnectionTestResults(results);
+    res.json(await buildResponse({ results }));
   } catch (err) {
     sendKnownError(res, err);
   }

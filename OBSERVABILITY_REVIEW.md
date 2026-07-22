@@ -1,10 +1,12 @@
 # Observability Review
 
-Static review of `C:\Projects\qbo-escalations` completed 2026-07-09. The evidence collector ran in read-only mode on 2026-07-10 UTC. No application server, client server, gateway, model server, database process, or other long-running service was started or changed.
+Static review of `C:\Projects\qbo-escalations` completed 2026-07-09 and refreshed for AI Management and Connected Accounts on 2026-07-21. The evidence collector ran again in read-only mode on 2026-07-22 UTC. No application server, client server, gateway, model server, database process, or other long-running service was started or changed.
 
 ## 1. Plain-English summary
 
 The app can already prove a useful amount about chat and image-parser work. It stores AI traces with a request ID, provider and model, success or failure, fallback attempts, timing, image metadata, validation results, and usage/cost fields when the provider supplies them. It also stores provider-call evidence, usage records, image-parse history, and provider-health history. The user can see much of this through Usage > AI Traces, Sessions, Image Parser history, the request waterfall, workflow log panels, and health banners.
+
+The 2026-07-21 settings update adds a smaller but important evidence path. AI Management now saves the automatic-check schedule, last/next check times, provider-connection results, genuinely-new model alerts, overdue official-review alerts, and whether each alert was reviewed. Connected Accounts now saves the last successful Gmail and Calendar API access for each Google account and translates the granted Google permissions into plain-English status. These records survive a terminal close, but they are operational state—not a complete actor-aware Audit Trail.
 
 The app cannot yet prove, in one reliable place:
 
@@ -31,6 +33,8 @@ The most important next fix is to make the existing evidence joinable and durabl
 | Provider-health history         | Provider readiness/canary snapshots, status, diagnostics, latency, usage, fallback attempts, and provider errors                                                    | `server/src/lib/provider-health-log-store.js:10-143`, `server/src/routes/agent-identities.js:292-317`                         | JSONL file, path controlled by `PROVIDER_HEALTH_LOG_PATH`                                                          | Historical provider-health checks                                              |
 | Knowledge governance history    | Knowledge-candidate audit events for publish, unpublish, edits, and related governance actions                                                                      | `server/src/services/knowledgebase-management-service.js:256-268` and its audit-event call sites                              | Durable inside the knowledge record                                                                                | Governance history for the knowledge feature, not a platform-wide audit trail  |
 | Prompt history                  | Prompt versions and some agent history exist; prompt restore/edit actions record `actor: 'user'` in agent history                                                   | `server/src/routes/agent-prompts.js`, `server/src/lib/agent-prompt-store.js`, `server/src/services/agent-identity-service.js` | Durable files/history, but not a unified audit record                                                              | Some prompt version history and a limited action description                   |
+| AI catalog checks and alerts    | Schedule, last/next checks, connection-test results, new-model/overdue-review alerts, and review timestamps                                                         | `server/src/services/ai-management.js`, `server/src/services/ai-management-scheduler.js`                                    | Durable local JSON in `server/data/ai-management.json`                                                            | What was found, what needs review, and whether the operator reviewed it        |
+| Google account access health   | Last successful Gmail and Calendar access plus granted/missing permission summaries per connected account                                                           | `server/src/models/GmailAuth.js`, `server/src/services/gmail.js`, `server/src/services/calendar.js`                         | Durable MongoDB metadata; OAuth token fields remain hidden by default                                             | Whether each account recently worked and whether required Google access exists |
 
 ## 3. What logs are only temporary terminal output
 
@@ -43,7 +47,7 @@ The most important next fix is to make the existing evidence joinable and durabl
 
 ## 4. What durable logs or audit records exist
 
-The strongest durable records are `AiTrace`, `ProviderCallPackage`, `UsageLog`, `ImageParseResult`, provider-health JSONL, saved conversation/session data, workflow/case-intake activity, knowledge-candidate audit events, and prompt version history.
+The strongest durable records are `AiTrace`, `ProviderCallPackage`, `UsageLog`, `ImageParseResult`, provider-health JSONL, saved conversation/session data, workflow/case-intake activity, knowledge-candidate audit events, prompt version history, AI-management review state, and Google access-health metadata.
 
 Important retention limits:
 
@@ -61,7 +65,7 @@ This repository does not contain a general application login/password/session-au
 
 | Event                           | Current behavior                                                                                                                                                                                | What is missing                                                                                            |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Gmail OAuth status/connect      | Routes exist for status, consent URL, callback, and disconnect. Success/failure is printed to the console; OAuth tokens are stored in `GmailAuth` with secret fields excluded from normal reads | Durable actor, timestamped action, account target, result, reason, and request ID in a central audit trail |
+| Gmail OAuth status/connect      | Routes exist for status, consent URL, callback, reauthorization, and disconnect. OAuth tokens are stored in `GmailAuth` with secret fields excluded from normal reads; last successful Gmail/Calendar access and permission health are saved | Durable actor, timestamped connection-change event, result, reason, and request ID in a central audit trail |
 | Gmail account switch/disconnect | Account operations exist and errors are printed                                                                                                                                                 | Durable “who changed what” event and before/after account state                                            |
 | Image-parser API-key save/test  | Keys are stored in MongoDB with secret fields excluded by default; provider tests return a result                                                                                               | Key-change audit event, actor, reason, and safe old/new fingerprint                                        |
 | Preferences/configuration       | Preferences and AI settings can be updated                                                                                                                                                      | Central audit event showing actor, changed fields, previous values, and result                             |
@@ -107,6 +111,8 @@ The server exposes:
 
 The client already shows request health in the top health banner, agent health in the agent banner, provider status in agent/provider areas, and runtime/request information in the request waterfall and workflow panels.
 
+Settings > AI Management now adds an operator-run “Test all connections” check with per-provider results, a saved failure alert, and a global badge on the Settings button until the alert is reviewed. Settings > Connected Accounts shows the last successful Gmail and Calendar access and warns when a required Google permission is missing.
+
 These checks prove current or recently recorded health. They do not provide a complete historical snapshot of all processes on the machine, such as whether a separate gateway or LM Studio process was running, which process owned a port, or whether an orphan process was safe to preserve.
 
 ## 8. What client-side errors are captured
@@ -148,6 +154,10 @@ This is useful while the process is alive, but it is not a durable Error Log. Th
 | What is the current server/provider health?                        | Yes at check time                                  | Health, runtime, agent-health, and provider-health endpoints                           | Health banners, Agents/provider strategy, request waterfall           |
 | What was the exact detailed provider exchange for a captured call? | Often, within retention and capture limits         | `ProviderCallPackage` request/response/CLI fields                                      | Image Parser trace details or provider-package-backed detail surfaces |
 | What knowledge record changed and why?                             | For knowledge governance actions                   | Candidate audit events                                                                 | Knowledge view                                                        |
+| When did provider discovery last succeed and when will it run next? | Yes                                                | Saved AI-management schedule and provider discovery timestamps                         | Settings > AI Management                                              |
+| Which genuinely newer models or overdue catalog reviews need attention? | Yes                                            | Deduplicated, durable AI-management notifications with review timestamps               | Settings > AI Management; Settings button alert badge                 |
+| Which saved agents would be affected by disabling a provider/model? | Yes at decision time                               | Agent identity runtime assignments matched to the managed provider/model               | Settings > AI Management, before confirming the change                |
+| Did each connected Google account last work for Gmail and Calendar? | Yes after a successful API operation               | `GmailAuth.lastGmailAccessAt`, `lastCalendarAccessAt`, and permission status            | Settings > Connected Accounts                                        |
 
 ## 12. What questions the app cannot answer now
 
@@ -172,6 +182,8 @@ Existing paths worth keeping and strengthening:
 - Top health banner and request waterfall: current request failures, slow work, status codes, and active requests.
 - Agents > provider strategy/health: agent reachability and provider readiness/canary history.
 - Knowledge: governance history for knowledge records.
+- Settings > AI Management: automatic-check schedule, last/next checks, provider connection results, affected-agent previews, model-release review packets, and reviewable alerts.
+- Settings > Connected Accounts: per-account Gmail/Calendar access time, plain-English permissions, missing-access warnings, reauthorization, and independent inbox/sending/calendar defaults.
 
 Recommended missing or incomplete paths:
 
@@ -201,6 +213,11 @@ Recommended missing or incomplete paths:
 - Connect/disconnect or switch a Gmail account and verify the audit trail includes actor, account target, timestamp, result, and reason without exposing tokens.
 - Change an image-parser key, preference, agent runtime setting, and prompt; verify each has an audit event with safe before/after information.
 - Trigger a provider health failure and recovery; confirm current health, stored health history, provider/model, latency, and error reason.
+- Run AI Management model discovery with a genuinely newer test ID and confirm one durable alert appears, the Settings badge updates, repeated checks do not duplicate it, and reviewing it clears the badge.
+- Change automatic checks to Weekly and Monthly; confirm last-success and next-scheduled times are truthful and no model is approved automatically.
+- Test all provider connections; confirm each enabled provider reports pass/fail, failures remain reviewable, and no API key value is returned to the browser.
+- Perform successful Gmail and Calendar reads for each connected account; confirm Settings shows the correct per-account timestamps and missing OAuth permissions in plain English.
+- Set different inbox, sending, and calendar defaults; confirm UI actions and server-side agent calls use the intended account without disconnecting another account.
 - Verify usage and cost fields when a provider returns usage, and verify the UI clearly says when usage or pricing is unavailable.
 - Close the terminal or restart the app and confirm durable traces, usage, parse history, audit events, and errors remain according to retention policy.
 - Create an expired external provider payload fixture and verify cleanup removes only the intended file and records what happened.

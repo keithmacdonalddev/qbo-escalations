@@ -2,6 +2,7 @@ import { apiFetch } from '../api/http.js';
 
 const STORAGE_KEYS = Object.freeze({
   gmail: 'qbo-default-gmail-account',
+  sending: 'qbo-default-sending-account',
   calendar: 'qbo-default-calendar-account',
 });
 
@@ -36,24 +37,39 @@ export function getDefaultGmailAccount() {
   return readStoredAccount(STORAGE_KEYS.gmail);
 }
 
-export function setDefaultGmailAccount(email) {
-  const value = writeStoredAccount(STORAGE_KEYS.gmail, email);
-  // Fire-and-forget server sync — localStorage is the immediate source of truth
-  syncDefaultsToServer({ defaultGmailAccount: value }).catch(() => {});
+export async function setDefaultGmailAccount(email) {
+  const value = typeof email === 'string' ? email.trim() : '';
+  const saved = await syncDefaultsToServer({ defaultGmailAccount: value });
+  if (!saved) throw new Error('The default inbox could not be saved.');
+  writeStoredAccount(STORAGE_KEYS.gmail, saved.defaultGmailAccount || '');
   // Notify same-tab listeners (storage event only fires cross-tab)
-  window.dispatchEvent(new CustomEvent('default-email-changed', { detail: value }));
-  return value;
+  window.dispatchEvent(new CustomEvent('default-email-changed', { detail: saved.defaultGmailAccount || '' }));
+  return saved.defaultGmailAccount || '';
 }
 
 export function getDefaultCalendarAccount() {
   return readStoredAccount(STORAGE_KEYS.calendar);
 }
 
-export function setDefaultCalendarAccount(email) {
-  const value = writeStoredAccount(STORAGE_KEYS.calendar, email);
-  // Fire-and-forget server sync
-  syncDefaultsToServer({ defaultCalendarAccount: value }).catch(() => {});
-  return value;
+export function getDefaultSendingAccount() {
+  return readStoredAccount(STORAGE_KEYS.sending);
+}
+
+export async function setDefaultSendingAccount(email) {
+  const value = typeof email === 'string' ? email.trim() : '';
+  const saved = await syncDefaultsToServer({ defaultSendingAccount: value });
+  if (!saved) throw new Error('The default sending account could not be saved.');
+  writeStoredAccount(STORAGE_KEYS.sending, saved.defaultSendingAccount || '');
+  window.dispatchEvent(new CustomEvent('default-sending-account-changed', { detail: saved.defaultSendingAccount || '' }));
+  return saved.defaultSendingAccount || '';
+}
+
+export async function setDefaultCalendarAccount(email) {
+  const value = typeof email === 'string' ? email.trim() : '';
+  const saved = await syncDefaultsToServer({ defaultCalendarAccount: value });
+  if (!saved) throw new Error('The default calendar account could not be saved.');
+  writeStoredAccount(STORAGE_KEYS.calendar, saved.defaultCalendarAccount || '');
+  return saved.defaultCalendarAccount || '';
 }
 
 export function hasConnectedAccount(accounts, email) {
@@ -81,7 +97,7 @@ export function resolveConnectedAccount(accounts, preferredEmail, fallbackEmail 
 
 /**
  * Push one or both defaults to the server.
- * Accepts partial updates: { defaultGmailAccount } or { defaultCalendarAccount } or both.
+ * Accepts partial updates for inbox, sending, and calendar defaults.
  */
 export async function syncDefaultsToServer(fields = {}) {
   try {
@@ -99,7 +115,7 @@ export async function syncDefaultsToServer(fields = {}) {
 
 /**
  * Load defaults from the server and hydrate localStorage.
- * Returns { defaultGmailAccount, defaultCalendarAccount } or null on failure.
+ * Returns the saved inbox, sending, and calendar defaults or null on failure.
  */
 export async function loadDefaultsFromServer() {
   try {
@@ -108,15 +124,13 @@ export async function loadDefaultsFromServer() {
     if (!data.ok) return null;
 
     // Hydrate localStorage from server — server is authoritative
-    if (data.defaultGmailAccount) {
-      writeStoredAccount(STORAGE_KEYS.gmail, data.defaultGmailAccount);
-    }
-    if (data.defaultCalendarAccount) {
-      writeStoredAccount(STORAGE_KEYS.calendar, data.defaultCalendarAccount);
-    }
+    writeStoredAccount(STORAGE_KEYS.gmail, data.defaultGmailAccount || '');
+    writeStoredAccount(STORAGE_KEYS.sending, data.defaultSendingAccount || '');
+    writeStoredAccount(STORAGE_KEYS.calendar, data.defaultCalendarAccount || '');
 
     return {
       defaultGmailAccount: data.defaultGmailAccount || '',
+      defaultSendingAccount: data.defaultSendingAccount || '',
       defaultCalendarAccount: data.defaultCalendarAccount || '',
     };
   } catch {

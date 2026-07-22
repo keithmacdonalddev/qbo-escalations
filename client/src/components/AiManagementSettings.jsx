@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { apiFetch } from '../api/http.js';
 import { useProviderCatalog } from '../context/ProviderCatalogContext.jsx';
 import { useToast } from '../hooks/useToast.jsx';
 import { clearProviderKeyStatusCache } from '../hooks/useProviderKeyStatus.js';
@@ -78,6 +79,9 @@ export default function AiManagementSettings({ onOpenAgents }) {
   const [showKeys, setShowKeys] = useState({});
   const [validationEvidence, setValidationEvidence] = useState({});
   const [actionMessage, setActionMessage] = useState('');
+  const [usage, setUsage] = useState({ providers: {}, models: {} });
+  const [usageStatus, setUsageStatus] = useState('loading');
+  const [showReviewedNotifications, setShowReviewedNotifications] = useState(false);
 
   const providers = catalog?.providers || [];
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId)
@@ -88,6 +92,24 @@ export default function AiManagementSettings({ onOpenAgents }) {
     .filter((provider) => provider.requiresMaintainedCatalogRelease)
     .filter((provider) => provider.id === 'lm-studio' || keys[provider.id]?.configured)
     .map((provider) => provider.id), [providers, keys]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setUsageStatus('loading');
+    request('/usage').then((data) => {
+      if (!cancelled && data?.usage) {
+        setUsage(data.usage);
+        setUsageStatus('ready');
+      }
+    }).catch(() => {
+      if (!cancelled) setUsageStatus('error');
+    });
+    return () => { cancelled = true; };
+  }, [request, catalog?.revision]);
+
+  const notifications = (catalog?.notifications || []).filter((notification) => (
+    showReviewedNotifications || !notification.reviewedAt
+  ));
 
   async function runAction(id, action, successMessage) {
     setPending(id);
@@ -149,8 +171,16 @@ export default function AiManagementSettings({ onOpenAgents }) {
 
   async function toggleProvider(provider) {
     const nextEnabled = !provider.enabled;
+    if (!nextEnabled && usageStatus !== 'ready') {
+      toast.error('Agent impact could not be verified. Restore database access, then try disabling this provider again.', { duration: 6000 });
+      return;
+    }
+    const affected = usage.providers?.[provider.id] || [];
+    const affectedText = affected.length > 0
+      ? `\n\nSaved assignments affected:\n${affected.map((entry) => `• ${entry.name} (${entry.assignment})`).join('\n')}`
+      : '\n\nNo saved agent profile currently uses this provider.';
     if (!nextEnabled && !window.confirm(
-      `Disable ${provider.label}? Any agent currently assigned to it will be blocked until you enable it again or change that agent's profile.`
+      `Disable ${provider.label}? Any assigned agent will be blocked until you enable it again or change that agent's profile.${affectedText}`
     )) return;
     await runAction(
       `provider:${provider.id}`,
@@ -161,8 +191,16 @@ export default function AiManagementSettings({ onOpenAgents }) {
 
   async function toggleModel(provider, model) {
     const nextEnabled = !model.enabled;
+    if (!nextEnabled && usageStatus !== 'ready') {
+      toast.error('Agent impact could not be verified. Restore database access, then try disabling this model again.', { duration: 6000 });
+      return;
+    }
+    const affected = usage.models?.[modelKey(provider.id, model.id)] || [];
+    const affectedText = affected.length > 0
+      ? `\n\nSaved assignments affected:\n${affected.map((entry) => `• ${entry.name} (${entry.assignment})`).join('\n')}`
+      : '\n\nNo saved agent profile currently uses this model.';
     if (!nextEnabled && !window.confirm(
-      `Disable ${model.label || model.id}? Agent profiles that use it will keep their assignment but the server will block new runs.`
+      `Disable ${model.label || model.id}? Saved assignments remain visible, but the server will block new runs.${affectedText}`
     )) return;
     await runAction(
       `model:${modelKey(provider.id, model.id)}`,
@@ -254,6 +292,75 @@ export default function AiManagementSettings({ onOpenAgents }) {
     if (result) clearProviderKeyStatusCache();
   }
 
+  async function updateAutomation(patch, message) {
+    await runAction(
+      'automation-settings',
+      () => request('/settings', jsonOptions('PUT', patch)),
+      message,
+    );
+  }
+
+  async function testAllConnections() {
+    const result = await runAction(
+      'test-connections',
+      () => request('/connections/test', jsonOptions('POST', {})),
+    );
+    if (!result?.results) return;
+    const passed = result.results.filter((entry) => entry.ok).length;
+    const failed = result.results.filter((entry) => !entry.ok && !entry.skipped).length;
+    const skipped = result.results.filter((entry) => entry.skipped).length;
+    const message = `${passed} connection${passed === 1 ? '' : 's'} passed · ${failed} need attention${skipped ? ` · ${skipped} disabled` : ''}.`;
+    setActionMessage(message);
+    if (failed) toast.error(message, { duration: 5500 });
+    else toast.success(message, { duration: 4000 });
+  }
+
+  async function markNotificationReviewed(notification) {
+    await runAction(
+      `notification:${notification.id}`,
+      () => request(`/notifications/${encodeURIComponent(notification.id)}/review`, jsonOptions('PUT', {})),
+      'Notification marked reviewed.',
+    );
+  }
+
+  function viewNotificationProvider(notification) {
+    if (!notification.providerId) return;
+    setSelectedProviderId(notification.providerId);
+    window.requestAnimationFrame(() => {
+      document.querySelector('.ai-management-workspace')?.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'start',
+      });
+    });
+  }
+
+  async function downloadReviewPacket(provider, model) {
+    const actionId = `packet:${modelKey(provider.id, model.id)}`;
+    setPending(actionId);
+    try {
+      const params = new URLSearchParams({ providerId: provider.id, modelId: model.id });
+      const response = await apiFetch(`/api/ai-management/review-packet?${params.toString()}`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'The review packet could not be created.');
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${model.id}-release-review.md`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      toast.success('Model-release review packet downloaded.');
+    } catch (packetError) {
+      toast.error(packetError.message || 'The review packet could not be downloaded.');
+    } finally {
+      setPending('');
+    }
+  }
+
   if (loading && !catalog) {
     return <div className="settings-v2-state">Loading the governed AI catalog…</div>;
   }
@@ -275,14 +382,19 @@ export default function AiManagementSettings({ onOpenAgents }) {
           <h2>AI Management</h2>
           <p>Providers, keys, and models available to every agent. Agent profiles still own their assignments.</p>
         </div>
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={pending.startsWith('refresh:') || refreshableProviderIds.length === 0}
-          onClick={() => refreshModels(refreshableProviderIds)}
-        >
-          {pending.startsWith('refresh:') ? 'Checking…' : 'Check for new models'}
-        </button>
+        <div className="ai-management-heading-actions">
+          <button type="button" className="btn btn-secondary" disabled={pending === 'test-connections'} onClick={testAllConnections}>
+            {pending === 'test-connections' ? 'Testing…' : 'Test all connections'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={pending.startsWith('refresh:') || refreshableProviderIds.length === 0}
+            onClick={() => refreshModels(refreshableProviderIds)}
+          >
+            {pending.startsWith('refresh:') ? 'Checking…' : 'Check for new models'}
+          </button>
+        </div>
       </header>
 
       <div className="ai-management-commandbar">
@@ -292,8 +404,8 @@ export default function AiManagementSettings({ onOpenAgents }) {
           <div className={catalog?.summary?.candidates ? 'needs-attention' : ''}>
             <strong>{catalog?.summary?.candidates || 0}</strong><span>needs review</span>
           </div>
-          <div className={(catalog?.summary?.discoveryWarnings || catalog?.summary?.overdueCatalogReviews) ? 'needs-attention' : ''}>
-            <strong>{(catalog?.summary?.discoveryWarnings || 0) + (catalog?.summary?.overdueCatalogReviews || 0)}</strong><span>warnings</span>
+          <div className={catalog?.summary?.notificationsNeedingReview ? 'needs-attention' : ''}>
+            <strong>{catalog?.summary?.notificationsNeedingReview || 0}</strong><span>alerts to review</span>
           </div>
         </div>
         <section className="ai-management-policy-card" title="When on, the server blocks custom model IDs that are not in the reviewed catalog. Disabled providers and models are always blocked.">
@@ -311,7 +423,68 @@ export default function AiManagementSettings({ onOpenAgents }) {
         </section>
       </div>
 
+      <section className="ai-automation-strip" aria-label="Model discovery automation">
+        <div className="ai-automation-schedule">
+          <div><strong>Automatic checks</strong><span>Provider lists only; approval stays manual.</span></div>
+          <div className="settings-segmented" role="radiogroup" aria-label="Automatic model check schedule">
+            {['off', 'weekly', 'monthly'].map((frequency) => (
+              <button
+                type="button"
+                role="radio"
+                aria-checked={catalog?.automaticCheckFrequency === frequency}
+                className={catalog?.automaticCheckFrequency === frequency ? 'is-active' : ''}
+                disabled={pending === 'automation-settings'}
+                key={frequency}
+                onClick={() => updateAutomation(
+                  { automaticCheckFrequency: frequency },
+                  frequency === 'off' ? 'Automatic model checks turned off.' : `Automatic model checks set to ${frequency}.`,
+                )}
+              >{frequency[0].toUpperCase() + frequency.slice(1)}</button>
+            ))}
+          </div>
+        </div>
+        <div className="ai-automation-timing">
+          <span>Last success <strong>{formatDate(catalog?.lastSuccessfulCheckAt)}</strong></span>
+          <span>Next scheduled <strong>{catalog?.automaticCheckFrequency === 'off' ? 'Off' : formatDate(catalog?.nextScheduledCheckAt)}</strong></span>
+        </div>
+        <div className="ai-automation-notifications">
+          <label><input type="checkbox" checked={catalog?.notifyNewModels !== false} disabled={pending === 'automation-settings'} onChange={(event) => updateAutomation({ notifyNewModels: event.target.checked }, `New-model notifications ${event.target.checked ? 'enabled' : 'disabled'}.`)} />New models</label>
+          <label><input type="checkbox" checked={catalog?.notifyOverdueCatalogReviews !== false} disabled={pending === 'automation-settings'} onChange={(event) => updateAutomation({ notifyOverdueCatalogReviews: event.target.checked }, `Overdue-review notifications ${event.target.checked ? 'enabled' : 'disabled'}.`)} />Overdue reviews</label>
+        </div>
+      </section>
+
+      {(catalog?.notifications?.length || 0) > 0 && (
+        <section className="ai-notification-review" aria-label="AI management notification review">
+          <div className="ai-section-title-row">
+            <div><strong>Review alerts</strong><span>Saved until you review them; repeated checks do not create duplicates.</span></div>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowReviewedNotifications((current) => !current)}>
+              {showReviewedNotifications ? 'Hide reviewed' : 'Show reviewed'}
+            </button>
+          </div>
+          <div className="ai-notification-list">
+            {notifications.length === 0 ? <span className="ai-notification-empty">All current alerts are reviewed.</span> : notifications.slice(0, 4).map((notification) => (
+              <article key={notification.id} className={`ai-notification-item is-${notification.severity || 'info'}${notification.reviewedAt ? ' is-reviewed' : ''}`}>
+                <div><strong>{notification.title}</strong><span>{notification.message}</span></div>
+                <div className="ai-notification-actions">
+                  {notification.providerId && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => viewNotificationProvider(notification)}>View provider</button>
+                  )}
+                  {notification.reviewedAt ? <span className="ai-reviewed-label">Reviewed {formatDate(notification.reviewedAt)}</span> : (
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={pending === `notification:${notification.id}`} onClick={() => markNotificationReviewed(notification)}>Mark reviewed</button>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       {actionMessage && <div className="settings-v2-inline-message" role="status">{actionMessage}</div>}
+      {usageStatus === 'error' && (
+        <div className="settings-v2-inline-message is-error" role="alert">
+          Agent assignments could not be checked. Disabling providers and models is paused until database access is restored.
+        </div>
+      )}
 
       <div className="ai-management-workspace">
         <nav className="ai-provider-list" aria-label="AI providers">
@@ -344,6 +517,9 @@ export default function AiManagementSettings({ onOpenAgents }) {
                 <p>
                   Default: <code>{selectedProvider.defaultModel || 'provider controlled'}</code> · Last successful account check: {formatDate(selectedProvider.lastSuccessfulCheckAt)}
                 </p>
+                {(usage.providers?.[selectedProvider.id]?.length || 0) > 0 && (
+                  <p className="ai-usage-impact">Used by {usage.providers[selectedProvider.id].map((entry) => entry.name).join(', ')}</p>
+                )}
               </div>
               <button
                 type="button"
@@ -475,6 +651,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
                           {model.supportsThinking === true && <span>Reasoning</span>}
                           {model.contextWindowTokens && <span>{Math.round(model.contextWindowTokens / 1000)}k context</span>}
                           {model.lastSeenAt && <span>Seen {formatDate(model.lastSeenAt)}</span>}
+                          {(usage.models?.[key]?.length || 0) > 0 && <span className="is-impact">Used by {usage.models[key].map((entry) => entry.name).join(', ')}</span>}
                         </div>
                       </div>
                       {model.approval === 'candidate' ? (
@@ -483,6 +660,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
                             <strong>Maintained release required</strong>
                             <p>Official docs, request compatibility, focused tests, catalog metadata, and harness evidence must be updated together. This ID cannot be approved from the browser.</p>
                             <div>
+                              <button type="button" className="btn btn-secondary btn-sm" disabled={pending === `packet:${key}`} onClick={() => downloadReviewPacket(selectedProvider, model)}>Download review packet</button>
                               <button type="button" className="btn btn-ghost btn-sm is-danger" disabled={pending === `block:${key}`} onClick={() => blockCandidate(selectedProvider, model)}>Block candidate</button>
                             </div>
                           </div>
@@ -497,6 +675,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
                               />
                             </label>
                             <div>
+                              <button type="button" className="btn btn-secondary btn-sm" disabled={pending === `packet:${key}`} onClick={() => downloadReviewPacket(selectedProvider, model)}>Download packet</button>
                               <button type="button" className="btn btn-primary btn-sm" disabled={pending === `approve:${key}`} onClick={() => approveCandidate(selectedProvider, model)}>Approve after pass</button>
                               <button type="button" className="btn btn-ghost btn-sm is-danger" disabled={pending === `block:${key}`} onClick={() => blockCandidate(selectedProvider, model)}>Block</button>
                             </div>

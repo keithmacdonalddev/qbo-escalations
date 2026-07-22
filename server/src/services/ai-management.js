@@ -12,15 +12,29 @@ const MANAGED_PROVIDER_IDS = Object.freeze(
 );
 const MAX_DISCOVERY_PAGES = 20;
 const ACCOUNT_VISIBILITY_EVIDENCE = 'account-model-list';
+const AUTOMATIC_CHECK_FREQUENCIES = Object.freeze(['off', 'weekly', 'monthly']);
+const AUTOMATIC_CHECK_INTERVAL_MS = Object.freeze({
+  weekly: 7 * 24 * 60 * 60 * 1000,
+  monthly: 30 * 24 * 60 * 60 * 1000,
+});
+const MAX_NOTIFICATIONS = 100;
 
 const PROVIDER_META = Object.freeze(Object.fromEntries(
   providerCatalog.map((entry) => [entry.id, entry])
 ));
 
 const DEFAULT_STATE = Object.freeze({
-  schemaVersion: 1,
+  schemaVersion: 2,
   revision: 1,
   enforceApprovedModels: false,
+  automaticCheckFrequency: 'off',
+  notifyNewModels: true,
+  notifyOverdueCatalogReviews: true,
+  lastScheduledCheckAt: '',
+  nextScheduledCheckAt: '',
+  lastConnectionTestAt: '',
+  connectionTestResults: [],
+  notifications: [],
   updatedAt: '',
   providers: {},
 });
@@ -40,9 +54,19 @@ function readState() {
     const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
     if (!isPlainObject(parsed)) throw new Error('the root value is not an object');
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       revision: Number.isFinite(parsed.revision) ? parsed.revision : 1,
       enforceApprovedModels: parsed.enforceApprovedModels === true,
+      automaticCheckFrequency: AUTOMATIC_CHECK_FREQUENCIES.includes(parsed.automaticCheckFrequency)
+        ? parsed.automaticCheckFrequency
+        : 'off',
+      notifyNewModels: parsed.notifyNewModels !== false,
+      notifyOverdueCatalogReviews: parsed.notifyOverdueCatalogReviews !== false,
+      lastScheduledCheckAt: typeof parsed.lastScheduledCheckAt === 'string' ? parsed.lastScheduledCheckAt : '',
+      nextScheduledCheckAt: typeof parsed.nextScheduledCheckAt === 'string' ? parsed.nextScheduledCheckAt : '',
+      lastConnectionTestAt: typeof parsed.lastConnectionTestAt === 'string' ? parsed.lastConnectionTestAt : '',
+      connectionTestResults: Array.isArray(parsed.connectionTestResults) ? parsed.connectionTestResults : [],
+      notifications: Array.isArray(parsed.notifications) ? parsed.notifications : [],
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : '',
       providers: isPlainObject(parsed.providers) ? parsed.providers : {},
     };
@@ -58,7 +82,7 @@ let state = readState();
 function writeState(nextState) {
   const persistedState = {
     ...nextState,
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: Math.max(1, Number(nextState.revision) || 1),
     updatedAt: new Date().toISOString(),
   };
@@ -69,6 +93,103 @@ function writeState(nextState) {
   // Update the live enforcement state only after durable storage succeeds.
   state = persistedState;
   return state;
+}
+
+function getNextScheduledCheckAt(frequency, from = new Date()) {
+  const interval = AUTOMATIC_CHECK_INTERVAL_MS[frequency];
+  if (!interval) return '';
+  const base = from instanceof Date ? from : new Date(from);
+  const baseTime = Number.isNaN(base.getTime()) ? Date.now() : base.getTime();
+  return new Date(baseTime + interval).toISOString();
+}
+
+function notificationId(type, key) {
+  return `${type}:${String(key || 'general').replace(/[^a-z0-9:._-]+/gi, '-').slice(0, 180)}`;
+}
+
+function applyNotification(next, notification) {
+  const now = new Date().toISOString();
+  const notifications = Array.isArray(next.notifications) ? [...next.notifications] : [];
+  const index = notifications.findIndex((entry) => entry.id === notification.id);
+  const fingerprint = JSON.stringify(notification.fingerprint || notification.message || '');
+  if (index >= 0) {
+    const current = notifications[index];
+    const changed = current.fingerprint !== fingerprint;
+    notifications[index] = {
+      ...current,
+      ...notification,
+      fingerprint,
+      createdAt: current.createdAt || now,
+      lastSeenAt: now,
+      reviewedAt: changed ? '' : current.reviewedAt || '',
+      resolvedAt: '',
+    };
+  } else {
+    notifications.unshift({
+      ...notification,
+      fingerprint,
+      createdAt: now,
+      lastSeenAt: now,
+      reviewedAt: '',
+      resolvedAt: '',
+    });
+  }
+  next.notifications = notifications
+    .sort((left, right) => Date.parse(right.lastSeenAt || right.createdAt || 0) - Date.parse(left.lastSeenAt || left.createdAt || 0))
+    .slice(0, MAX_NOTIFICATIONS);
+}
+
+function resolveNotification(next, id) {
+  const notifications = Array.isArray(next.notifications) ? [...next.notifications] : [];
+  const index = notifications.findIndex((entry) => entry.id === id);
+  if (index < 0 || notifications[index].resolvedAt) return;
+  notifications[index] = { ...notifications[index], resolvedAt: new Date().toISOString() };
+  next.notifications = notifications;
+}
+
+function syncCatalogReviewNotifications(next) {
+  for (const providerId of MANAGED_PROVIDER_IDS) {
+    const review = buildCatalogReview(providerId);
+    const id = notificationId('catalog-review-overdue', providerId);
+    if (next.notifyOverdueCatalogReviews && review.status === 'overdue') {
+      const provider = PROVIDER_META[providerId] || {};
+      applyNotification(next, {
+        id,
+        type: 'catalog-review-overdue',
+        severity: 'warning',
+        title: `${provider.shortLabel || provider.label || providerId} catalog review is overdue`,
+        message: `The official model catalog was last reviewed ${review.reviewedAt || 'on an unknown date'}. Recheck official releases, deprecations, capabilities, and request compatibility.`,
+        providerId,
+        modelIds: [],
+        fingerprint: [review.reviewedAt, review.expiresAfterDays, review.status],
+      });
+    } else {
+      resolveNotification(next, id);
+    }
+  }
+}
+
+function syncDiscoveryNotifications(next, results = []) {
+  for (const result of results) {
+    const providerId = result.providerId;
+    const id = notificationId('new-models-found', providerId);
+    const modelIds = Array.isArray(result.candidateModelIds) ? [...result.candidateModelIds].sort() : [];
+    if (next.notifyNewModels && result.ok && modelIds.length > 0) {
+      const provider = PROVIDER_META[providerId] || {};
+      applyNotification(next, {
+        id,
+        type: 'new-models-found',
+        severity: 'info',
+        title: `${modelIds.length} newer ${provider.shortLabel || provider.label || providerId} model${modelIds.length === 1 ? '' : 's'} found`,
+        message: 'These IDs are newer than the reviewed catalog and remain unavailable until the maintained release review is completed.',
+        providerId,
+        modelIds,
+        fingerprint: modelIds,
+      });
+    } else if (result.ok && modelIds.length === 0) {
+      resolveNotification(next, id);
+    }
+  }
 }
 
 function providerModelDefaults(providerId) {
@@ -340,10 +461,27 @@ function buildProviderSnapshot(providerId) {
 
 function getManagementSnapshot() {
   const providers = MANAGED_PROVIDER_IDS.map(buildProviderSnapshot);
+  const notifications = (Array.isArray(state.notifications) ? state.notifications : [])
+    .filter((notification) => !notification.resolvedAt)
+    .sort((left, right) => Date.parse(right.lastSeenAt || right.createdAt || 0) - Date.parse(left.lastSeenAt || left.createdAt || 0));
+  const lastSuccessfulCheckAt = providers
+    .map((provider) => provider.lastSuccessfulCheckAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || '';
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: state.revision,
     enforceApprovedModels: state.enforceApprovedModels === true,
+    automaticCheckFrequency: state.automaticCheckFrequency || 'off',
+    notifyNewModels: state.notifyNewModels !== false,
+    notifyOverdueCatalogReviews: state.notifyOverdueCatalogReviews !== false,
+    lastSuccessfulCheckAt,
+    lastScheduledCheckAt: state.lastScheduledCheckAt || '',
+    nextScheduledCheckAt: state.nextScheduledCheckAt || '',
+    lastConnectionTestAt: state.lastConnectionTestAt || '',
+    connectionTestResults: clone(state.connectionTestResults || []),
+    notifications: clone(notifications),
     updatedAt: state.updatedAt || '',
     providers,
     summary: {
@@ -359,6 +497,8 @@ function getManagementSnapshot() {
       ),
       overdueCatalogReviews: providers.filter((provider) => provider.catalogReview.status === 'overdue').length,
       discoveryWarnings: providers.filter((provider) => ['attention', 'failed'].includes(provider.discoveryStatus)).length,
+      notifications: notifications.length,
+      notificationsNeedingReview: notifications.filter((notification) => !notification.reviewedAt).length,
     },
   };
 }
@@ -377,6 +517,73 @@ function updateSettings(patch = {}) {
   const next = clone(state);
   if (patch.enforceApprovedModels !== undefined) {
     next.enforceApprovedModels = patch.enforceApprovedModels === true;
+  }
+  if (patch.automaticCheckFrequency !== undefined) {
+    const frequency = String(patch.automaticCheckFrequency || '').trim();
+    if (!AUTOMATIC_CHECK_FREQUENCIES.includes(frequency)) {
+      const err = new Error('Automatic model checks must be off, weekly, or monthly.');
+      err.code = 'INVALID_SCHEDULE';
+      throw err;
+    }
+    if (frequency !== next.automaticCheckFrequency) {
+      next.automaticCheckFrequency = frequency;
+      next.nextScheduledCheckAt = getNextScheduledCheckAt(frequency);
+    }
+  }
+  if (patch.notifyNewModels !== undefined) next.notifyNewModels = patch.notifyNewModels === true;
+  if (patch.notifyOverdueCatalogReviews !== undefined) {
+    next.notifyOverdueCatalogReviews = patch.notifyOverdueCatalogReviews === true;
+  }
+  syncCatalogReviewNotifications(next);
+  next.revision += 1;
+  writeState(next);
+  return getManagementSnapshot();
+}
+
+function reviewNotification(id) {
+  const normalized = String(id || '').trim();
+  const next = clone(state);
+  const notifications = Array.isArray(next.notifications) ? [...next.notifications] : [];
+  const index = notifications.findIndex((entry) => entry.id === normalized);
+  if (index < 0) {
+    const err = new Error('The notification could not be found.');
+    err.code = 'INVALID_NOTIFICATION';
+    throw err;
+  }
+  notifications[index] = { ...notifications[index], reviewedAt: new Date().toISOString() };
+  next.notifications = notifications;
+  next.revision += 1;
+  writeState(next);
+  return getManagementSnapshot();
+}
+
+function recordConnectionTestResults(results = []) {
+  const checkedAt = new Date().toISOString();
+  const normalizedResults = (Array.isArray(results) ? results : []).map((result) => ({
+    providerId: String(result.providerId || ''),
+    ok: result.ok === true,
+    skipped: result.skipped === true,
+    code: String(result.code || ''),
+    message: String(result.message || '').slice(0, 300),
+  }));
+  const next = clone(state);
+  next.lastConnectionTestAt = checkedAt;
+  next.connectionTestResults = normalizedResults;
+  const failures = normalizedResults.filter((result) => !result.ok && !result.skipped);
+  const id = notificationId('provider-connection-failed', 'all');
+  if (failures.length > 0) {
+    applyNotification(next, {
+      id,
+      type: 'provider-connection-failed',
+      severity: 'warning',
+      title: `${failures.length} provider connection${failures.length === 1 ? '' : 's'} need attention`,
+      message: failures.map((failure) => `${failure.providerId}: ${failure.message || failure.code || 'connection failed'}`).join(' · '),
+      providerId: '',
+      modelIds: [],
+      fingerprint: failures.map((failure) => [failure.providerId, failure.code]),
+    });
+  } else {
+    resolveNotification(next, id);
   }
   next.revision += 1;
   writeState(next);
@@ -894,7 +1101,136 @@ async function refreshProviderModels(providerIds = MANAGED_PROVIDER_IDS) {
     }
   }
 
+  const next = clone(state);
+  syncDiscoveryNotifications(next, results);
+  syncCatalogReviewNotifications(next);
+  next.revision += 1;
+  writeState(next);
   return { snapshot: getManagementSnapshot(), results };
+}
+
+function isScheduledModelCheckDue(now = new Date()) {
+  if (!AUTOMATIC_CHECK_INTERVAL_MS[state.automaticCheckFrequency]) return false;
+  const dueAt = Date.parse(state.nextScheduledCheckAt || '');
+  return Number.isFinite(dueAt) && dueAt <= now.getTime();
+}
+
+async function runScheduledModelCheck(now = new Date()) {
+  if (!isScheduledModelCheckDue(now)) return { ran: false, snapshot: getManagementSnapshot(), results: [] };
+  const providerIds = MANAGED_PROVIDER_IDS.filter((providerId) => {
+    const definition = modelCatalog.providers?.[providerId];
+    return definition?.discovery === 'api' && buildCatalogReview(providerId).requiresMaintainedCatalogRelease;
+  });
+  const result = await refreshProviderModels(providerIds);
+  const completedAt = now instanceof Date && !Number.isNaN(now.getTime()) ? now : new Date();
+  const next = clone(state);
+  next.lastScheduledCheckAt = completedAt.toISOString();
+  next.nextScheduledCheckAt = getNextScheduledCheckAt(next.automaticCheckFrequency, completedAt);
+  next.revision += 1;
+  writeState(next);
+  return { ran: true, snapshot: getManagementSnapshot(), results: result.results };
+}
+
+function syncReviewNotifications() {
+  const next = clone(state);
+  const before = JSON.stringify(next.notifications || []);
+  syncCatalogReviewNotifications(next);
+  if (JSON.stringify(next.notifications || []) === before) return getManagementSnapshot();
+  next.revision += 1;
+  writeState(next);
+  return getManagementSnapshot();
+}
+
+function buildAgentUsageSnapshot(identities = []) {
+  const providers = Object.fromEntries(MANAGED_PROVIDER_IDS.map((providerId) => [providerId, []]));
+  const models = {};
+  const addUsage = (providerId, modelId, identity, assignment) => {
+    const resolvedProviderId = resolveManagedProviderId(providerId);
+    if (!MANAGED_PROVIDER_IDS.includes(resolvedProviderId)) return;
+    const usage = {
+      agentId: identity.agentId,
+      name: identity.profile?.displayName || identity.profile?.roleTitle || identity.agentId,
+      assignment,
+      providerId: resolvedProviderId,
+      modelId,
+    };
+    providers[resolvedProviderId].push(usage);
+    if (modelId) {
+      const key = `${resolvedProviderId}:${modelId}`;
+      if (!models[key]) models[key] = [];
+      models[key].push(usage);
+    }
+  };
+
+  for (const identity of Array.isArray(identities) ? identities : []) {
+    const runtime = identity?.runtime;
+    if (!runtime?.provider) continue;
+    const primaryProvider = resolveManagedProviderId(runtime.provider);
+    const primaryDefault = PROVIDER_META[primaryProvider]?.model || '';
+    addUsage(runtime.provider, String(runtime.model || primaryDefault), identity, 'primary');
+    if (runtime.fallbackProvider) {
+      const fallbackProvider = resolveManagedProviderId(runtime.fallbackProvider);
+      const fallbackDefault = PROVIDER_META[fallbackProvider]?.model || '';
+      addUsage(runtime.fallbackProvider, String(runtime.fallbackModel || fallbackDefault), identity, 'fallback');
+    }
+  }
+
+  return { providers, models };
+}
+
+async function getAgentUsageSnapshot() {
+  const { listAgentIdentities } = require('./agent-identity-service');
+  const identities = await listAgentIdentities();
+  return buildAgentUsageSnapshot(identities);
+}
+
+function buildModelReleaseReviewPacket(providerId, modelId, usage = []) {
+  const provider = buildProviderSnapshot(ensureManagedProvider(providerId));
+  const model = provider.models.find((entry) => entry.id === String(modelId || '').trim());
+  if (!model) {
+    const err = new Error('The model could not be found in the managed catalog.');
+    err.code = 'INVALID_MODEL';
+    throw err;
+  }
+  const generatedAt = new Date().toISOString();
+  const officialSources = provider.catalogReview.officialSources.length > 0
+    ? provider.catalogReview.officialSources.map((source) => `- ${source}`).join('\n')
+    : '- No official sources are recorded yet.';
+  const affectedAgents = usage.length > 0
+    ? usage.map((entry) => `- ${entry.name} (${entry.agentId}) — ${entry.assignment}`).join('\n')
+    : '- No saved agent profile currently uses this model.';
+  return [
+    `# Model Release Review — ${model.label || model.id}`,
+    '',
+    `Generated: ${generatedAt}`,
+    `Provider: ${provider.label} (${provider.id})`,
+    `Model ID: ${model.id}`,
+    `Catalog status: ${model.catalogStatus}`,
+    `Availability evidence: ${model.availability || 'unknown'}`,
+    `First discovered: ${model.discoveredAt || 'not recorded'}`,
+    `Last seen: ${model.lastSeenAt || 'not recorded'}`,
+    `Official catalog last reviewed: ${provider.catalogReview.reviewedAt || 'not recorded'} (${provider.catalogReview.status})`,
+    '',
+    '## Official sources',
+    '',
+    officialSources,
+    '',
+    '## Saved agent impact',
+    '',
+    affectedAgents,
+    '',
+    '## Required release checks',
+    '',
+    '- [ ] Confirm the model is genuinely newer than the newest reviewed model in its line.',
+    '- [ ] Check official release, deprecation, pricing, limits, and capability documentation.',
+    '- [ ] Verify the exact request and response contract used by every affected harness.',
+    '- [ ] Update catalog metadata, provider defaults, request builders, and focused tests together.',
+    '- [ ] Run deterministic agent harness fixtures and record the evidence.',
+    '- [ ] Review latency, cost, fallback, and error evidence after release.',
+    '',
+    'This packet contains review evidence only. Downloading it does not approve or enable the model.',
+    '',
+  ].join('\n');
 }
 
 function resolveManagedProviderId(providerId) {
@@ -991,18 +1327,27 @@ module.exports = {
   STATE_FILE,
   assertProviderEnabled,
   assertProviderModelAllowed,
+  buildModelReleaseReviewPacket,
   discoverProviderModels,
+  getAgentUsageSnapshot,
   getManagementSnapshot,
   isProviderEnabled,
+  isScheduledModelCheckDue,
+  recordConnectionTestResults,
   refreshProviderModels,
   resetStateForTests,
+  reviewNotification,
+  runScheduledModelCheck,
+  syncReviewNotifications,
   updateModelPolicy,
   updateProviderPolicy,
   updateSettings,
 };
 
 module.exports._internal = {
+  buildAgentUsageSnapshot,
   classifyDiscoveryModel,
+  getNextScheduledCheckAt,
   isReviewedDiscoveryIgnore,
   mergeModel,
   reconcileModelPolicy,

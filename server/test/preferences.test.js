@@ -56,16 +56,22 @@ test('preferences routes persist AI assistant defaults', async (t) => {
     .put('/api/preferences')
     .send({
       defaultGmailAccount: 'Support@Example.com',
+      defaultSendingAccount: 'Sender@Example.com',
+      defaultCalendarAccount: 'Calendar@Example.com',
       aiAssistantDefaults,
     })
     .expect(200);
 
   assert.equal(putRes.body.ok, true);
   assert.equal(putRes.body.defaultGmailAccount, 'support@example.com');
+  assert.equal(putRes.body.defaultSendingAccount, 'sender@example.com');
+  assert.equal(putRes.body.defaultCalendarAccount, 'calendar@example.com');
   assert.deepEqual(putRes.body.aiAssistantDefaults, aiAssistantDefaults);
 
   const getRes = await agent.get('/api/preferences').expect(200);
   assert.equal(getRes.body.ok, true);
   assert.equal(getRes.body.defaultGmailAccount, 'support@example.com');
+  assert.equal(getRes.body.defaultSendingAccount, 'sender@example.com');
+  assert.equal(getRes.body.defaultCalendarAccount, 'calendar@example.com');
   assert.deepEqual(getRes.body.aiAssistantDefaults, aiAssistantDefaults);
 });

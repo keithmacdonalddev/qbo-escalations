@@ -2,6 +2,7 @@
 
 const { google } = require('googleapis');
 const GmailAuth = require('../models/GmailAuth');
+const UserPreferences = require('../models/UserPreferences');
 const { runIfStubbed } = require('../lib/harness-service-gate');
 
 // ---------------------------------------------------------------------------
@@ -35,6 +36,32 @@ const GMAIL_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
 ];
 
+const GOOGLE_PERMISSION_GROUPS = Object.freeze([
+  { id: 'gmail-read', label: 'Read email and inbox details', anyOf: ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.modify'] },
+  { id: 'gmail-send', label: 'Send email', anyOf: ['https://www.googleapis.com/auth/gmail.send'] },
+  { id: 'gmail-compose', label: 'Create and manage drafts', anyOf: ['https://www.googleapis.com/auth/gmail.compose'] },
+  { id: 'gmail-organize', label: 'Organize email, labels, and filters', allOf: ['https://www.googleapis.com/auth/gmail.modify', 'https://www.googleapis.com/auth/gmail.labels', 'https://www.googleapis.com/auth/gmail.settings.basic'] },
+  { id: 'calendar', label: 'Read and manage calendar events', anyOf: ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/calendar.events'] },
+  { id: 'profile-email', label: 'Know which Google account is connected', anyOf: ['https://www.googleapis.com/auth/userinfo.email'] },
+]);
+
+function buildPermissionStatus(scopeText = '') {
+  const grantedScopes = new Set(String(scopeText || '').split(/\s+/).filter(Boolean));
+  const permissions = GOOGLE_PERMISSION_GROUPS.map((permission) => {
+    const anySatisfied = !permission.anyOf || permission.anyOf.some((scope) => grantedScopes.has(scope));
+    const allSatisfied = !permission.allOf || permission.allOf.every((scope) => grantedScopes.has(scope));
+    return {
+      id: permission.id,
+      label: permission.label,
+      granted: anySatisfied && allSatisfied,
+    };
+  });
+  return {
+    permissions,
+    missingPermissions: permissions.filter((permission) => !permission.granted).map((permission) => permission.label),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // System label constants
 // ---------------------------------------------------------------------------
@@ -67,16 +94,33 @@ function getOAuth2Client() {
  * Automatically refreshes the access token when expired and persists the new one.
  * @param {string} [email] - Optional email to select a specific account. Falls back to primary.
  */
-async function getAuth(email) {
+async function getAuth(email, purpose = 'gmail') {
   const oauth2 = getOAuth2Client();
   if (!oauth2) return null;
+
+  let preferredEmail = typeof email === 'string' ? email.toLowerCase().trim() : '';
+  if (!preferredEmail) {
+    try {
+      const preferences = await UserPreferences.findById('singleton').lean();
+      preferredEmail = purpose === 'calendar'
+        ? preferences?.defaultCalendarAccount || ''
+        : purpose === 'sending'
+          ? preferences?.defaultSendingAccount || preferences?.defaultGmailAccount || ''
+          : preferences?.defaultGmailAccount || '';
+    } catch {
+      preferredEmail = '';
+    }
+  }
 
   // Token fields are select:false on the model, so the metadata statics
   // (getByEmail/getPrimary) no longer return them. This path needs the raw
   // tokens to drive the OAuth client, so query directly and opt the secrets in.
-  const stored = email
-    ? await GmailAuth.findOne({ email: email.toLowerCase().trim() }).select('+accessToken +refreshToken').lean()
-    : await GmailAuth.findOne().sort({ updatedAt: -1 }).select('+accessToken +refreshToken').lean();
+  let stored = preferredEmail
+    ? await GmailAuth.findOne({ email: preferredEmail }).select('+accessToken +refreshToken').lean()
+    : null;
+  if (!stored) {
+    stored = await GmailAuth.findOne().sort({ updatedAt: -1 }).select('+accessToken +refreshToken').lean();
+  }
   if (!stored) return null;
 
   oauth2.setCredentials({
@@ -149,7 +193,7 @@ function appNotConfigured() {
 /**
  * Generate the Google OAuth2 consent URL.
  */
-function getAuthUrl(returnTo) {
+function getAuthUrl(returnTo, options = {}) {
   const oauth2 = getOAuth2Client();
   if (!oauth2) return null;
 
@@ -157,7 +201,9 @@ function getAuthUrl(returnTo) {
     access_type: 'offline',
     prompt: 'consent',  // Force consent to always get refresh_token
     scope: GMAIL_SCOPES,
+    include_granted_scopes: true,
   };
+  if (options.loginHint) opts.login_hint = String(options.loginHint).trim();
 
   // Pass returnTo through OAuth state so callback can redirect to the right page
   if (returnTo) {
@@ -183,13 +229,25 @@ async function handleCallback(code) {
   const profileRes = await gmail.users.getProfile({ userId: 'me' });
   const email = profileRes.data.emailAddress;
 
-  // Save tokens to database
+  const existing = await GmailAuth.findOne({ email: email.toLowerCase().trim() })
+    .select('+refreshToken')
+    .lean();
+  const refreshToken = tokens.refresh_token || existing?.refreshToken;
+  if (!refreshToken) {
+    throw new Error('Google did not return reusable access. Reauthorize the account and approve the requested permissions.');
+  }
+
+  // Save tokens to database. During reauthorization Google may omit a new
+  // refresh token, so preserve the existing one instead of disconnecting.
   await GmailAuth.upsertTokens({
     email,
     accessToken: tokens.access_token,
-    refreshToken: tokens.refresh_token,
+    refreshToken,
     tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : new Date(Date.now() + 3600000),
-    scope: tokens.scope || GMAIL_SCOPES.join(' '),
+    // Permissions must reflect evidence returned by Google. Preserve a prior
+    // grant during reauthorization, but never claim every requested scope when
+    // Google omits scope evidence for a brand-new connection.
+    scope: tokens.scope || existing?.scope || '',
   });
 
   return { email };
@@ -242,6 +300,7 @@ async function getAuthStatus() {
 
   // Primary = first in the list (sorted by updatedAt desc)
   const primary = allAccounts[0];
+  const primaryPermissionStatus = buildPermissionStatus(primary.scope);
 
   return {
     ok: true,
@@ -250,12 +309,23 @@ async function getAuthStatus() {
     appConfigured: true,
     connectedAt: primary.createdAt || null,
     scopes: primary.scope || '',
+    permissions: primaryPermissionStatus.permissions,
+    missingPermissions: primaryPermissionStatus.missingPermissions,
+    lastGmailAccessAt: primary.lastGmailAccessAt || null,
+    lastCalendarAccessAt: primary.lastCalendarAccessAt || null,
     activeAccount: primary.email,
-    accounts: allAccounts.map((a) => ({
-      email: a.email,
-      connectedAt: a.createdAt || null,
-      lastUsed: a.updatedAt || null,
-    })),
+    accounts: allAccounts.map((a) => {
+      const permissionStatus = buildPermissionStatus(a.scope);
+      return {
+        email: a.email,
+        connectedAt: a.createdAt || null,
+        lastUsed: a.updatedAt || null,
+        lastGmailAccessAt: a.lastGmailAccessAt || null,
+        lastCalendarAccessAt: a.lastCalendarAccessAt || null,
+        permissions: permissionStatus.permissions,
+        missingPermissions: permissionStatus.missingPermissions,
+      };
+    }),
   };
 }
 
@@ -266,11 +336,18 @@ async function listAccounts() {
   const accounts = await GmailAuth.getAll();
   return {
     ok: true,
-    accounts: accounts.map((a) => ({
-      email: a.email,
-      connectedAt: a.createdAt || null,
-      lastUsed: a.updatedAt || null,
-    })),
+    accounts: accounts.map((a) => {
+      const permissionStatus = buildPermissionStatus(a.scope);
+      return {
+        email: a.email,
+        connectedAt: a.createdAt || null,
+        lastUsed: a.updatedAt || null,
+        lastGmailAccessAt: a.lastGmailAccessAt || null,
+        lastCalendarAccessAt: a.lastCalendarAccessAt || null,
+        permissions: permissionStatus.permissions,
+        missingPermissions: permissionStatus.missingPermissions,
+      };
+    }),
   };
 }
 
@@ -701,7 +778,7 @@ async function listLabels(accountEmail) {
  * @param {string} [opts.accountEmail] - optional account to use
  */
 async function createDraft({ to, subject, body, cc, bcc, accountEmail }) {
-  const auth = await getAuth(accountEmail);
+  const auth = await getAuth(accountEmail, 'sending');
   if (!auth) return notConnected();
 
   if (!to) return { ok: false, code: 'MISSING_FIELD', error: '"to" field is required' };
@@ -797,7 +874,7 @@ function buildRawMessage({ to, cc, bcc, subject, body, inReplyTo, references }) 
  * @param {string} [opts.references] - References header for threading
  */
 async function sendMessage({ to, cc, bcc, subject, body, threadId, inReplyTo, references, accountEmail }) {
-  const auth = await getAuth(accountEmail);
+  const auth = await getAuth(accountEmail, 'sending');
   if (!auth) return notConnected();
 
   if (!to) return { ok: false, code: 'MISSING_FIELD', error: '"to" field is required' };
@@ -827,7 +904,7 @@ async function sendMessage({ to, cc, bcc, subject, body, threadId, inReplyTo, re
  * @param {string} [accountEmail] - optional account to use
  */
 async function sendDraft(draftId, accountEmail) {
-  const auth = await getAuth(accountEmail);
+  const auth = await getAuth(accountEmail, 'sending');
   if (!auth) return notConnected();
 
   if (!draftId) return { ok: false, code: 'MISSING_FIELD', error: '"draftId" is required' };
@@ -1180,7 +1257,7 @@ async function deleteFilter(filterId, accountEmail) {
  * @param {string} [opts.accountEmail] - optional account to use
  */
 async function listDrafts({ maxResults = 10, accountEmail } = {}) {
-  const auth = await getAuth(accountEmail);
+  const auth = await getAuth(accountEmail, 'sending');
   if (!auth) return notConnected();
 
   const client = getGmailClient(auth);
@@ -1267,6 +1344,7 @@ async function listUnifiedMessages({ q, maxResults = 25, pageTokens = {} } = {})
           errors.push({ account: email, code: result.code || 'FETCH_FAILED', error: result.error || 'Failed to fetch messages' });
           return [];
         }
+        await recordSuccessfulAccess(email, 'gmail');
         if (result.nextPageToken) {
           nextPageTokens[email] = result.nextPageToken;
         }
@@ -1318,6 +1396,7 @@ async function getUnifiedUnreadCounts() {
         if (!auth) { counts[account.email] = 0; return; }
         const gmail = getGmailClient(auth);
         const res = await gmail.users.labels.get({ userId: 'me', id: 'INBOX' });
+        await recordSuccessfulAccess(account.email, 'gmail');
         const count = res.data.messagesUnread || 0;
         counts[account.email] = count;
         total += count;
@@ -1331,19 +1410,84 @@ async function getUnifiedUnreadCounts() {
   return { ok: true, counts };
 }
 
+const ACCESS_TRACKED_GMAIL_OPERATIONS = new Set([
+  'getProfile', 'listMessages', 'getMessage', 'listLabels', 'createLabel',
+  'createDraft', 'listDrafts', 'sendMessage', 'sendDraft', 'modifyMessage',
+  'trashMessage', 'untrashMessage', 'deleteMessage', 'batchModify',
+  'scanSubscriptions', 'listFilters', 'createFilter', 'deleteFilter',
+]);
+
+function accountEmailForOperation(kind, args) {
+  switch (kind) {
+    case 'getProfile':
+    case 'listLabels':
+    case 'listFilters':
+      return args[0] || '';
+    case 'getMessage':
+    case 'sendDraft':
+    case 'trashMessage':
+    case 'untrashMessage':
+    case 'deleteMessage':
+    case 'deleteFilter':
+      return args[1] || '';
+    case 'createLabel':
+      return args[2] || '';
+    case 'listMessages':
+    case 'createDraft':
+    case 'listDrafts':
+    case 'sendMessage':
+    case 'scanSubscriptions':
+    case 'createFilter':
+      return args[0]?.accountEmail || '';
+    case 'modifyMessage':
+    case 'batchModify':
+      return args[1]?.accountEmail || '';
+    default:
+      return '';
+  }
+}
+
+async function recordSuccessfulAccess(email, service = 'gmail') {
+  try {
+    let resolvedEmail = email || '';
+    if (!resolvedEmail) {
+      const preferences = await UserPreferences.findById('singleton').lean();
+      resolvedEmail = service === 'calendar'
+        ? preferences?.defaultCalendarAccount || ''
+        : service === 'sending'
+          ? preferences?.defaultSendingAccount || preferences?.defaultGmailAccount || ''
+          : preferences?.defaultGmailAccount || '';
+    }
+    await GmailAuth.recordSuccessfulAccess(resolvedEmail || undefined, service === 'calendar' ? 'calendar' : 'gmail');
+  } catch (error) {
+    console.warn(`[Google access] Could not record successful ${service} access:`, error.message);
+  }
+}
+
 function wrapHarnessedGmailFunction(kind, impl) {
   return function wrappedHarnessedGmailFunction(...args) {
     const stubbed = runIfStubbed('gmail', kind, args);
     if (stubbed.handled) return stubbed.value;
-    return impl(...args);
+    const result = impl(...args);
+    if (!ACCESS_TRACKED_GMAIL_OPERATIONS.has(kind) || !result?.then) return result;
+    return result.then(async (value) => {
+      if (value?.ok !== false) {
+        const service = ['createDraft', 'listDrafts', 'sendMessage', 'sendDraft'].includes(kind) ? 'sending' : 'gmail';
+        await recordSuccessfulAccess(accountEmailForOperation(kind, args), service);
+      }
+      return value;
+    });
   };
 }
 
 module.exports = {
   // Constants
   SYSTEM_LABELS,
+  GOOGLE_PERMISSION_GROUPS,
+  buildPermissionStatus,
   // Shared auth (reused by calendar service)
   getAuth,
+  recordSuccessfulAccess,
   // OAuth flow
   getAuthUrl: wrapHarnessedGmailFunction('getAuthUrl', getAuthUrl),
   handleCallback: wrapHarnessedGmailFunction('handleCallback', handleCallback),

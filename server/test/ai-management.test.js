@@ -12,15 +12,20 @@ const modelCatalog = require('../../shared/ai-model-catalog.json');
 const {
   assertProviderEnabled,
   assertProviderModelAllowed,
+  buildModelReleaseReviewPacket,
   getManagementSnapshot,
+  isScheduledModelCheckDue,
+  recordConnectionTestResults,
   refreshProviderModels,
   resetStateForTests,
+  reviewNotification,
   updateModelPolicy,
   updateProviderPolicy,
   updateSettings,
 } = require('../src/services/ai-management');
 const {
   classifyDiscoveryModel,
+  buildAgentUsageSnapshot,
   isReviewedDiscoveryIgnore,
   mergeModel,
   reconcileModelPolicy,
@@ -49,6 +54,63 @@ test('curated providers and models start approved while strict enforcement start
       `${provider.id} should include its runtime default model`
     );
   }
+});
+
+test('automatic checks expose a trustworthy next run and keep approval manual', () => {
+  const snapshot = updateSettings({ automaticCheckFrequency: 'weekly' });
+  const nextCheckAt = Date.parse(snapshot.nextScheduledCheckAt);
+
+  assert.equal(snapshot.automaticCheckFrequency, 'weekly');
+  assert.ok(Number.isFinite(nextCheckAt));
+  assert.equal(isScheduledModelCheckDue(new Date(nextCheckAt - 1)), false);
+  assert.equal(isScheduledModelCheckDue(new Date(nextCheckAt + 1)), true);
+  assert.equal(snapshot.enforceApprovedModels, false);
+
+  const disabled = updateSettings({ automaticCheckFrequency: 'off' });
+  assert.equal(disabled.nextScheduledCheckAt, '');
+});
+
+test('provider failures create one reviewable notification and a passing retest resolves it', () => {
+  const failed = recordConnectionTestResults([
+    { providerId: 'openai', ok: false, code: 'INVALID_KEY', message: 'API key rejected' },
+    { providerId: 'codex', ok: true, code: 'OK', message: 'Ready' },
+  ]);
+  assert.equal(failed.summary.notificationsNeedingReview, 1);
+  assert.match(failed.notifications[0].title, /provider connection/i);
+
+  const reviewed = reviewNotification(failed.notifications[0].id);
+  assert.equal(reviewed.summary.notificationsNeedingReview, 0);
+  assert.ok(reviewed.notifications[0].reviewedAt);
+
+  const recovered = recordConnectionTestResults([
+    { providerId: 'openai', ok: true, code: 'OK', message: 'Ready' },
+  ]);
+  assert.equal(recovered.notifications.length, 0);
+});
+
+test('agent impact and release packets identify saved primary and fallback assignments', () => {
+  const usage = buildAgentUsageSnapshot([
+    {
+      agentId: 'triage',
+      profile: { displayName: 'Triage Agent' },
+      runtime: {
+        provider: 'openai',
+        model: 'gpt-5.6-terra',
+        fallbackProvider: 'gemini',
+        fallbackModel: 'gemini-3.6-flash',
+      },
+    },
+  ]);
+  assert.equal(usage.models['openai:gpt-5.6-terra'][0].assignment, 'primary');
+  assert.equal(usage.models['gemini:gemini-3.6-flash'][0].assignment, 'fallback');
+
+  const packet = buildModelReleaseReviewPacket(
+    'openai',
+    'gpt-5.6-terra',
+    usage.models['openai:gpt-5.6-terra']
+  );
+  assert.match(packet, /Triage Agent \(triage\) — primary/);
+  assert.match(packet, /Downloading it does not approve or enable the model/);
 });
 
 test('provider defaults and CLI model presets cannot drift from the governed model inventory', () => {

@@ -157,6 +157,7 @@
   line-height: 1.4;
 }
 .settings-v2-heading .btn { flex: 0 0 auto; }
+.ai-management-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 
 .settings-v2-card,
 .ai-release-procedure {
@@ -265,6 +266,49 @@
   color: var(--accent-hover, #8bb7ff);
   font-size: 0.68rem;
 }
+.settings-v2-inline-message.is-error {
+  border-color: color-mix(in srgb, var(--danger, #f06060) 38%, transparent);
+  background: color-mix(in srgb, var(--danger, #f06060) 9%, transparent);
+  color: var(--danger, #f06060);
+}
+
+.ai-automation-strip {
+  display: grid;
+  grid-template-columns: minmax(310px, 1.2fr) minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin: 0 0 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--settings-border);
+  border-radius: 8px;
+  background: var(--settings-panel);
+}
+.ai-automation-schedule { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ai-automation-schedule strong,
+.ai-automation-schedule span { display: block; }
+.ai-automation-schedule strong { font-size: 0.69rem; }
+.ai-automation-schedule span { margin-top: 2px; color: var(--settings-muted); font-size: 0.58rem; }
+.ai-automation-strip .settings-segmented button { padding: 4px 7px; font-size: 0.59rem; }
+.ai-automation-timing { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ai-automation-timing > span { color: var(--settings-faint); font-size: 0.56rem; line-height: 1.3; }
+.ai-automation-timing strong { display: block; margin-top: 2px; color: var(--settings-muted); font-size: 0.59rem; font-weight: 650; }
+.ai-automation-notifications { display: flex; flex-direction: column; gap: 4px; padding-left: 10px; border-left: 1px solid var(--settings-border); }
+.ai-automation-notifications label { display: flex; gap: 5px; align-items: center; color: var(--settings-muted); font-size: 0.59rem; white-space: nowrap; }
+.ai-automation-notifications input { accent-color: var(--settings-accent); }
+
+.ai-notification-review { margin: 0 0 10px; padding: 10px 11px; border: 1px solid var(--settings-border); border-radius: 8px; background: var(--settings-panel); }
+.ai-notification-list { display: flex; flex-direction: column; gap: 5px; margin-top: 7px; }
+.ai-notification-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 8px; border: 1px solid var(--settings-border); border-radius: 6px; background: var(--settings-input); }
+.ai-notification-item.is-warning { border-left: 2px solid var(--warning, #f0a940); }
+.ai-notification-item.is-info { border-left: 2px solid var(--settings-accent); }
+.ai-notification-item.is-reviewed { opacity: 0.65; }
+.ai-notification-item strong,
+.ai-notification-item span { display: block; }
+.ai-notification-item strong { font-size: 0.64rem; }
+.ai-notification-item div > span { margin-top: 2px; color: var(--settings-muted); font-size: 0.58rem; line-height: 1.35; }
+.ai-notification-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.ai-reviewed-label,
+.ai-notification-empty { color: var(--settings-faint); font-size: 0.57rem; }
 
 .ai-management-workspace {
   display: grid;
@@ -316,6 +360,7 @@
 .ai-provider-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding-bottom: 11px; border-bottom: 1px solid var(--settings-border); }
 .ai-provider-detail-header h3 { margin: 0; font-size: 1rem; letter-spacing: -0.015em; }
 .ai-provider-detail-header p { margin: 4px 0 0; color: var(--settings-muted); font-size: 0.63rem; line-height: 1.35; }
+.ai-provider-detail-header .ai-usage-impact { color: var(--warning, #f0a940); }
 .ai-provider-detail code,
 .ai-model-row code { color: var(--accent-hover, #8bb7ff); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.62rem; overflow-wrap: anywhere; }
 .settings-v2-toggle-button {
@@ -381,6 +426,7 @@
 .ai-model-channel { background: var(--bg-elevated, #242a38); color: var(--settings-muted); font-weight: 600; }
 .ai-model-capabilities { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
 .ai-model-capabilities span { padding: 2px 5px; border: 1px solid var(--settings-border); border-radius: 4px; color: var(--settings-muted); font-size: 0.55rem; }
+.ai-model-capabilities span.is-impact { border-color: color-mix(in srgb, var(--warning, #f0a940) 35%, transparent); color: var(--warning, #f0a940); }
 .ai-model-review { width: min(100%, 300px); flex: 0 1 300px; }
 .ai-model-review label span { display: block; margin-bottom: 4px; color: var(--settings-muted); font-size: 0.59rem; }
 .ai-model-review input { width: 100%; }
@@ -483,8 +529,25 @@
 .settings-v2-layout .settings-accounts-card:hover { transform: none !important; box-shadow: none !important; }
 .settings-v2-layout .settings-accounts-card-header { padding: 12px 14px !important; border-bottom: 1px solid var(--settings-border) !important; background: var(--bg-elevated, #242a38) !important; }
 .settings-v2-layout .settings-accounts-body { padding: 12px 14px !important; }
-.settings-v2-layout .settings-accounts-provider { padding: 0 0 12px !important; }
+.settings-v2-layout .settings-accounts-provider { padding: 0 !important; }
 .settings-v2-layout .settings-accounts-defaults { margin-top: 10px !important; padding-top: 10px !important; }
+.settings-v2-layout .settings-accounts-default-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
+.settings-account-health-list { display: flex; flex-direction: column; gap: 5px; }
+.settings-account-health-row { display: grid; grid-template-columns: minmax(165px, 1.15fr) repeat(2, minmax(150px, 1fr)) auto; gap: 12px; align-items: center; padding: 8px 9px; border: 1px solid var(--settings-border); border-radius: 6px; background: var(--settings-input); }
+.settings-account-health-name { display: flex; gap: 7px; align-items: center; min-width: 0; }
+.settings-account-health-name strong { overflow: hidden; font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
+.settings-account-health-row > div > span,
+.settings-account-health-row > div > strong { display: block; }
+.settings-account-health-row > div > span { color: var(--settings-faint); font-size: 0.55rem; }
+.settings-account-health-row > div > strong { margin-top: 2px; color: var(--settings-muted); font-size: 0.58rem; font-weight: 600; }
+.settings-account-permission-state { padding: 3px 6px; border-radius: 5px; background: var(--success-subtle, rgba(92, 208, 142, 0.1)); color: var(--success, #5cd08e); font-size: 0.57rem; font-weight: 700; white-space: nowrap; }
+.settings-account-permission-state.is-warning { background: var(--warning-subtle, rgba(240, 169, 64, 0.1)); color: var(--warning, #f0a940); }
+.settings-account-health-actions { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+.settings-accounts-access-warning { display: flex !important; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px !important; }
+.settings-v2-layout .settings-accounts-scopes-list { display: flex; flex-wrap: wrap; gap: 5px 12px; }
+.settings-v2-layout .settings-accounts-scopes-list li { margin: 0 !important; color: var(--success, #5cd08e); font-size: 0.6rem; }
+.settings-v2-layout .settings-accounts-scopes-list li.is-missing { color: var(--warning, #f0a940); }
+.settings-v2-layout .settings-accounts-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .settings-v2-layout .settings-info-footer { margin-top: 10px !important; padding: 9px 11px !important; border: 1px solid var(--settings-border) !important; border-radius: 7px !important; background: var(--settings-input) !important; color: var(--settings-muted) !important; }
 
 .settings-v2-content .agent-accordion-list { gap: 7px !important; }
@@ -513,6 +576,8 @@
   .ai-management-commandbar { display: block; }
   .ai-management-policy-card { border-top: 1px solid var(--settings-border); }
   .ai-management-workspace { grid-template-columns: 164px minmax(0, 1fr); }
+  .ai-automation-strip { grid-template-columns: 1fr 1fr; }
+  .ai-automation-notifications { grid-column: 1 / -1; flex-direction: row; padding: 7px 0 0; border-top: 1px solid var(--settings-border); border-left: 0; }
   .ai-release-procedure ol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ai-release-procedure li:last-child { grid-column: 1 / -1; }
 }
@@ -543,17 +608,29 @@
   .ai-release-procedure ol { grid-template-columns: 1fr; }
   .ai-release-procedure li:last-child { grid-column: auto; }
   .settings-v2-range-grid { grid-template-columns: 1fr; gap: 5px; }
+  .settings-v2-layout .settings-accounts-default-grid { grid-template-columns: 1fr !important; }
+  .settings-account-health-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .settings-account-health-row > div:not(.settings-account-health-name) { grid-column: 1 / -1; }
 }
 
 @media (max-width: 480px) {
   .settings-v2-heading { align-items: stretch; flex-direction: column; gap: 9px; }
   .settings-v2-heading .btn { width: 100%; }
-  .ai-management-summary > div { padding: 7px 9px; }
+  .ai-management-summary { overflow-x: visible; }
+  .ai-management-summary > div { min-width: 0; flex: 1 1 25%; padding: 7px 6px; }
+  .ai-management-summary span { font-size: 0.55rem; white-space: normal; }
   .ai-management-policy-card,
   .settings-v2-master-toggle,
   .ai-provider-detail-header,
   .ai-discovery-row { align-items: flex-start; }
   .ai-management-policy-card { flex: auto; }
+  .ai-management-heading-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .ai-automation-strip { grid-template-columns: 1fr; }
+  .ai-automation-schedule { display: grid; grid-template-columns: minmax(90px, 1fr) minmax(170px, 1.3fr); }
+  .ai-automation-timing,
+  .ai-automation-notifications { grid-column: auto; }
+  .ai-automation-schedule .settings-segmented { grid-template-columns: repeat(3, 1fr); }
+  .ai-notification-item { align-items: flex-start; flex-direction: column; }
   .settings-segmented { display: grid; grid-template-columns: repeat(2, 1fr); width: 100%; }
   .ai-key-input-row .btn { flex: 1 1 auto; }
   .ai-model-row { gap: 8px; }

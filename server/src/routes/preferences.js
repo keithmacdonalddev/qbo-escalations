@@ -10,6 +10,7 @@ router.get('/', async (req, res) => {
   res.json({
     ok: true,
     defaultGmailAccount: prefs.defaultGmailAccount || '',
+    defaultSendingAccount: prefs.defaultSendingAccount || '',
     defaultCalendarAccount: prefs.defaultCalendarAccount || '',
     aiAssistantDefaults: prefs.aiAssistantDefaults || null,
   });
@@ -17,15 +18,17 @@ router.get('/', async (req, res) => {
 
 // PUT /api/preferences — update defaults (partial updates supported)
 router.put('/', async (req, res) => {
-  const { defaultGmailAccount, defaultCalendarAccount, aiAssistantDefaults } = req.body || {};
+  const { defaultGmailAccount, defaultSendingAccount, defaultCalendarAccount, aiAssistantDefaults } = req.body || {};
   const prefs = await UserPreferences.upsert({
     defaultGmailAccount,
+    defaultSendingAccount,
     defaultCalendarAccount,
     aiAssistantDefaults,
   });
   res.json({
     ok: true,
     defaultGmailAccount: prefs.defaultGmailAccount || '',
+    defaultSendingAccount: prefs.defaultSendingAccount || '',
     defaultCalendarAccount: prefs.defaultCalendarAccount || '',
     aiAssistantDefaults: prefs.aiAssistantDefaults || null,
   });

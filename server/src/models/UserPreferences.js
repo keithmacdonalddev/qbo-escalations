@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const userPreferencesSchema = new mongoose.Schema({
   _id:                    { type: String, default: 'singleton' },
   defaultGmailAccount:    { type: String, default: '', trim: true, lowercase: true },
+  defaultSendingAccount:  { type: String, default: '', trim: true, lowercase: true },
   defaultCalendarAccount: { type: String, default: '', trim: true, lowercase: true },
   aiAssistantDefaults:    { type: mongoose.Schema.Types.Mixed, default: null },
 }, {
@@ -43,6 +44,9 @@ userPreferencesSchema.statics.upsert = async function (fields = {}) {
   }
   if (fields.defaultCalendarAccount !== undefined) {
     $set.defaultCalendarAccount = (fields.defaultCalendarAccount || '').trim().toLowerCase();
+  }
+  if (fields.defaultSendingAccount !== undefined) {
+    $set.defaultSendingAccount = (fields.defaultSendingAccount || '').trim().toLowerCase();
   }
   if (fields.aiAssistantDefaults !== undefined) {
     $set.aiAssistantDefaults = cloneJsonObject(fields.aiAssistantDefaults);

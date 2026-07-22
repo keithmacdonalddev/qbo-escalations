@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTooltipLevel } from '../hooks/useTooltipLevel.jsx';
+import { useToast } from '../hooks/useToast.jsx';
 import { apiFetch } from '../api/http.js';
 import {
   getDefaultCalendarAccount,
   getDefaultGmailAccount,
+  getDefaultSendingAccount,
   hasConnectedAccount,
   loadDefaultsFromServer,
   setDefaultCalendarAccount,
   setDefaultGmailAccount,
+  setDefaultSendingAccount,
 } from '../lib/accountDefaults.js';
 import AiAssistantSettingsPanel from './AiAssistantSettingsPanel.jsx';
 import AiManagementSettings from './AiManagementSettings.jsx';
@@ -32,16 +35,18 @@ function Icon({ name, size = 17 }) {
 
 const SETTINGS_SECTIONS = [
   { id: 'ai-management', label: 'AI Management', desc: 'Providers, models, keys, and releases', icon: 'cpu', keywords: 'api key model catalog enable disable dynamic discovery' },
-  { id: 'accounts', label: 'Connected Accounts', desc: 'Google, inbox, and calendar defaults', icon: 'link', keywords: 'gmail email oauth account calendar' },
+  { id: 'accounts', label: 'Connected Accounts', desc: 'Google access and account defaults', icon: 'link', keywords: 'gmail email send oauth account calendar' },
   { id: 'ai-safety', label: 'AI Safety & Context', desc: 'Cost, context, memory, and diagnostics', icon: 'shield', keywords: 'budget token retrieval guardrail debug memory' },
   { id: 'display', label: 'Display & Navigation', desc: 'Readability, sidebar, and hints', icon: 'display', keywords: 'text size tooltip sidebar labels hover accessibility' },
   { id: 'advanced', label: 'Developer Tools', desc: 'Performance and network diagnostics', icon: 'tools', keywords: 'waterfall flame led speed intensity diagnostics' },
 ];
 
 export default function Settings({ themeProps, aiProps, layoutProps }) {
+  const toast = useToast();
   const [activeSection, setActiveSection] = useState('ai-management');
   const [searchQuery, setSearchQuery] = useState('');
   const [savedFlash, setSavedFlash] = useState(null);
+  const [savingDefault, setSavingDefault] = useState('');
   const liveRegionRef = useRef(null);
   const { level: tooltipLevel, setLevel: setTooltipLevel } = useTooltipLevel();
   const textSize = themeProps?.textSize || 0;
@@ -55,10 +60,15 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
     appConfigured: true,
     accounts: [],
     activeAccount: null,
+    permissions: [],
+    missingPermissions: [],
+    lastGmailAccessAt: null,
+    lastCalendarAccessAt: null,
   });
   const [googleDisconnecting, setGoogleDisconnecting] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
   const [defaultEmailAccount, setDefaultEmailAccountState] = useState(() => getDefaultGmailAccount());
+  const [defaultSendingAccount, setDefaultSendingAccountState] = useState(() => getDefaultSendingAccount());
   const [defaultCalendarAccount, setDefaultCalendarAccountState] = useState(() => getDefaultCalendarAccount());
 
   const fetchGoogleAuth = useCallback(async () => {
@@ -74,6 +84,10 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
         appConfigured: data.appConfigured !== false,
         accounts: Array.isArray(data.accounts) ? data.accounts : [],
         activeAccount: data.activeAccount || data.email || null,
+        permissions: Array.isArray(data.permissions) ? data.permissions : [],
+        missingPermissions: Array.isArray(data.missingPermissions) ? data.missingPermissions : [],
+        lastGmailAccessAt: data.lastGmailAccessAt || null,
+        lastCalendarAccessAt: data.lastCalendarAccessAt || null,
       });
     } catch {
       setGoogleAuth((current) => ({ ...current, loading: false }));
@@ -83,8 +97,10 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   useEffect(() => {
     fetchGoogleAuth();
     loadDefaultsFromServer().then((preferences) => {
-      if (preferences?.defaultGmailAccount) setDefaultEmailAccountState(preferences.defaultGmailAccount);
-      if (preferences?.defaultCalendarAccount) setDefaultCalendarAccountState(preferences.defaultCalendarAccount);
+      if (!preferences) return;
+      setDefaultEmailAccountState(preferences.defaultGmailAccount);
+      setDefaultSendingAccountState(preferences.defaultSendingAccount);
+      setDefaultCalendarAccountState(preferences.defaultCalendarAccount);
     });
   }, [fetchGoogleAuth]);
 
@@ -110,6 +126,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
 
   const connectedAccounts = Array.isArray(googleAuth.accounts) ? googleAuth.accounts : [];
   const selectedDefaultEmailAccount = hasConnectedAccount(connectedAccounts, defaultEmailAccount) ? defaultEmailAccount : '';
+  const selectedDefaultSendingAccount = hasConnectedAccount(connectedAccounts, defaultSendingAccount) ? defaultSendingAccount : '';
   const selectedDefaultCalendarAccount = hasConnectedAccount(connectedAccounts, defaultCalendarAccount) ? defaultCalendarAccount : '';
   const defaultFallbackLabel = connectedAccounts.length > 0
     ? `Use first connected (${connectedAccounts[0].email})`
@@ -121,11 +138,30 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
       const response = await apiFetch('/api/gmail/auth/url?returnTo=/settings');
       const data = await response.json();
       if (data.ok && data.url) window.location.href = data.url;
-      else setGoogleConnecting(false);
-    } catch {
+      else throw new Error(data.error || 'Google authorization could not be started.');
+    } catch (connectError) {
       setGoogleConnecting(false);
+      toast.error(connectError.message || 'Google authorization could not be started.', { duration: 5000 });
     }
-  }, []);
+  }, [toast]);
+
+  const handleGoogleReauthorize = useCallback(async (accountEmail) => {
+    setGoogleConnecting(true);
+    try {
+      const query = new URLSearchParams({
+        returnTo: '/settings',
+        reauthorize: 'true',
+        account: accountEmail || googleAuth.activeAccount || googleAuth.email || '',
+      });
+      const response = await apiFetch(`/api/gmail/auth/url?${query.toString()}`);
+      const data = await response.json();
+      if (data.ok && data.url) window.location.href = data.url;
+      else throw new Error(data.error || 'Google reauthorization could not be started.');
+    } catch (reauthorizeError) {
+      setGoogleConnecting(false);
+      toast.error(reauthorizeError.message || 'Google reauthorization could not be started.', { duration: 5000 });
+    }
+  }, [googleAuth.activeAccount, googleAuth.email, toast]);
 
   const handleGoogleDisconnect = useCallback(async () => {
     if (!window.confirm('Disconnect this Google account from the application?')) return;
@@ -134,16 +170,34 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
       const response = await apiFetch('/api/gmail/auth/disconnect', { method: 'POST' });
       const data = await response.json();
       if (data.ok) await fetchGoogleAuth();
+      else throw new Error(data.error || 'Google could not be disconnected.');
+    } catch (disconnectError) {
+      toast.error(disconnectError.message || 'Google could not be disconnected.', { duration: 5000 });
     } finally {
       setGoogleDisconnecting(false);
     }
-  }, [fetchGoogleAuth]);
+  }, [fetchGoogleAuth, toast]);
 
   const announceSaved = useCallback((kind, message) => {
     setSavedFlash(kind);
     window.setTimeout(() => setSavedFlash((current) => current === kind ? null : current), 2000);
     if (liveRegionRef.current) liveRegionRef.current.textContent = message;
   }, []);
+
+  const saveDefaultSelection = useCallback(async ({ kind, email, save, updateState, successMessage }) => {
+    setSavingDefault(kind);
+    try {
+      const value = await save(email);
+      updateState(value);
+      announceSaved(kind, successMessage(value));
+    } catch (saveError) {
+      const message = saveError.message || 'The account default could not be saved.';
+      toast.error(message, { duration: 5000 });
+      if (liveRegionRef.current) liveRegionRef.current.textContent = message;
+    } finally {
+      setSavingDefault((current) => current === kind ? '' : current);
+    }
+  }, [announceSaved, toast]);
 
   function renderDisplay() {
     const textSizeLabel = textSize === 0 ? 'Default' : textSize > 0 ? `+${textSize}` : String(textSize);
@@ -256,26 +310,40 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
             <SettingsAccountsSection
               googleAuth={googleAuth}
               connectedAccounts={connectedAccounts}
-              primaryGoogleAccount={googleAuth.activeAccount || googleAuth.email || ''}
               selectedDefaultEmailAccount={selectedDefaultEmailAccount}
+              selectedDefaultSendingAccount={selectedDefaultSendingAccount}
               selectedDefaultCalendarAccount={selectedDefaultCalendarAccount}
               defaultFallbackLabel={defaultFallbackLabel}
               missingDefaultEmailAccount={Boolean(defaultEmailAccount) && !selectedDefaultEmailAccount}
+              missingDefaultSendingAccount={Boolean(defaultSendingAccount) && !selectedDefaultSendingAccount}
               missingDefaultCalendarAccount={Boolean(defaultCalendarAccount) && !selectedDefaultCalendarAccount}
               savedFlash={savedFlash}
+              savingDefault={savingDefault}
               onGoogleConnect={handleGoogleConnect}
+              onGoogleReauthorize={handleGoogleReauthorize}
               onGoogleDisconnect={handleGoogleDisconnect}
               googleConnecting={googleConnecting}
               googleDisconnecting={googleDisconnecting}
               onDefaultEmailAccountChange={(event) => {
-                const value = setDefaultGmailAccount(event.target.value);
-                setDefaultEmailAccountState(value);
-                announceSaved('email', value ? `Default inbox set to ${value}` : 'Default inbox reset.');
+                void saveDefaultSelection({
+                  kind: 'email', email: event.target.value, save: setDefaultGmailAccount,
+                  updateState: setDefaultEmailAccountState,
+                  successMessage: (value) => value ? `Default inbox set to ${value}` : 'Default inbox reset.',
+                });
+              }}
+              onDefaultSendingAccountChange={(event) => {
+                void saveDefaultSelection({
+                  kind: 'sending', email: event.target.value, save: setDefaultSendingAccount,
+                  updateState: setDefaultSendingAccountState,
+                  successMessage: (value) => value ? `Default sending account set to ${value}` : 'Default sending account reset.',
+                });
               }}
               onDefaultCalendarAccountChange={(event) => {
-                const value = setDefaultCalendarAccount(event.target.value);
-                setDefaultCalendarAccountState(value);
-                announceSaved('calendar', value ? `Default calendar set to ${value}` : 'Default calendar reset.');
+                void saveDefaultSelection({
+                  kind: 'calendar', email: event.target.value, save: setDefaultCalendarAccount,
+                  updateState: setDefaultCalendarAccountState,
+                  successMessage: (value) => value ? `Default calendar set to ${value}` : 'Default calendar reset.',
+                });
               }}
             />
           </div>

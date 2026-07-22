@@ -31,7 +31,7 @@ Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/ge
 | --- | --- | --- |
 | Curated provider capabilities | `shared/ai-provider-catalog.json` | Provider transport, default model, effort support, image support, and request behavior |
 | Curated model inventory and review attestation | `shared/ai-model-catalog.json` | Models already reviewed with the application, official source links, review date, expiry, release channel, and capabilities |
-| Operator policy and discoveries | `server/data/ai-management.json` | Local enabled/disabled state, discovered candidates, validation evidence, and enforcement mode |
+| Operator policy, checks, and review queue | `server/data/ai-management.json` | Local enabled/disabled state, schedule, discovery/connection evidence, review notifications, validation evidence, and enforcement mode |
 | Agent assignments | `AgentIdentity.runtime` | Primary/fallback provider and model for each agent |
 | Runtime enforcement | `server/src/services/ai-management.js` | Final allowed/blocked decision before provider execution |
 
@@ -68,6 +68,16 @@ The app records the two kinds of evidence separately:
 A complete successful response that unexpectedly omits a reviewed model creates a warning; it does not silently remove or disable that model after one account-specific check. An empty, malformed, repeated-cursor, over-pagination, or entirely unusable success response fails closed and preserves the previous successful evidence. A failed attempt updates only the attempt time, never the last-successful time.
 
 The maintained review records both provider-specific ignore patterns and explicit version rules for each model line. A returned ID is new only when its parsed generation is higher than the newest matching catalog generation. If no version rule matches, a cloud model must carry a provider creation date later than the catalog review date; otherwise it is treated as ambiguous and hidden. This deliberately prefers missing an uncertain candidate over presenting an old model as new. Raw counts remain available in server evidence, while the Settings result reports only the number of newer candidates and any reviewed IDs missing from the account response.
+
+## Automatic checks and review notifications
+
+Automatic model checks may be **Off**, **Weekly**, or **Monthly**. The default is Off. Turning a schedule on records an explicit next-check time; a lightweight background coordinator runs a provider-list check only when that time is due. The scheduled check follows the same new-only filter and fail-closed rules as “Check now.” It never approves a model, changes a request contract, or rewrites an agent profile.
+
+AI Management saves deduplicated notices when a provider returns genuinely newer models, an official catalog review becomes overdue, or provider connection tests fail. The Settings button shows the number needing review throughout the app. The client refreshes that count on focus and at a bounded interval, and “Mark reviewed” saves the review time. Repeating the same evidence does not create another notice; a materially changed set of models or failures reopens the existing notice.
+
+Before a provider or model is disabled, AI Management matches the selection against saved primary and fallback assignments in `AgentIdentity.runtime` and names the affected agents in the confirmation. It does not alter those profiles. A model-release review packet can be downloaded as Markdown; it includes discovery/catalog evidence, official sources, saved-agent impact, and the maintained-release checklist, without API keys or automatic approval.
+
+“Test all connections” runs the existing provider and CLI availability probes, saves a safe provider-by-provider result, and returns no credentials. A passing retest resolves the prior connection-failure notice.
 
 ## Required new-model release procedure
 
