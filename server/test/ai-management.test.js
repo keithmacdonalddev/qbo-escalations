@@ -13,9 +13,11 @@ const {
   assertProviderEnabled,
   assertProviderModelAllowed,
   buildModelReleaseReviewPacket,
+  clearProviderConnectionTestResult,
   getManagementSnapshot,
   isScheduledModelCheckDue,
   recordConnectionTestResults,
+  recordProviderConnectionTestResult,
   refreshProviderModels,
   resetStateForTests,
   reviewNotification,
@@ -86,6 +88,27 @@ test('provider failures create one reviewable notification and a passing retest 
     { providerId: 'openai', ok: true, code: 'OK', message: 'Ready' },
   ]);
   assert.equal(recovered.notifications.length, 0);
+});
+
+test('an individual API key test updates only that provider and can be cleared after a key change', () => {
+  recordConnectionTestResults([
+    { providerId: 'gemini', ok: true, code: 'OK', message: 'Ready' },
+  ]);
+
+  const tested = recordProviderConnectionTestResult({
+    providerId: 'openai',
+    ok: false,
+    code: 'INVALID_KEY',
+    message: 'API key rejected',
+  });
+  assert.equal(tested.connectionTestResults.length, 2);
+  assert.equal(tested.connectionTestResults.find((entry) => entry.providerId === 'gemini').ok, true);
+  assert.equal(tested.connectionTestResults.find((entry) => entry.providerId === 'openai').code, 'INVALID_KEY');
+  assert.ok(tested.connectionTestResults.every((entry) => entry.checkedAt));
+
+  const cleared = clearProviderConnectionTestResult('openai');
+  assert.equal(cleared.connectionTestResults.some((entry) => entry.providerId === 'openai'), false);
+  assert.equal(cleared.connectionTestResults.some((entry) => entry.providerId === 'gemini'), true);
 });
 
 test('agent impact and release packets identify saved primary and fallback assignments', () => {

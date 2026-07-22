@@ -565,6 +565,7 @@ function recordConnectionTestResults(results = []) {
     skipped: result.skipped === true,
     code: String(result.code || ''),
     message: String(result.message || '').slice(0, 300),
+    checkedAt,
   }));
   const next = clone(state);
   next.lastConnectionTestAt = checkedAt;
@@ -585,6 +586,41 @@ function recordConnectionTestResults(results = []) {
   } else {
     resolveNotification(next, id);
   }
+  next.revision += 1;
+  writeState(next);
+  return getManagementSnapshot();
+}
+
+function recordProviderConnectionTestResult(result = {}) {
+  const providerId = ensureManagedProvider(result.providerId);
+  const checkedAt = new Date().toISOString();
+  const normalizedResult = {
+    providerId,
+    ok: result.ok === true,
+    skipped: result.skipped === true,
+    code: String(result.code || ''),
+    message: String(result.message || '').slice(0, 300),
+    checkedAt,
+  };
+  const next = clone(state);
+  next.lastConnectionTestAt = checkedAt;
+  next.connectionTestResults = [
+    ...(Array.isArray(next.connectionTestResults) ? next.connectionTestResults : [])
+      .filter((entry) => entry?.providerId !== providerId),
+    normalizedResult,
+  ];
+  next.revision += 1;
+  writeState(next);
+  return getManagementSnapshot();
+}
+
+function clearProviderConnectionTestResult(providerId) {
+  const normalized = ensureManagedProvider(providerId);
+  const next = clone(state);
+  const current = Array.isArray(next.connectionTestResults) ? next.connectionTestResults : [];
+  const filtered = current.filter((entry) => entry?.providerId !== normalized);
+  if (filtered.length === current.length) return getManagementSnapshot();
+  next.connectionTestResults = filtered;
   next.revision += 1;
   writeState(next);
   return getManagementSnapshot();
@@ -1334,6 +1370,8 @@ module.exports = {
   isProviderEnabled,
   isScheduledModelCheckDue,
   recordConnectionTestResults,
+  recordProviderConnectionTestResult,
+  clearProviderConnectionTestResult,
   refreshProviderModels,
   resetStateForTests,
   reviewNotification,

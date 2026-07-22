@@ -5,9 +5,11 @@ const { createRateLimiter } = require('../middleware/rate-limit');
 const {
   MANAGED_PROVIDER_IDS,
   buildModelReleaseReviewPacket,
+  clearProviderConnectionTestResult,
   getAgentUsageSnapshot,
   getManagementSnapshot,
   recordConnectionTestResults,
+  recordProviderConnectionTestResult,
   refreshProviderModels,
   reviewNotification,
   updateModelPolicy,
@@ -190,6 +192,7 @@ router.put('/keys/:providerId', async (req, res) => {
       return res.status(400).json({ ok: false, code: 'KEY_REQUIRED', error: 'Enter an API key to save.' });
     }
     await setStoredApiKey(providerId, key);
+    clearProviderConnectionTestResult(providerId);
     clearProviderAvailabilityCache();
     return res.json(await buildResponse());
   } catch (err) {
@@ -201,6 +204,7 @@ router.delete('/keys/:providerId', async (req, res) => {
   try {
     const providerId = assertKeyProvider(req.params.providerId);
     await setStoredApiKey(providerId, '');
+    clearProviderConnectionTestResult(providerId);
     clearProviderAvailabilityCache();
     res.json(await buildResponse());
   } catch (err) {
@@ -219,6 +223,12 @@ router.post('/keys/:providerId/test', testKeyRateLimit, async (req, res) => {
     }
     const result = await validateRemoteProvider(providerId, key);
     if (!result.ok) {
+      if (!supplied) recordProviderConnectionTestResult({
+        providerId,
+        ok: false,
+        code: result.code || 'PROVIDER_TEST_FAILED',
+        message: result.reason || 'Provider connection test failed.',
+      });
       const status = result.code === 'INVALID_KEY' ? 401
         : result.code === 'TIMEOUT' ? 504
           : result.code === 'PROVIDER_UNAVAILABLE' ? 503
@@ -229,6 +239,9 @@ router.post('/keys/:providerId/test', testKeyRateLimit, async (req, res) => {
         error: result.reason || 'Provider connection test failed.',
         detail: result.detail || '',
       });
+    }
+    if (!supplied) {
+      recordProviderConnectionTestResult({ providerId, ok: true, code: 'OK', message: 'API key verified.' });
     }
     return res.json({ ok: true, providerId, model: result.model || '' });
   } catch (err) {

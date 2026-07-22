@@ -277,3 +277,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
 Special Feature: Evidence Recovery Workbench - When a completeness check finds a gap, inspect already-saved traces, provider packages, and still-visible local output, then offer a human-reviewed recovery plan that restores only provable artifacts with their original provenance. It would never silently rerun AI or change the verdict; the session becomes complete only after the repaired artifact is saved and the deterministic contract verifies it.
+
+Date: 2026-07-21
+Time: 23:23 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: high
+Special Feature: Credential Permission Verification - Go beyond checking whether a provider key works by verifying which approved capabilities and data scopes it can access, then warn when it is under-permissioned or unnecessarily powerful for its assigned agents. This would give the operator a governed least-privilege decision before sensitive workflows run, without exposing the secret itself.

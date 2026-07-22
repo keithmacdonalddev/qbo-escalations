@@ -30,6 +30,24 @@ function modelKey(providerId, modelId) {
   return `${providerId}:${modelId}`;
 }
 
+function providerKeyStatus(provider, keys, catalog) {
+  if (!Object.prototype.hasOwnProperty.call(KEY_PLACEHOLDERS, provider.id)) return null;
+  if (!keys[provider.id]?.configured) {
+    return { label: 'Key missing', tone: 'missing', title: 'No API key is configured.' };
+  }
+  const result = catalog?.connectionTestResults?.find((entry) => entry.providerId === provider.id);
+  if (!result) {
+    return { label: 'Key not tested', tone: 'untested', title: 'An API key is configured but has not been verified yet.' };
+  }
+  if (result.ok) {
+    return { label: 'Key verified', tone: 'verified', title: `API key verified ${formatDate(result.checkedAt || catalog?.lastConnectionTestAt)}.` };
+  }
+  if (result.code === 'INVALID_KEY') {
+    return { label: 'Key invalid', tone: 'invalid', title: 'The provider rejected this API key.' };
+  }
+  return { label: 'Check failed', tone: 'warning', title: result.message || 'The latest connection test failed.' };
+}
+
 function AgentUsageLinks({ entries = [] }) {
   const uniqueEntries = entries.filter((entry, index, allEntries) => (
     entry?.agentId && allEntries.findIndex((candidate) => candidate?.agentId === entry.agentId) === index
@@ -110,6 +128,9 @@ export default function AiManagementSettings({ onOpenAgents }) {
   const selectedProvider = providers.find((provider) => provider.id === selectedProviderId)
     || providers[0]
     || null;
+  const selectedProviderKeyStatus = selectedProvider
+    ? providerKeyStatus(selectedProvider, keys, catalog)
+    : null;
   const refreshableProviderIds = useMemo(() => providers
     .filter((provider) => provider.discoveryMode === 'api')
     .filter((provider) => provider.requiresMaintainedCatalogRelease)
@@ -300,8 +321,9 @@ export default function AiManagementSettings({ onOpenAgents }) {
     const result = await runAction(
       `key-test:${providerId}`,
       () => request(`/keys/${encodeURIComponent(providerId)}/test`, jsonOptions('POST', value ? { key: value } : {})),
-      'Provider connection test passed.'
+      value ? 'Typed key test passed. Save it to use it.' : 'Saved API key verified.'
     );
+    await reload();
     if (result) clearProviderKeyStatusCache();
   }
 
@@ -513,6 +535,8 @@ export default function AiManagementSettings({ onOpenAgents }) {
         <nav className="ai-provider-list" aria-label="AI providers">
           {providers.map((provider) => {
             const candidateCount = provider.models.filter((model) => model.approval === 'candidate').length;
+            const keyStatus = providerKeyStatus(provider, keys, catalog);
+            const enabledModelCount = provider.models.filter((model) => model.approval === 'approved' && model.enabled).length;
             return (
               <button
                 type="button"
@@ -520,10 +544,21 @@ export default function AiManagementSettings({ onOpenAgents }) {
                 className={`ai-provider-list-item${selectedProvider?.id === provider.id ? ' is-active' : ''}`}
                 onClick={() => setSelectedProviderId(provider.id)}
               >
-                <span className={`ai-provider-status-dot${provider.enabled ? ' is-on' : ''}`} />
+                <span
+                  className={`ai-provider-status-dot${provider.enabled ? ' is-on' : ''}`}
+                  title={provider.enabled ? 'Provider enabled' : 'Provider disabled'}
+                  aria-hidden="true"
+                />
                 <span className="ai-provider-list-copy">
                   <strong>{provider.shortLabel || provider.label}</strong>
-                  <small>{provider.models.filter((model) => model.approval === 'approved' && model.enabled).length} models</small>
+                  <small>
+                    {enabledModelCount} model{enabledModelCount === 1 ? '' : 's'}
+                    {keyStatus && (
+                      <span className={`ai-provider-key-status is-${keyStatus.tone}`} title={keyStatus.title}>
+                        <span aria-hidden="true"> · </span>{keyStatus.label}
+                      </span>
+                    )}
+                  </small>
                 </span>
                 {candidateCount > 0 && <span className="ai-provider-count">{candidateCount}</span>}
               </button>
@@ -604,8 +639,11 @@ export default function AiManagementSettings({ onOpenAgents }) {
                         : `Missing · ${keys[selectedProvider.id]?.environmentVariable || ''}`}
                     </span>
                   </div>
-                  <span className={`ai-key-state${keys[selectedProvider.id]?.configured ? ' is-ready' : ''}`}>
-                    {keys[selectedProvider.id]?.configured ? 'Ready' : 'Needed'}
+                  <span
+                    className={`ai-key-state is-${selectedProviderKeyStatus?.tone || 'missing'}`}
+                    title={selectedProviderKeyStatus?.title}
+                  >
+                    {selectedProviderKeyStatus?.label || 'Key missing'}
                   </span>
                 </div>
                 <div className="ai-key-input-row">
