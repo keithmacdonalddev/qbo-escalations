@@ -248,7 +248,7 @@ function App() {
         return (
           <Profiler id="Agents" onRender={flame.onRender}>
           <motion.div key="agents" {...motionProps} style={{ height: '100%' }}>
-            <AgentsView agentIdFromRoute={route.agentId || null} />
+            <AgentsView agentIdFromRoute={route.agentId || null} profileTabFromRoute={route.agentTab || null} />
           </motion.div>
           </Profiler>
         );

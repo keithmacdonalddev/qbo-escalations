@@ -30,6 +30,29 @@ function modelKey(providerId, modelId) {
   return `${providerId}:${modelId}`;
 }
 
+function AgentUsageLinks({ entries = [] }) {
+  const uniqueEntries = entries.filter((entry, index, allEntries) => (
+    entry?.agentId && allEntries.findIndex((candidate) => candidate?.agentId === entry.agentId) === index
+  ));
+  return (
+    <>
+      Used by{' '}
+      {uniqueEntries.map((entry, index) => (
+        <span className="ai-agent-usage-link-wrap" key={entry.agentId}>
+          {index > 0 && ', '}
+          <a
+            className="ai-agent-usage-link"
+            href={`#/agents/${encodeURIComponent(entry.agentId)}?tab=configuration`}
+            title={`Open ${entry.name}'s provider and model settings`}
+          >
+            {entry.name}
+          </a>
+        </span>
+      ))}
+    </>
+  );
+}
+
 function statusLabel(model) {
   if (model.approval === 'candidate') return 'Needs review';
   if (model.approval === 'blocked') return 'Blocked';
@@ -518,7 +541,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
                   Default: <code>{selectedProvider.defaultModel || 'provider controlled'}</code> · Last successful account check: {formatDate(selectedProvider.lastSuccessfulCheckAt)}
                 </p>
                 {(usage.providers?.[selectedProvider.id]?.length || 0) > 0 && (
-                  <p className="ai-usage-impact">Used by {usage.providers[selectedProvider.id].map((entry) => entry.name).join(', ')}</p>
+                  <p className="ai-usage-impact"><AgentUsageLinks entries={usage.providers[selectedProvider.id]} /></p>
                 )}
               </div>
               <button
@@ -651,7 +674,9 @@ export default function AiManagementSettings({ onOpenAgents }) {
                           {model.supportsThinking === true && <span>Reasoning</span>}
                           {model.contextWindowTokens && <span>{Math.round(model.contextWindowTokens / 1000)}k context</span>}
                           {model.lastSeenAt && <span>Seen {formatDate(model.lastSeenAt)}</span>}
-                          {(usage.models?.[key]?.length || 0) > 0 && <span className="is-impact">Used by {usage.models[key].map((entry) => entry.name).join(', ')}</span>}
+                          {(usage.models?.[key]?.length || 0) > 0 && (
+                            <span className="is-impact"><AgentUsageLinks entries={usage.models[key]} /></span>
+                          )}
                         </div>
                       </div>
                       {model.approval === 'candidate' ? (

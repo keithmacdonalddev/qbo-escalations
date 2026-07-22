@@ -67,8 +67,14 @@ function parseHashRoute(hash = window.location.hash || '#/chat') {
   if (path === '/knowledge') return { view: 'knowledge', knowledgeRecordId: null };
   if (path.startsWith('/knowledge/')) return { view: 'knowledge', knowledgeRecordId: decodeURIComponent(path.slice('/knowledge/'.length)) };
   if (path === '/playbook') return { view: 'playbook' };
-  if (path === '/agents') return { view: 'agents', agentId: null };
-  if (path.startsWith('/agents/')) return { view: 'agents', agentId: path.slice('/agents/'.length) };
+  if (path === '/agents') return { view: 'agents', agentId: null, agentTab: null };
+  if (path.startsWith('/agents/')) {
+    return {
+      view: 'agents',
+      agentId: decodeURIComponent(path.slice('/agents/'.length)),
+      agentTab: query.get('tab') === 'configuration' ? 'configuration' : null,
+    };
+  }
   if (path === '/templates') return { view: 'templates' };
   if (path === '/analytics') return { view: 'analytics' };
   if (path === '/gallery') return { view: 'gallery' };
@@ -118,7 +124,9 @@ function getSidebarCurrentRoute(route) {
   }
 
   if (route.view === 'agents') {
-    return route.agentId ? `#/agents/${route.agentId}` : '#/agents';
+    if (!route.agentId) return '#/agents';
+    const agentPath = `#/agents/${encodeURIComponent(route.agentId)}`;
+    return route.agentTab ? `${agentPath}?tab=${encodeURIComponent(route.agentTab)}` : agentPath;
   }
 
   if (route.view === 'knowledge') {

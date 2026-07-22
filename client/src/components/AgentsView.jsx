@@ -246,7 +246,7 @@ const STATUS_LABELS = {
   disabled: 'Off',
 };
 
-function AgentsView({ agentIdFromRoute = null }) {
+function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
   const { openAgentTest } = useAgentTestModal();
   const [agents, setAgents] = useState([]);
   const [selectedAgentId, setSelectedAgentId] = useState(agentIdFromRoute);
@@ -281,7 +281,7 @@ function AgentsView({ agentIdFromRoute = null }) {
   // messages from earlier saves don't pile up in the panel.
   const [runtimeRecheckResult, setRuntimeRecheckResult] = useState(null);
   const runtimeRecheckTimeoutRef = useRef(null);
-  const [activeProfileTab, setActiveProfileTab] = useState('overview');
+  const [activeProfileTab, setActiveProfileTab] = useState(profileTabFromRoute || 'overview');
   const [registryModalMode, setRegistryModalMode] = useState(null);
   const [registrySaving, setRegistrySaving] = useState(false);
   const [registryMessage, setRegistryMessage] = useState('');
@@ -569,8 +569,8 @@ function AgentsView({ agentIdFromRoute = null }) {
       clearTimeout(runtimeRecheckTimeoutRef.current);
       runtimeRecheckTimeoutRef.current = null;
     }
-    setActiveProfileTab('overview');
-  }, [selectedAgentId]);
+    setActiveProfileTab(profileTabFromRoute || 'overview');
+  }, [profileTabFromRoute, selectedAgentId]);
 
   useEffect(() => {
     if (!currentAgent) {
