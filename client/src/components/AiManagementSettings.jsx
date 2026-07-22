@@ -537,16 +537,25 @@ export default function AiManagementSettings({ onOpenAgents }) {
             const candidateCount = provider.models.filter((model) => model.approval === 'candidate').length;
             const keyStatus = providerKeyStatus(provider, keys, catalog);
             const enabledModelCount = provider.models.filter((model) => model.approval === 'approved' && model.enabled).length;
+            const dotTone = !provider.enabled
+              ? ''
+              : ['missing', 'invalid'].includes(keyStatus?.tone)
+                ? ' is-error'
+                : keyStatus && keyStatus.tone !== 'verified'
+                  ? ' is-warning'
+                  : ' is-on';
+            const providerStateLabel = provider.enabled ? 'provider enabled' : 'provider disabled';
             return (
               <button
                 type="button"
                 key={provider.id}
                 className={`ai-provider-list-item${selectedProvider?.id === provider.id ? ' is-active' : ''}`}
+                aria-label={`${provider.shortLabel || provider.label}, ${enabledModelCount} model${enabledModelCount === 1 ? '' : 's'}, ${keyStatus ? `${keyStatus.label}, ` : ''}${providerStateLabel}${candidateCount > 0 ? `, ${candidateCount} model${candidateCount === 1 ? '' : 's'} need review` : ''}`}
                 onClick={() => setSelectedProviderId(provider.id)}
               >
                 <span
-                  className={`ai-provider-status-dot${provider.enabled ? ' is-on' : ''}`}
-                  title={provider.enabled ? 'Provider enabled' : 'Provider disabled'}
+                  className={`ai-provider-status-dot${dotTone}`}
+                  title={keyStatus?.title || (provider.enabled ? 'Provider enabled' : 'Provider disabled')}
                   aria-hidden="true"
                 />
                 <span className="ai-provider-list-copy">

@@ -339,6 +339,8 @@
 .ai-provider-list-item.is-active { border-color: var(--accent-border, rgba(110, 161, 247, 0.3)); background: var(--settings-accent-soft); color: var(--ink, #e4e4e8); }
 .ai-provider-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--settings-faint); }
 .ai-provider-status-dot.is-on { background: var(--success, #5cd08e); }
+.ai-provider-status-dot.is-warning { background: var(--warning, #f0a940); }
+.ai-provider-status-dot.is-error { background: var(--danger, #f06060); }
 .ai-provider-list-copy strong,
 .ai-provider-list-copy small { display: block; }
 .ai-provider-list-copy strong { overflow: hidden; font-size: 0.7rem; text-overflow: ellipsis; white-space: nowrap; }
