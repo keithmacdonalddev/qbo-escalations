@@ -19,10 +19,24 @@ function isParallelTurnMessage(msg, turnId) {
   );
 }
 
+function conversationWriteConflict() {
+  const error = new Error('The conversation changed while this chat update was being saved. Reload it before trying again.');
+  error.code = 'CONVERSATION_WRITE_CONFLICT';
+  error.status = 409;
+  return error;
+}
+
 async function saveConversationLenient(conversation) {
+  const loadedVersion = Number(conversation.__v);
+  if (!conversation.isNew && Number.isInteger(loadedVersion)) {
+    conversation.$where = { ...(conversation.$where || {}), __v: loadedVersion };
+  }
   try {
     await conversation.save();
   } catch (err) {
+    if (err?.name === 'DocumentNotFoundError' || err?.name === 'VersionError') {
+      throw conversationWriteConflict();
+    }
     if (!err || err.name !== 'ValidationError') throw err;
 
     // Legacy documents may contain old enum values in message metadata.
@@ -32,20 +46,30 @@ async function saveConversationLenient(conversation) {
         msg && typeof msg.toObject === 'function' ? msg.toObject() : msg
       ))
       : [];
-    await Conversation.updateOne(
-      { _id: conversation._id },
+    const filter = { _id: conversation._id };
+    const update = {
+      $set: {
+        title: conversation.title || 'New Conversation',
+        provider: normalizeProvider(conversation.provider),
+        messages: serializedMessages,
+        escalationId: conversation.escalationId || null,
+        systemPromptHash: conversation.systemPromptHash || '',
+        caseIntake: conversation.caseIntake || { status: 'none', runs: [], followUps: [] },
+        updatedAt: new Date(),
+      },
+    };
+    if (Number.isInteger(loadedVersion)) {
+      filter.__v = loadedVersion;
+      update.$inc = { __v: 1 };
+    }
+    const write = await Conversation.updateOne(
+      filter,
       {
-        $set: {
-          title: conversation.title || 'New Conversation',
-          provider: normalizeProvider(conversation.provider),
-          messages: serializedMessages,
-          escalationId: conversation.escalationId || null,
-          systemPromptHash: conversation.systemPromptHash || '',
-          caseIntake: conversation.caseIntake || { status: 'none', runs: [], followUps: [] },
-          updatedAt: new Date(),
-        },
+        ...update,
       }
     );
+    if (write.matchedCount !== 1) throw conversationWriteConflict();
+    if (Number.isInteger(loadedVersion)) conversation.__v = loadedVersion + 1;
   }
 }
 

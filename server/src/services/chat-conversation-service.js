@@ -397,6 +397,7 @@ async function recordConversationTriageResult(id, input = {}) {
   if (!conversation) {
     throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
   }
+  const loadedVersion = Number(conversation.__v);
 
   conversation.caseIntake = applyTriageResultToCaseIntake(conversation.caseIntake, {
     triageCard: hasCard ? triageCard : null,
@@ -430,8 +431,20 @@ async function recordConversationTriageResult(id, input = {}) {
       reportedVia: 'server',
     },
   }, { updatedAt: completedAt || new Date() });
-  conversation.markModified('caseIntake');
-  await conversation.save();
+  const versionFilter = { _id: conversation._id };
+  const versionUpdate = { $set: { caseIntake: conversation.caseIntake } };
+  if (Number.isInteger(loadedVersion)) {
+    versionFilter.__v = loadedVersion;
+    versionUpdate.$inc = { __v: 1 };
+  }
+  const write = await Conversation.updateOne(versionFilter, versionUpdate, { runValidators: true });
+  if (write.matchedCount !== 1) {
+    throw createServiceError(
+      'CONVERSATION_WRITE_CONFLICT',
+      'The conversation changed while the triage result was being saved. Reload it before trying again.',
+      409
+    );
+  }
 
   return conversation.caseIntake;
 }

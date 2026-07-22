@@ -13,6 +13,8 @@ import { getConversationTraces } from '../api/traceApi.js';
 import { getProviderLabel } from '../lib/providerCatalog.js';
 import { useToast } from '../hooks/useToast.jsx';
 import ConfirmModal from './ConfirmModal.jsx';
+import EvidenceRecoveryPanel from './chat-v5/EvidenceRecoveryPanel.jsx';
+import { useEvidenceRecovery, useEvidenceRecoveryMonitor } from './chat-v5/useEvidenceRecovery.js';
 import WorkflowLogPanel from './chat-v5/WorkflowLogPanel.jsx';
 
 const TABS = [
@@ -143,6 +145,20 @@ function EvidenceStatusChip({ status }) {
   return null;
 }
 
+function RecoveryPendingChip({ operation }) {
+  if (!operation || !['confirmed', 'running', 'cancel-requested', 'awaiting-acceptance'].includes(operation.status)) return null;
+  const awaitingReview = operation.status === 'awaiting-acceptance' || operation.needsAcceptance === true;
+  return (
+    <span className={`recovery-pending-chip${awaitingReview ? ' is-review' : ''}`}>
+      {awaitingReview
+        ? 'Recovery awaiting review'
+        : operation.status === 'cancel-requested'
+          ? 'Recovery cancelling'
+          : 'Recovery pending'}
+    </span>
+  );
+}
+
 export default function SessionsView({ sessionId = null }) {
   const toast = useToast();
   const [sessions, setSessions] = useState([]);
@@ -186,6 +202,26 @@ export default function SessionsView({ sessionId = null }) {
       return null;
     }
   }, []);
+
+  const refreshEvidenceAfterRecovery = useCallback(
+    () => loadEvidence(sessionId, true),
+    [loadEvidence, sessionId],
+  );
+  const refreshConversationAfterRecovery = useCallback(async () => {
+    if (!sessionId) return null;
+    const session = await getConversation(sessionId);
+    setActiveSession(session);
+    return session;
+  }, [sessionId]);
+  const evidenceRecovery = useEvidenceRecovery({
+    conversationId: sessionId || '',
+    onEvidenceRefresh: refreshEvidenceAfterRecovery,
+    onConversationRefresh: refreshConversationAfterRecovery,
+  });
+  const recoveryMonitor = useEvidenceRecoveryMonitor({ notify: false });
+  const recoveryByConversation = useMemo(() => new Map(
+    recoveryMonitor.activeOperations.map((operation) => [String(operation.conversationId), operation]),
+  ), [recoveryMonitor.activeOperations]);
 
   const loadSessions = useCallback(async (searchTerm = search) => {
     const gen = ++fetchGenRef.current;
@@ -341,6 +377,7 @@ export default function SessionsView({ sessionId = null }) {
   }, [toast]);
 
   const displayedDetail = activeSession || selectedListSession;
+  const selectedRecoverySummary = recoveryByConversation.get(String(sessionId || '')) || null;
   const linkedCount = sessions.filter(hasLinkedCase).length;
   const needsLinkCount = sessions.length - linkedCount;
 
@@ -398,6 +435,7 @@ export default function SessionsView({ sessionId = null }) {
             cancelRename={() => setEditingId(null)}
             copySession={copySession}
             setDeleteTarget={setDeleteTarget}
+            recoveryByConversation={recoveryByConversation}
           />
         </section>
       ) : (
@@ -412,6 +450,8 @@ export default function SessionsView({ sessionId = null }) {
           evidenceAcknowledging={evidenceAcknowledging}
           onAcknowledgeEvidence={acknowledgeEvidence}
           onRefreshEvidence={() => loadEvidence(sessionId, true)}
+          evidenceRecovery={evidenceRecovery}
+          pendingRecovery={evidenceRecovery.operation || selectedRecoverySummary}
         />
       )}
 
@@ -439,6 +479,7 @@ function SessionsTable({
   cancelRename,
   copySession,
   setDeleteTarget,
+  recoveryByConversation,
 }) {
   if (loading && sessions.length === 0) {
     return <div className="sessions-empty">Loading sessions...</div>;
@@ -466,6 +507,7 @@ function SessionsTable({
           {sessions.map((session) => {
             const linked = hasLinkedCase(session);
             const pipelineEvents = getPipelineEventCount(session);
+            const pendingRecovery = recoveryByConversation.get(String(session._id));
             return (
               <tr
                 key={session._id}
@@ -490,6 +532,7 @@ function SessionsTable({
                     <div className="sessions-title">
                       <span className="sessions-name">{getSessionTitle(session)}</span>
                       <EvidenceStatusChip status={session.evidenceStatus} />
+                      <RecoveryPendingChip operation={pendingRecovery} />
                     </div>
                   )}
                 </td>
@@ -546,6 +589,8 @@ function SessionDetail({
   evidenceAcknowledging,
   onAcknowledgeEvidence,
   onRefreshEvidence,
+  evidenceRecovery,
+  pendingRecovery,
 }) {
   if (loading && !session) {
     return <div className="sessions-empty">Loading session...</div>;
@@ -561,6 +606,7 @@ function SessionDetail({
         <div>
           <div className="eyebrow">Session</div>
           <h2>{getSessionTitle(session)}</h2>
+          <RecoveryPendingChip operation={pendingRecovery} />
           <div className="session-id mono">{session._id}</div>
         </div>
         <div className="session-detail-actions">
@@ -568,6 +614,8 @@ function SessionDetail({
           <a className="btn btn-ghost" href="#/sessions">Back to Sessions</a>
         </div>
       </div>
+
+      <EvidenceRecoveryPanel controller={evidenceRecovery} />
 
       <div className="session-stat-grid">
         <div className="stat-card"><div className="stat-card-value">{summary.messageCount}</div><div className="stat-card-label">Messages</div></div>
@@ -596,6 +644,8 @@ function SessionDetail({
           evidenceAcknowledging,
           onAcknowledgeEvidence,
           onRefreshEvidence,
+          onReviewRecovery: evidenceRecovery.openRecovery,
+          recoveryStatus: pendingRecovery?.status,
         })}
       </div>
     </section>
@@ -906,7 +956,14 @@ function SessionEvidenceTechnical({ evidence }) {
   );
 }
 
-function EvidenceAuditSection({ evidenceState, acknowledging, onAcknowledge, onRefresh }) {
+function EvidenceAuditSection({
+  evidenceState,
+  acknowledging,
+  recoveryStatus,
+  onAcknowledge,
+  onRefresh,
+  onReviewRecovery,
+}) {
   if (!evidenceState || evidenceState.state === 'idle' || evidenceState.state === 'loading') {
     return (
       <section className="session-evidence-audit">
@@ -943,14 +1000,20 @@ function EvidenceAuditSection({ evidenceState, acknowledging, onAcknowledge, onR
           <p>{evidence.summary?.headline}</p>
         </div>
         {evidence.status === 'incomplete' && (
-          <button
-            type="button"
-            className="session-evidence-action"
-            disabled={acknowledging || acknowledged}
-            onClick={onAcknowledge}
-          >
-            {acknowledged ? 'Acknowledged' : acknowledging ? 'Acknowledging…' : 'Acknowledge'}
-          </button>
+          <div className="session-evidence-recovery-actions">
+            <RecoveryPendingChip operation={recoveryStatus ? { status: recoveryStatus } : null} />
+            <button type="button" className="recovery-action is-primary" onClick={onReviewRecovery}>
+              Review recovery options
+            </button>
+            <button
+              type="button"
+              className="session-evidence-action"
+              disabled={acknowledging || acknowledged}
+              onClick={onAcknowledge}
+            >
+              {acknowledged ? 'Acknowledged' : acknowledging ? 'Acknowledging…' : 'Acknowledge'}
+            </button>
+          </div>
         )}
       </div>
 
@@ -1007,14 +1070,18 @@ function AuditTab({
   evidenceAcknowledging,
   onAcknowledgeEvidence,
   onRefreshEvidence,
+  recoveryStatus,
+  onReviewRecovery,
 }) {
   return (
     <div className="session-stack">
       <EvidenceAuditSection
         evidenceState={evidenceState}
         acknowledging={evidenceAcknowledging}
+        recoveryStatus={recoveryStatus}
         onAcknowledge={onAcknowledgeEvidence}
         onRefresh={onRefreshEvidence}
+        onReviewRecovery={onReviewRecovery}
       />
       <MetadataTable rows={[
         ['Session created', formatDateTime(session.createdAt)],

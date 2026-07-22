@@ -7,6 +7,7 @@ import WebcamCapture from '../WebcamCapture.jsx';
 import StageEventLogPanel from './StageEventLogPanel.jsx';
 import TriageReasoningView from './TriageReasoningView.jsx';
 import EvidenceSummary from './EvidenceSummary.jsx';
+import EvidenceRecoveryPanel, { EvidenceRecoveryCompletionNotices } from './EvidenceRecoveryPanel.jsx';
 import UnsavedResultNotice from './UnsavedResultNotice.jsx';
 import WorkflowLogPanel from './WorkflowLogPanel.jsx';
 import { listAgentIdentities } from '../../api/agentIdentitiesApi.js';
@@ -39,6 +40,7 @@ import {
 } from './pipelineRuntime.js';
 import { useAgentTestModal } from '../agent-tests/AgentTestModalProvider.jsx';
 import { useStageOrchestrator } from './useStageOrchestrator.js';
+import { useEvidenceRecovery, useEvidenceRecoveryMonitor } from './useEvidenceRecovery.js';
 import { useRunningTimer } from './useRunningTimer.js';
 import './chat-v5.css';
 
@@ -2356,6 +2358,7 @@ function AnalystWorkbench({
   evidenceAcknowledgeError,
   onAcknowledgeEvidence,
   onRefreshEvidence,
+  evidenceRecovery,
   unsavedAnalystAtRisk,
   onDismissUnsavedAnalyst,
 }) {
@@ -2631,9 +2634,12 @@ function AnalystWorkbench({
               runEvidence={runEvidence}
               acknowledging={evidenceAcknowledging}
               acknowledgeError={evidenceAcknowledgeError}
+              recoveryStatus={evidenceRecovery?.operation?.status}
               onAcknowledge={onAcknowledgeEvidence}
               onRefresh={onRefreshEvidence}
+              onReviewRecovery={evidenceRecovery?.openRecovery}
             />
+            <EvidenceRecoveryPanel controller={evidenceRecovery} />
             {emptyMainThread && (
               imageIntakeReady ? (
                 <div className="v5-analyst-intake-prompt">
@@ -2812,7 +2818,39 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   }, [resumeRouteId, suppressedResumeRouteId]);
 
   const effectiveConversationId = cleanValue((routeResumeActive ? resumeRouteId : null) || conversationId);
-  const visibleLiveTriageCard = useMemo(() => resolveTriageCard(triageCard, caseIntake), [caseIntake, triageCard]);
+  const [recoveryConversationSnapshot, setRecoveryConversationSnapshot] = useState({
+    conversationId: '',
+    caseIntake: null,
+  });
+  const recoveryCaseIntake = recoveryConversationSnapshot.conversationId === effectiveConversationId
+    ? recoveryConversationSnapshot.caseIntake
+    : null;
+  const refreshConversationAfterRecovery = useCallback(async () => {
+    if (!effectiveConversationId) return null;
+    const savedConversation = await getConversation(effectiveConversationId);
+    setRecoveryConversationSnapshot({
+      conversationId: effectiveConversationId,
+      caseIntake: savedConversation?.caseIntake || null,
+    });
+    return savedConversation;
+  }, [effectiveConversationId]);
+  const evidenceRecovery = useEvidenceRecovery({
+    conversationId: effectiveConversationId,
+    onEvidenceRefresh: refreshRunEvidence,
+    onConversationRefresh: refreshConversationAfterRecovery,
+  });
+  const recoveryMonitor = useEvidenceRecoveryMonitor({
+    currentConversationId: effectiveConversationId,
+    currentConversationVisible: isActive,
+  });
+  const viewRecoveryNotice = useCallback((notice) => {
+    recoveryMonitor.dismissCompletionNotice(notice.operationId);
+    window.location.hash = `#/chat/${notice.conversationId}`;
+  }, [recoveryMonitor.dismissCompletionNotice]);
+  const visibleLiveTriageCard = useMemo(
+    () => resolveTriageCard(triageCard, recoveryCaseIntake || caseIntake),
+    [caseIntake, recoveryCaseIntake, triageCard],
+  );
   const unsavedTriageText = useMemo(() => buildTriageCopyText(visibleLiveTriageCard), [visibleLiveTriageCard]);
   const unsavedTriageRiskKey = triageConversationSave.state === 'failed' && unsavedTriageText
     ? `${effectiveConversationId || 'unsaved'}:${unsavedTriageText}`
@@ -2981,7 +3019,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
 
   // What the Workflow Log and evidence surfaces should read: the live run's
   // caseIntake while a pipeline is active, otherwise the saved past run.
-  const effectiveCaseIntake = caseIntake || pastCaseIntake;
+  const effectiveCaseIntake = recoveryCaseIntake || caseIntake || pastCaseIntake;
 
   // True resume (Phase 1, transcript only): when the chat is opened at
   // #/chat/{id} for a saved session, fetch that conversation's saved messages
@@ -3620,6 +3658,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           evidenceAcknowledgeError={evidenceAcknowledgeError}
           onAcknowledgeEvidence={acknowledgeRunEvidence}
           onRefreshEvidence={refreshRunEvidence}
+          evidenceRecovery={evidenceRecovery}
           unsavedAnalystAtRisk={unsavedAnalystAtRisk}
           onDismissUnsavedAnalyst={dismissUnsavedAnalystWarning}
         />
@@ -3627,9 +3666,9 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
       <div className={`v5-evidence-dock-wrap${dockCollapsed ? ' is-leaving' : ''}`} aria-hidden={dockCollapsed}>
         <EvidenceDock
           stageLabels={stageLabels}
-          caseIntake={caseIntake}
+          caseIntake={recoveryCaseIntake || caseIntake}
           parsedFields={parsedFields}
-          triageCard={triageCard}
+          triageCard={recoveryCaseIntake?.triageCard || triageCard}
           invMatches={invMatches}
           stageState={stageState}
           testRuns={testRuns}
@@ -3687,6 +3726,14 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
         onClose={() => setParserPopupOpen(false)}
         onParsed={() => {}}
       />
+      {typeof document !== 'undefined' && createPortal(
+        <EvidenceRecoveryCompletionNotices
+          notices={recoveryMonitor.completionNotices}
+          onDismiss={recoveryMonitor.dismissCompletionNotice}
+          onView={viewRecoveryNotice}
+        />,
+        document.body
+      )}
       {isActive && typeof document !== 'undefined' && createPortal(
         <button
           type="button"

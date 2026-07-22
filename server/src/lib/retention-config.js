@@ -4,6 +4,7 @@ const RETENTION_KEYS = Object.freeze({
   IMAGE_PARSE_RESULT: 'image-parse-result',
   TRIAGE_RESULT: 'triage-result',
   PROVIDER_CALL_PACKAGE: 'provider-call-package',
+  RECOVERY_OPERATION: 'recovery-operation',
 });
 
 const RETENTION_POLICIES = Object.freeze({
@@ -18,6 +19,10 @@ const RETENTION_POLICIES = Object.freeze({
   [RETENTION_KEYS.PROVIDER_CALL_PACKAGE]: Object.freeze({
     envName: 'PROVIDER_CALL_PACKAGE_TTL_DAYS',
     defaultDays: 30,
+  }),
+  [RETENTION_KEYS.RECOVERY_OPERATION]: Object.freeze({
+    envName: 'RECOVERY_OPERATION_TTL_DAYS',
+    defaultDays: 180,
   }),
 });
 

@@ -1,3 +1,5 @@
+import './evidence-recovery.css';
+
 function TechnicalDetails({ evidence }) {
   const identifiers = evidence?.identifiers && typeof evidence.identifiers === 'object'
     ? Object.entries(evidence.identifiers)
@@ -37,7 +39,20 @@ function TechnicalDetails({ evidence }) {
   );
 }
 
-function IncompleteDetails({ evidence, acknowledging, onAcknowledge, acknowledged }) {
+function RecoveryPendingIndicator({ status }) {
+  if (!['confirmed', 'running', 'cancel-requested', 'awaiting-acceptance'].includes(status)) return null;
+  return (
+    <span className="recovery-pending-indicator">
+      {status === 'awaiting-acceptance'
+        ? 'Recovery awaiting review'
+        : status === 'cancel-requested'
+          ? 'Recovery cancelling'
+          : 'Recovery pending'}
+    </span>
+  );
+}
+
+function IncompleteDetails({ evidence, acknowledging, onAcknowledge, acknowledged, onReviewRecovery }) {
   const summary = evidence.summary || {};
   const missing = Array.isArray(evidence.missing) ? evidence.missing : [];
   const trusted = Array.isArray(summary.trusted) ? summary.trusted : [];
@@ -73,6 +88,14 @@ function IncompleteDetails({ evidence, acknowledging, onAcknowledge, acknowledge
         <p>{summary.nextStep}</p>
       </div>
 
+      {onReviewRecovery && (
+        <div className="recovery-inline-entry">
+          <button type="button" className="recovery-action is-primary" onClick={onReviewRecovery}>
+            Review recovery options
+          </button>
+        </div>
+      )}
+
       <TechnicalDetails evidence={evidence} />
       {!acknowledged && (
         <button
@@ -88,7 +111,15 @@ function IncompleteDetails({ evidence, acknowledging, onAcknowledge, acknowledge
   );
 }
 
-export default function EvidenceSummary({ runEvidence, acknowledging = false, acknowledgeError = '', onAcknowledge, onRefresh }) {
+export default function EvidenceSummary({
+  runEvidence,
+  acknowledging = false,
+  acknowledgeError = '',
+  recoveryStatus = '',
+  onAcknowledge,
+  onRefresh,
+  onReviewRecovery,
+}) {
   if (!runEvidence || runEvidence.state === 'idle') return null;
   if (runEvidence.state === 'loading') {
     return <div className="v5-run-evidence v5-run-evidence--neutral">Checking whether this run’s evidence was saved…</div>;
@@ -127,19 +158,27 @@ export default function EvidenceSummary({ runEvidence, acknowledging = false, ac
   if (acknowledged) {
     return (
       <details className="v5-run-evidence v5-run-evidence--acknowledged">
-        <summary>Acknowledged · {evidence.summary.headline}</summary>
-        <IncompleteDetails evidence={evidence} acknowledged />
+        <summary>
+          Acknowledged · {evidence.summary.headline}
+          {' '}
+          <RecoveryPendingIndicator status={recoveryStatus} />
+        </summary>
+        <IncompleteDetails evidence={evidence} acknowledged onReviewRecovery={onReviewRecovery} />
       </details>
     );
   }
 
   return (
     <section className="v5-run-evidence v5-run-evidence--incomplete" aria-label="Evidence completeness warning">
-      <strong className="v5-run-evidence__heading">{evidence.summary.headline}</strong>
+      <div className="v5-run-evidence__recovery-head">
+        <strong className="v5-run-evidence__heading">{evidence.summary.headline}</strong>
+        <RecoveryPendingIndicator status={recoveryStatus} />
+      </div>
       <IncompleteDetails
         evidence={evidence}
         acknowledging={acknowledging}
         onAcknowledge={onAcknowledge}
+        onReviewRecovery={onReviewRecovery}
         acknowledged={false}
       />
       {acknowledgeError && <p className="v5-run-evidence__ack-error" role="alert">{acknowledgeError}</p>}

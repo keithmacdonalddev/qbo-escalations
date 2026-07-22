@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const mongoose = require('mongoose');
+const { isValidObjectId } = require('../../lib/chat-route-helpers');
 const {
   acknowledgeConversationEvidence,
   deleteConversation,
@@ -17,6 +17,7 @@ const {
   updateConversation,
 } = require('../../services/chat-conversation-service');
 const { getEventStats } = require('../../services/event-stats-service');
+const recoveryRouter = require('./recovery');
 
 const router = express.Router();
 
@@ -28,10 +29,6 @@ function safeString(value, fallback = '') {
   } catch {
     return fallback;
   }
-}
-
-function isValidObjectId(value) {
-  return typeof value === 'string' && mongoose.isValidObjectId(value);
 }
 
 function sendConversationError(res, err, fallbackCode = 'INTERNAL', fallbackMessage = 'Conversation request failed') {
@@ -90,6 +87,12 @@ router.get('/stage-events', async (req, res) => {
     return sendConversationError(res, err, 'STAGE_EVENTS_FAILED', 'Failed to load stage events');
   }
 });
+
+// Recovery owns one non-ID route (`/recovery/active`) and its evidence routes.
+// Mount it before the generic `/:id` guard so the named route is never mistaken
+// for a conversation ID; the recovery router applies the same shared guard to
+// every conversation-scoped route it owns.
+router.use(recoveryRouter);
 
 router.use('/:id', (req, res, next) => {
   if (!isValidObjectId(req.params.id)) {

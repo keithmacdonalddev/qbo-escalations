@@ -746,6 +746,23 @@ function preflightCacheKey(provider, model) {
   return `${safeString(provider, '')}::${safeString(model, '')}::${baseUrl}`;
 }
 
+function peekPreflightCache(provider, model) {
+  const entry = preflightResultCache.get(preflightCacheKey(provider, model));
+  if (!entry) return null;
+  const ageMs = Date.now() - entry.at;
+  if (ageMs >= PREFLIGHT_CACHE_TTL_MS) return null;
+  return {
+    ok: Boolean(entry.result?.ok),
+    code: safeString(entry.result?.code, ''),
+    reason: safeString(entry.result?.reason, '').slice(0, 300),
+    provider: safeString(provider, ''),
+    model: safeString(model, ''),
+    checkedAt: new Date(entry.at).toISOString(),
+    expiresAt: new Date(entry.at + PREFLIGHT_CACHE_TTL_MS).toISOString(),
+    ageMs,
+  };
+}
+
 async function preflightProvider(options = {}) {
   const { provider, model } = options;
   const key = preflightCacheKey(provider, model);
@@ -1139,11 +1156,38 @@ function buildFallbackCard(parseFields, reason) {
   };
 }
 
-async function persistTriageResult(record) {
-  if (!TriageResult.db || TriageResult.db.readyState !== 1) return null;
+async function notifyPersistResult(callback, payload) {
+  if (typeof callback !== 'function') return;
   try {
-    return await TriageResult.create(record);
+    await callback(payload);
   } catch {
+    // Persistence observers must not change the existing triage result path.
+  }
+}
+
+async function persistTriageResult(record, onPersistResult) {
+  if (!TriageResult.db || TriageResult.db.readyState !== 1) {
+    await notifyPersistResult(onPersistResult, {
+      ok: false,
+      id: '',
+      error: 'Triage result storage is unavailable.',
+    });
+    return null;
+  }
+  try {
+    const saved = await TriageResult.create(record);
+    await notifyPersistResult(onPersistResult, {
+      ok: true,
+      id: saved?._id ? String(saved._id) : '',
+      error: '',
+    });
+    return saved;
+  } catch (err) {
+    await notifyPersistResult(onPersistResult, {
+      ok: false,
+      id: '',
+      error: safeString(err?.message, 'Triage result save failed.').slice(0, 500),
+    });
     return null;
   }
 }
@@ -1172,6 +1216,9 @@ async function buildFallbackRun({
   eventBus,
   knowledgeContext,
   attempted,
+  persistenceSource,
+  recoveryOperationId,
+  onPersistResult,
 } = {}) {
   const elapsedMs = Date.now() - startedAt;
   const card = buildFallbackCard(parseFields, reason);
@@ -1198,6 +1245,7 @@ async function buildFallbackRun({
     knowledgeContext,
     attempted,
   });
+  if (recoveryOperationId) triageMeta.recoveryOperationId = recoveryOperationId;
   eventBus?.emit('error', {
     code: errorCode || 'TRIAGE_FALLBACK',
     message: reason,
@@ -1218,6 +1266,7 @@ async function buildFallbackRun({
   });
 
   const saved = await persistTriageResult({
+    source: persistenceSource || undefined,
     runId,
     status: 'degraded',
     severity,
@@ -1237,7 +1286,7 @@ async function buildFallbackRun({
     triageMeta,
     parserText: safeString(text, ''),
     parseFields,
-  });
+  }, onPersistResult);
 
   return {
     ok: true,
@@ -1340,6 +1389,9 @@ async function runTriage(text, options = {}) {
         startedAt,
         eventBus,
         knowledgeContext: knowledgeContextTrace,
+        persistenceSource: safeString(options.source, ''),
+        recoveryOperationId: safeString(options.triageMeta?.recoveryOperationId, ''),
+        onPersistResult: options.onPersistResult,
         // Only the primary was attempted (no failover before its own pre-flight).
         attempted: [{ provider: primaryProvider, model: primaryModel, role: 'primary' }],
       });
@@ -1586,6 +1638,8 @@ async function runTriage(text, options = {}) {
       latencyMs: elapsedMs,
       knowledgeContext: knowledgeContextTrace,
     });
+    const recoveryOperationId = safeString(options.triageMeta?.recoveryOperationId, '');
+    if (recoveryOperationId) triageMeta.recoveryOperationId = recoveryOperationId;
     // Compact, traceable note about the repair pass (or its absence on a clean
     // first answer) so the persisted result explains how the card was produced.
     if (repairNote) triageMeta.repair = repairNote;
@@ -1597,6 +1651,7 @@ async function runTriage(text, options = {}) {
       built.card.validationIssues = built.validation.issues;
     }
     const saved = await persistTriageResult({
+      source: safeString(options.source, '') || undefined,
       runId,
       status,
       severity: built.severity,
@@ -1616,7 +1671,7 @@ async function runTriage(text, options = {}) {
       triageMeta,
       parserText,
       parseFields,
-    });
+    }, options.onPersistResult);
 
     return {
       ok: true,
@@ -1637,6 +1692,7 @@ async function runTriage(text, options = {}) {
       savedResult: serializeTriageResultDoc(saved),
     };
   } catch (err) {
+    if (options.propagateAbort === true && signal?.aborted) throw err;
     providerTrace = err?.providerTrace || providerTrace || null;
     const code = err?.code || 'TRIAGE_PROVIDER_FAILED';
     const failureStage = code && code.startsWith('PROVIDER_PACKAGE') ? 'provider-package-readback' : 'provider-call';
@@ -1664,6 +1720,9 @@ async function runTriage(text, options = {}) {
       eventBus,
       knowledgeContext: knowledgeContextTrace,
       attempted,
+      persistenceSource: safeString(options.source, ''),
+      recoveryOperationId: safeString(options.triageMeta?.recoveryOperationId, ''),
+      onPersistResult: options.onPersistResult,
     });
   }
 }
@@ -1674,6 +1733,7 @@ module.exports = {
   buildFallbackCard,
   extractTriageTextFromProviderPackage,
   getEffectiveModel,
+  peekPreflightCache,
   preflightProvider,
   runDirectTriageProviderCall,
   runTriage,
