@@ -3,6 +3,7 @@ import { apiFetch } from '../api/http.js';
 import { useProviderCatalog } from '../context/ProviderCatalogContext.jsx';
 import { useToast } from '../hooks/useToast.jsx';
 import { clearProviderKeyStatusCache } from '../hooks/useProviderKeyStatus.js';
+import ProviderSpendingCard from './ProviderSpendingCard.jsx';
 
 const KEY_PLACEHOLDERS = {
   'llm-gateway': 'Gateway API key',
@@ -696,6 +697,8 @@ export default function AiManagementSettings({ onOpenAgents }) {
                 <p className="ai-key-help">Saved keys stay on the server and are never returned to the browser. “Show” reveals only what you are currently typing.</p>
               </section>
             )}
+
+            <ProviderSpendingCard key={selectedProvider.id} providerId={selectedProvider.id} />
 
             <section className="ai-model-catalog-section">
               <div className="ai-section-title-row">

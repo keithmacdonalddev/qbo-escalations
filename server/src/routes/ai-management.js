@@ -24,6 +24,12 @@ const {
   setStoredApiKey,
   validateRemoteProvider,
 } = require('../services/image-parser');
+const {
+  ProviderSpendingError,
+  getProviderSpendingSnapshot,
+  refreshProviderSpending,
+  setStoredReportingKey,
+} = require('../services/provider-spending');
 
 const router = express.Router();
 const KEY_PROVIDER_IDS = Object.freeze(['llm-gateway', 'anthropic', 'openai', 'kimi', 'gemini']);
@@ -36,6 +42,13 @@ const KEY_ENVIRONMENT_VARIABLES = Object.freeze({
 });
 
 function sendKnownError(res, err) {
+  if (err instanceof ProviderSpendingError) {
+    return res.status(err.status).json({
+      ok: false,
+      code: err.code,
+      error: err.message,
+    });
+  }
   const status = ['INVALID_PROVIDER', 'INVALID_MODEL', 'INVALID_SCHEDULE', 'INVALID_NOTIFICATION'].includes(err?.code) ? 400
     : err?.code === 'MODEL_VALIDATION_REQUIRED' || err?.code === 'MODEL_CATALOG_RELEASE_REQUIRED' ? 409
       : 500;
@@ -130,6 +143,49 @@ router.get('/usage', async (req, res) => {
     res.json({ ok: true, usage });
   } catch (err) {
     sendKnownError(res, err);
+  }
+});
+
+router.get('/spending/:providerId', async (req, res) => {
+  try {
+    const spending = await getProviderSpendingSnapshot(req.params.providerId);
+    res.json({ ok: true, spending });
+  } catch (err) {
+    sendKnownError(res, err);
+  }
+});
+
+const spendingRefreshRateLimit = createRateLimiter({ name: 'ai-management-provider-spending', limit: 6, windowMs: 60_000 });
+router.post('/spending/:providerId/refresh', spendingRefreshRateLimit, async (req, res) => {
+  try {
+    const spending = await refreshProviderSpending(req.params.providerId);
+    res.json({ ok: true, spending });
+  } catch (err) {
+    sendKnownError(res, err);
+  }
+});
+
+router.put('/spending/:providerId/credential', async (req, res) => {
+  try {
+    const key = typeof req.body?.key === 'string' ? req.body.key.trim() : '';
+    if (!key) {
+      return res.status(400).json({ ok: false, code: 'REPORTING_KEY_REQUIRED', error: 'Enter a reporting key to save.' });
+    }
+    setStoredReportingKey(req.params.providerId, key);
+    const spending = await getProviderSpendingSnapshot(req.params.providerId);
+    return res.json({ ok: true, spending });
+  } catch (err) {
+    return sendKnownError(res, err);
+  }
+});
+
+router.delete('/spending/:providerId/credential', async (req, res) => {
+  try {
+    setStoredReportingKey(req.params.providerId, '');
+    const spending = await getProviderSpendingSnapshot(req.params.providerId);
+    return res.json({ ok: true, spending });
+  } catch (err) {
+    return sendKnownError(res, err);
   }
 });
 

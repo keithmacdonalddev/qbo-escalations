@@ -17,10 +17,19 @@ const MAX_TRACKED_BODY_CHARS = 8_192;
 // it into the generic HealthBanner causes a false "Recent ... request was slow"
 // warning. Use includes() so query strings like ?forceRefresh=true still match.
 const IGNORED_TRACKER_PATHS = ['/api/agent-identities/health'];
+const SENSITIVE_TRACKER_PATHS = [
+  '/api/ai-management/keys/',
+];
 
 function isIgnoredTrackerUrl(url) {
   if (typeof url !== 'string') return false;
   return IGNORED_TRACKER_PATHS.some((path) => url.includes(path));
+}
+
+function isSensitiveTrackerUrl(url) {
+  if (typeof url !== 'string') return false;
+  if (SENSITIVE_TRACKER_PATHS.some((path) => url.includes(path))) return true;
+  return /\/api\/ai-management\/spending\/[^/?]+\/credential(?:[/?#]|$)/.test(url);
 }
 
 // ── localStorage helpers (silent on quota errors) ────────────
@@ -44,8 +53,16 @@ function looksLikeImagePayload(body) {
   );
 }
 
-function sanitizeTrackedOptions(options) {
+function sanitizeTrackedOptions(options, url = '') {
   if (!options || typeof options !== 'object') return null;
+  if (isSensitiveTrackerUrl(url)) {
+    return {
+      body: null,
+      canReplay: false,
+      bodyOmitted: true,
+      sensitive: true,
+    };
+  }
   const next = {};
   if (options.headers) next.headers = options.headers;
 
@@ -72,6 +89,11 @@ function sanitizeTrackedOptions(options) {
 
   return next;
 }
+
+export const requestWaterfallInternals = Object.freeze({
+  isSensitiveTrackerUrl,
+  sanitizeTrackedOptions,
+});
 
 // ── Slow-request notification (fires once per request) ───────
 
@@ -167,7 +189,7 @@ export function useRequestWaterfall() {
       const id = `req-${nextIdRef.current++}`;
       const shortUrl = url.split('?')[0].replace('/api/', '');
       const endpoint = url.split('?')[0]; // full endpoint without query params
-      const trackedOptions = sanitizeTrackedOptions(options);
+      const trackedOptions = sanitizeTrackedOptions(options, url);
       const entry = {
         id,
         url,

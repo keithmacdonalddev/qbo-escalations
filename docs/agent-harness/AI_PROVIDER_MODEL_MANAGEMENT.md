@@ -32,6 +32,7 @@ Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/ge
 | Curated provider capabilities | `shared/ai-provider-catalog.json` | Provider transport, default model, effort support, image support, and request behavior |
 | Curated model inventory and review attestation | `shared/ai-model-catalog.json` | Models already reviewed with the application, official source links, review date, expiry, release channel, and capabilities |
 | Operator policy, checks, and review queue | `server/data/ai-management.json` | Local enabled/disabled state, schedule, discovery/connection evidence, review notifications, validation evidence, and enforcement mode |
+| Provider spending evidence | `server/data/provider-spending.json` | Sanitized provider-reported totals, check times, and bounded errors; never credentials or raw provider responses |
 | Agent assignments | `AgentIdentity.runtime` | Primary/fallback provider and model for each agent |
 | Runtime enforcement | `server/src/services/ai-management.js` | Final allowed/blocked decision before provider execution |
 
@@ -125,6 +126,10 @@ Keys are entered in AI Management and saved server-side through `/api/ai-managem
 
 The reveal control shows only the value currently being typed. It cannot reveal a saved key. Environment-variable keys remain controlled by the server environment and cannot be deleted from the browser.
 
+Normal provider-key and spending-report credential requests are marked sensitive in the client request tracker. Their bodies and headers are not retained for the developer waterfall, and those requests cannot be replayed from diagnostics.
+
+OpenAI and Anthropic spending reports require separate organization-admin credentials. Those reporting keys are also entered, replaced, checked, and removed in the provider's Spending card; they are stored separately from model keys and are never returned to the browser. Kimi and LLM Gateway reuse their existing model key. Providers without a supported billing endpoint show app-observed estimates and a direct billing link without presenting the estimate as an account balance. See [Provider Spending In AI Management](PROVIDER_SPENDING.md) for the provider-by-provider behavior and setup.
+
 ## Verification checklist for catalog changes
 
 - Shared provider and model catalogs parse successfully.
@@ -133,5 +138,6 @@ The reveal control shows only the value currently being typed. It cannot reveal 
 - Agent runtime saves reject disabled providers/models.
 - Chat, Copilot, Workspace, image parser, and Agent profile pickers show the same approved inventory.
 - Client production build succeeds.
+- Provider spending parser, redaction, UI credential, and no-false-balance tests pass.
 - Desktop and mobile Settings layouts are visually checked.
 - No long-running local service is started, stopped, or restarted without the user's explicit request.
