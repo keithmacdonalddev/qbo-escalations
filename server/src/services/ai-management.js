@@ -10,6 +10,8 @@ const DISCOVERY_TIMEOUT_MS = 12_000;
 const MANAGED_PROVIDER_IDS = Object.freeze(
   providerCatalog.filter((entry) => entry.selectable !== false).map((entry) => entry.id)
 );
+const MAX_DISCOVERY_PAGES = 20;
+const ACCOUNT_VISIBILITY_EVIDENCE = 'account-model-list';
 
 const PROVIDER_META = Object.freeze(Object.fromEntries(
   providerCatalog.map((entry) => [entry.id, entry])
@@ -74,6 +76,59 @@ function providerModelDefaults(providerId) {
   return Array.isArray(definition?.models) ? definition.models : [];
 }
 
+function buildCatalogReview(providerId) {
+  const configured = isPlainObject(modelCatalog.catalogReviews?.[providerId])
+    ? modelCatalog.catalogReviews[providerId]
+    : {};
+  const reviewedAt = typeof configured.reviewedAt === 'string' ? configured.reviewedAt : '';
+  const reviewedTime = reviewedAt ? Date.parse(`${reviewedAt}T00:00:00Z`) : Number.NaN;
+  const ageDays = Number.isFinite(reviewedTime)
+    ? Math.max(0, Math.floor((Date.now() - reviewedTime) / 86_400_000))
+    : null;
+  const expiresAfterDays = Number.isFinite(configured.expiresAfterDays)
+    ? configured.expiresAfterDays
+    : null;
+  const reviewKind = configured.reviewKind === 'operator-managed'
+    ? 'operator-managed'
+    : 'maintained-release';
+  const status = !reviewedAt
+    ? 'missing'
+    : expiresAfterDays !== null && ageDays > expiresAfterDays
+      ? 'overdue'
+      : 'current';
+
+  return {
+    reviewedAt,
+    ageDays,
+    expiresAfterDays,
+    reviewKind,
+    status,
+    requiresMaintainedCatalogRelease: reviewKind === 'maintained-release',
+    officialSources: Array.isArray(configured.officialSources)
+      ? configured.officialSources.filter((source) => typeof source === 'string' && source.startsWith('https://'))
+      : [],
+  };
+}
+
+function isReviewedDiscoveryIgnore(providerId, modelId) {
+  if (providerModelDefaults(providerId).some((model) => model.id === modelId)) return false;
+  const unsupportedSurfacePattern = providerId === 'gemini'
+    ? /(?:^|[-_])(tts|live|audio|image|imagen|veo|embedding|aqa|robotics|computer-use|omni)(?:$|[-_])/i
+    : providerId === 'openai'
+      ? /(audio|realtime|transcrib|tts|image|search|embedding|moderation)/i
+      : null;
+  if (unsupportedSurfacePattern?.test(modelId)) return true;
+  const patterns = modelCatalog.catalogReviews?.[providerId]?.ignoredModelIdPatterns;
+  if (!Array.isArray(patterns)) return false;
+  return patterns.some((pattern) => {
+    try {
+      return new RegExp(pattern, 'i').test(modelId);
+    } catch {
+      return false;
+    }
+  });
+}
+
 function reconcileModelPolicy(baseModel, modelState = {}) {
   const isCurated = Boolean(baseModel?.id);
   const source = String(modelState.source || '');
@@ -84,7 +139,6 @@ function reconcileModelPolicy(baseModel, modelState = {}) {
   // A discovery can see a model before the reviewed catalog is updated. Once
   // that same ID becomes curated, promote only the untouched discovery state.
   if (isCurated
-    && source === 'provider-discovery'
     && approval === 'candidate'
     && modelState.enabled === false
     && validationStatus === 'not-run'
@@ -130,6 +184,7 @@ function mergeModel(providerId, baseModel, modelState = {}) {
     enabled: typeof effectiveState.enabled === 'boolean' ? effectiveState.enabled : isCurated,
     source: effectiveState.source || (isCurated ? 'curated-catalog' : 'provider-discovery'),
     availability: effectiveState.availability || (isCurated ? 'catalogued' : 'discovered'),
+    catalogStatus: isCurated ? 'reviewed' : 'needs-review',
     validationStatus: effectiveState.validationStatus || (isCurated ? 'catalogued' : 'not-run'),
   };
 }
@@ -138,15 +193,27 @@ function buildProviderSnapshot(providerId) {
   const meta = PROVIDER_META[providerId] || {};
   const providerState = isPlainObject(state.providers[providerId]) ? state.providers[providerId] : {};
   const savedModels = isPlainObject(providerState.models) ? providerState.models : {};
+  const catalogReview = buildCatalogReview(providerId);
+  const missingReviewedModelIds = new Set(
+    Array.isArray(providerState.discoverySummary?.missingReviewedModelIds)
+      ? providerState.discoverySummary.missingReviewedModelIds
+      : []
+  );
   const models = [];
   const seen = new Set();
 
   for (const baseModel of providerModelDefaults(providerId)) {
     seen.add(baseModel.id);
-    models.push(mergeModel(providerId, baseModel, savedModels[baseModel.id]));
+    const merged = mergeModel(providerId, baseModel, savedModels[baseModel.id]);
+    models.push(missingReviewedModelIds.has(baseModel.id)
+      ? { ...merged, availability: 'not-seen' }
+      : merged);
   }
   for (const [modelId, modelState] of Object.entries(savedModels)) {
     if (seen.has(modelId)) continue;
+    if (modelState?.source === 'provider-discovery'
+      && !String(modelState.validationEvidence || '').trim()
+      && isReviewedDiscoveryIgnore(providerId, modelId)) continue;
     models.push(mergeModel(providerId, null, { ...modelState, id: modelId }));
   }
 
@@ -168,7 +235,12 @@ function buildProviderSnapshot(providerId) {
     discoveryMode: modelCatalog.providers?.[providerId]?.discovery || 'manual',
     discoveryStatus: providerState.discoveryStatus || 'not-checked',
     lastCheckedAt: providerState.lastCheckedAt || '',
+    lastAttemptedAt: providerState.lastAttemptedAt || providerState.lastCheckedAt || '',
+    lastSuccessfulCheckAt: providerState.lastSuccessfulCheckAt || providerState.lastCheckedAt || '',
     discoveryError: providerState.discoveryError || '',
+    discoverySummary: isPlainObject(providerState.discoverySummary) ? providerState.discoverySummary : null,
+    catalogReview,
+    requiresMaintainedCatalogRelease: catalogReview.requiresMaintainedCatalogRelease,
     models,
   };
 }
@@ -192,6 +264,8 @@ function getManagementSnapshot() {
         (total, provider) => total + provider.models.filter((model) => model.approval === 'candidate').length,
         0
       ),
+      overdueCatalogReviews: providers.filter((provider) => provider.catalogReview.status === 'overdue').length,
+      discoveryWarnings: providers.filter((provider) => ['attention', 'failed'].includes(provider.discoveryStatus)).length,
     },
   };
 }
@@ -252,6 +326,17 @@ function updateModelPolicy(providerId, modelId, patch = {}) {
     ? patch.validationEvidence.trim().slice(0, 500)
     : String(currentModel.validationEvidence || '').trim();
   const isCuratedModel = providerModelDefaults(id).some((model) => model.id === normalizedModel);
+
+  if (nextApproval === 'approved'
+    && !isCuratedModel
+    && buildCatalogReview(id).requiresMaintainedCatalogRelease) {
+    const err = new Error(
+      'Cloud models discovered from a provider list cannot be approved from the browser. '
+      + 'Update the reviewed catalog, request compatibility, focused tests, and release documentation together.'
+    );
+    err.code = 'MODEL_CATALOG_RELEASE_REQUIRED';
+    throw err;
+  }
 
   if (nextApproval === 'approved'
     && nextValidation !== 'passed'
@@ -343,6 +428,9 @@ function normalizeGeminiModels(data) {
   return (Array.isArray(data?.models) ? data.models : [])
     .filter((model) => Array.isArray(model?.supportedGenerationMethods)
       && model.supportedGenerationMethods.includes('generateContent'))
+    .filter((model) => !/(?:^|[-_])(tts|live|audio|image|imagen|veo|embedding|aqa|robotics|computer-use|omni)(?:$|[-_])/i.test(
+      String(model.baseModelId || model.name || '').replace(/^models\//, '')
+    ))
     .map((model) => ({
       id: String(model.baseModelId || model.name || '').replace(/^models\//, ''),
       label: model.displayName || model.baseModelId || model.name,
@@ -377,6 +465,137 @@ function normalizeCompatibleModels(data) {
     }));
 }
 
+function createDiscoveryError(code, message) {
+  const err = new Error(message);
+  err.code = code;
+  return err;
+}
+
+function requireDiscoveryArray(data, field, providerId) {
+  if (!Array.isArray(data?.[field])) {
+    throw createDiscoveryError(
+      'DISCOVERY_RESPONSE_INVALID',
+      `${providerId} returned a successful response without the expected ${field} model list.`
+    );
+  }
+  return data[field];
+}
+
+function finalizeDiscoveryResult(providerId, rawModels, normalizedModels, sourceUrl, pages = 1) {
+  if (!Array.isArray(rawModels) || rawModels.length === 0) {
+    throw createDiscoveryError(
+      'DISCOVERY_RESPONSE_EMPTY',
+      `${providerId} returned an empty model list. The previous successful result was preserved.`
+    );
+  }
+
+  const reviewFilteredModels = normalizedModels.filter(
+    (model) => !isReviewedDiscoveryIgnore(providerId, String(model?.id || '').trim())
+  );
+  const uniqueModels = [];
+  const seenIds = new Set();
+  let duplicateCount = 0;
+  for (const model of reviewFilteredModels) {
+    const modelId = String(model?.id || '').trim();
+    if (!modelId) continue;
+    if (seenIds.has(modelId)) {
+      duplicateCount += 1;
+      continue;
+    }
+    seenIds.add(modelId);
+    uniqueModels.push({ ...model, id: modelId });
+  }
+
+  if (uniqueModels.length === 0) {
+    throw createDiscoveryError(
+      'DISCOVERY_RESPONSE_UNUSABLE',
+      `${providerId} returned models, but none matched this application's text-and-agent API surface. The previous successful result was preserved.`
+    );
+  }
+
+  return {
+    status: 'success',
+    models: uniqueModels,
+    rawCount: rawModels.length,
+    ignoredCount: Math.max(0, rawModels.length - reviewFilteredModels.length),
+    duplicateCount,
+    sourceUrl,
+    evidenceScope: ACCOUNT_VISIBILITY_EVIDENCE,
+    complete: true,
+    pages,
+  };
+}
+
+async function discoverAnthropicModels(apiKey) {
+  const sourceUrl = 'https://api.anthropic.com/v1/models';
+  const rawModels = [];
+  const seenCursors = new Set();
+  let afterId = '';
+  let pages = 0;
+  let hasMore = false;
+
+  while (pages < MAX_DISCOVERY_PAGES) {
+    const url = `${sourceUrl}?limit=1000${afterId ? `&after_id=${encodeURIComponent(afterId)}` : ''}`;
+    const data = await fetchJson(url, {
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    });
+    rawModels.push(...requireDiscoveryArray(data, 'data', 'anthropic'));
+    pages += 1;
+    hasMore = data.has_more === true;
+    if (!hasMore) break;
+    const nextCursor = String(data.last_id || '').trim();
+    if (!nextCursor || seenCursors.has(nextCursor)) {
+      throw createDiscoveryError('DISCOVERY_RESPONSE_INVALID', 'anthropic returned an invalid or repeated pagination cursor.');
+    }
+    seenCursors.add(nextCursor);
+    afterId = nextCursor;
+  }
+
+  if (pages >= MAX_DISCOVERY_PAGES && hasMore) {
+    throw createDiscoveryError('DISCOVERY_RESPONSE_INVALID', 'anthropic model discovery exceeded the safe pagination limit.');
+  }
+  return finalizeDiscoveryResult(
+    'anthropic',
+    rawModels,
+    normalizeAnthropicModels({ data: rawModels }),
+    sourceUrl,
+    pages
+  );
+}
+
+async function discoverGeminiModels(apiKey) {
+  const sourceUrl = 'https://generativelanguage.googleapis.com/v1beta/models';
+  const rawModels = [];
+  const seenTokens = new Set();
+  let pageToken = '';
+  let pages = 0;
+
+  while (pages < MAX_DISCOVERY_PAGES) {
+    const url = `${sourceUrl}?pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`;
+    const data = await fetchJson(url, { headers: { 'x-goog-api-key': apiKey } });
+    rawModels.push(...requireDiscoveryArray(data, 'models', 'gemini'));
+    pages += 1;
+    const nextToken = String(data.nextPageToken || '').trim();
+    pageToken = nextToken;
+    if (!pageToken) break;
+    if (seenTokens.has(pageToken)) {
+      throw createDiscoveryError('DISCOVERY_RESPONSE_INVALID', 'gemini returned a repeated pagination token.');
+    }
+    seenTokens.add(pageToken);
+  }
+
+  if (pages >= MAX_DISCOVERY_PAGES && pageToken) {
+    throw createDiscoveryError('DISCOVERY_RESPONSE_INVALID', 'gemini model discovery exceeded the safe pagination limit.');
+  }
+  return finalizeDiscoveryResult(
+    'gemini',
+    rawModels,
+    normalizeGeminiModels({ models: rawModels }),
+    sourceUrl,
+    pages
+  );
+}
+
 async function discoverProviderModels(providerId) {
   const id = ensureManagedProvider(providerId);
   if (id === 'claude' || id === 'codex') {
@@ -384,6 +603,8 @@ async function discoverProviderModels(providerId) {
       status: 'manual',
       models: [],
       message: 'CLI model availability is maintained manually because API access does not prove local CLI account access.',
+      evidenceScope: 'maintained-catalog',
+      complete: false,
     };
   }
 
@@ -396,42 +617,43 @@ async function discoverProviderModels(providerId) {
   }
 
   if (id === 'anthropic') {
-    const data = await fetchJson('https://api.anthropic.com/v1/models?limit=1000', {
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-    });
-    return { status: 'success', models: normalizeAnthropicModels(data) };
+    return discoverAnthropicModels(apiKey);
   }
   if (id === 'openai') {
-    const data = await fetchJson('https://api.openai.com/v1/models', {
+    const sourceUrl = 'https://api.openai.com/v1/models';
+    const data = await fetchJson(sourceUrl, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    return { status: 'success', models: normalizeOpenAiModels(data) };
+    const rawModels = requireDiscoveryArray(data, 'data', 'openai');
+    return finalizeDiscoveryResult('openai', rawModels, normalizeOpenAiModels(data), sourceUrl);
   }
   if (id === 'gemini') {
-    const data = await fetchJson('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000', {
-      headers: { 'x-goog-api-key': apiKey },
-    });
-    return { status: 'success', models: normalizeGeminiModels(data) };
+    return discoverGeminiModels(apiKey);
   }
   if (id === 'kimi') {
-    const data = await fetchJson('https://api.moonshot.ai/v1/models', {
+    const sourceUrl = 'https://api.moonshot.ai/v1/models';
+    const data = await fetchJson(sourceUrl, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    return { status: 'success', models: normalizeKimiModels(data) };
+    const rawModels = requireDiscoveryArray(data, 'data', 'kimi');
+    return finalizeDiscoveryResult('kimi', rawModels, normalizeKimiModels(data), sourceUrl);
   }
   if (id === 'llm-gateway') {
-    const data = await fetchJson(`${getGatewayBaseUrl()}/v1/models`, {
+    const sourceUrl = `${getGatewayBaseUrl()}/v1/models`;
+    const data = await fetchJson(sourceUrl, {
       headers: { Authorization: `Bearer ${apiKey}` },
     });
-    return { status: 'success', models: normalizeCompatibleModels(data) };
+    const rawModels = requireDiscoveryArray(data, 'data', 'llm-gateway');
+    return finalizeDiscoveryResult('llm-gateway', rawModels, normalizeCompatibleModels(data), sourceUrl);
   }
   if (id === 'lm-studio') {
     const base = getLmStudioBaseUrl();
     const url = /\/v1$/i.test(base) ? `${base}/models` : `${base}/v1/models`;
     const data = await fetchJson(url);
-    return { status: 'success', models: normalizeCompatibleModels(data) };
+    const rawModels = requireDiscoveryArray(data, 'data', 'lm-studio');
+    return finalizeDiscoveryResult('lm-studio', rawModels, normalizeCompatibleModels(data), url);
   }
-  return { status: 'manual', models: [] };
+  return { status: 'manual', models: [], evidenceScope: 'maintained-catalog', complete: false };
 }
 
 function mergeDiscoveryResult(providerId, result) {
@@ -439,6 +661,44 @@ function mergeDiscoveryResult(providerId, result) {
   const currentProvider = isPlainObject(next.providers[providerId]) ? next.providers[providerId] : {};
   const models = isPlainObject(currentProvider.models) ? currentProvider.models : {};
   const checkedAt = new Date().toISOString();
+
+  if (result.status === 'manual') {
+    next.providers[providerId] = {
+      ...currentProvider,
+      discoveryStatus: 'manual',
+      discoveryError: '',
+    };
+    next.revision += 1;
+    writeState(next);
+    return {
+      providerId,
+      ok: true,
+      status: 'manual',
+      found: 0,
+      message: result.message || '',
+      evidenceScope: result.evidenceScope || 'maintained-catalog',
+    };
+  }
+
+  const discoveredIds = new Set((result.models || []).map((model) => model.id));
+  const curatedModels = providerModelDefaults(providerId);
+  const curatedIds = new Set(curatedModels.map((model) => model.id));
+  const catalogReview = buildCatalogReview(providerId);
+
+  for (const [modelId, currentModel] of Object.entries(models)) {
+    if (currentModel?.source === 'provider-discovery'
+      && !String(currentModel.validationEvidence || '').trim()
+      && isReviewedDiscoveryIgnore(providerId, modelId)) {
+      delete models[modelId];
+      continue;
+    }
+    if (!isPlainObject(currentModel) || !currentModel.lastSeenAt || discoveredIds.has(modelId)) continue;
+    models[modelId] = {
+      ...currentModel,
+      availability: 'not-seen',
+      missingSince: currentModel.missingSince || checkedAt,
+    };
+  }
 
   for (const discovered of result.models || []) {
     const currentModel = isPlainObject(models[discovered.id]) ? models[discovered.id] : {};
@@ -450,10 +710,11 @@ function mergeDiscoveryResult(providerId, result) {
       approval: currentModel.approval || (isCurated ? 'approved' : 'candidate'),
       enabled: typeof currentModel.enabled === 'boolean' ? currentModel.enabled : isCurated,
       validationStatus: currentModel.validationStatus || (isCurated ? 'catalogued' : 'not-run'),
-      source: 'provider-discovery',
-      availability: 'available',
+      source: isCurated ? 'curated-catalog' : 'provider-discovery',
+      availability: 'account-visible',
       discoveredAt: currentModel.discoveredAt || checkedAt,
       lastSeenAt: checkedAt,
+      missingSince: '',
     };
     models[discovered.id] = {
       ...mergedModel,
@@ -461,15 +722,51 @@ function mergeDiscoveryResult(providerId, result) {
     };
   }
 
+  const candidateModelIds = [...discoveredIds].filter((modelId) => !curatedIds.has(modelId));
+  const reviewedVisibleModelIds = [...discoveredIds].filter((modelId) => curatedIds.has(modelId));
+  const missingReviewedModelIds = catalogReview.requiresMaintainedCatalogRelease
+    ? curatedModels.map((model) => model.id).filter((modelId) => !discoveredIds.has(modelId))
+    : [];
+  const discoveryStatus = missingReviewedModelIds.length > 0
+    ? 'attention'
+    : candidateModelIds.length > 0
+      ? 'review-needed'
+      : 'verified';
+  const discoverySummary = {
+    evidenceScope: result.evidenceScope || ACCOUNT_VISIBILITY_EVIDENCE,
+    sourceUrl: result.sourceUrl || '',
+    complete: result.complete === true,
+    pages: Number(result.pages) || 1,
+    rawCount: Number(result.rawCount) || 0,
+    acceptedCount: discoveredIds.size,
+    ignoredCount: Number(result.ignoredCount) || 0,
+    duplicateCount: Number(result.duplicateCount) || 0,
+    reviewedVisible: reviewedVisibleModelIds.length,
+    candidates: candidateModelIds.length,
+    candidateModelIds,
+    missingReviewed: missingReviewedModelIds.length,
+    missingReviewedModelIds,
+  };
+
   next.providers[providerId] = {
     ...currentProvider,
     models,
-    discoveryStatus: result.status,
+    discoveryStatus,
     discoveryError: '',
     lastCheckedAt: checkedAt,
+    lastAttemptedAt: checkedAt,
+    lastSuccessfulCheckAt: checkedAt,
+    discoverySummary,
   };
   next.revision += 1;
   writeState(next);
+  return {
+    providerId,
+    ok: true,
+    status: discoveryStatus,
+    found: discoveredIds.size,
+    ...discoverySummary,
+  };
 }
 
 async function refreshProviderModels(providerIds = MANAGED_PROVIDER_IDS) {
@@ -479,26 +776,26 @@ async function refreshProviderModels(providerIds = MANAGED_PROVIDER_IDS) {
   for (const providerId of requested) {
     try {
       const result = await discoverProviderModels(providerId);
-      mergeDiscoveryResult(providerId, result);
-      results.push({
-        providerId,
-        ok: true,
-        status: result.status,
-        found: Array.isArray(result.models) ? result.models.length : 0,
-        message: result.message || '',
-      });
+      results.push(mergeDiscoveryResult(providerId, result));
     } catch (err) {
       const next = clone(state);
       const currentProvider = isPlainObject(next.providers[providerId]) ? next.providers[providerId] : {};
+      const attemptedAt = new Date().toISOString();
       next.providers[providerId] = {
         ...currentProvider,
         discoveryStatus: 'failed',
         discoveryError: err.message || 'Model discovery failed.',
-        lastCheckedAt: new Date().toISOString(),
+        lastAttemptedAt: attemptedAt,
       };
       next.revision += 1;
       writeState(next);
-      results.push({ providerId, ok: false, code: err.code || 'DISCOVERY_FAILED', error: err.message });
+      results.push({
+        providerId,
+        ok: false,
+        code: err.code || 'DISCOVERY_FAILED',
+        error: err.message,
+        lastSuccessfulCheckAt: currentProvider.lastSuccessfulCheckAt || currentProvider.lastCheckedAt || '',
+      });
     }
   }
 
@@ -610,6 +907,7 @@ module.exports = {
 };
 
 module.exports._internal = {
+  isReviewedDiscoveryIgnore,
   mergeModel,
   reconcileModelPolicy,
 };

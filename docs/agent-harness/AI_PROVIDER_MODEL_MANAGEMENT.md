@@ -16,10 +16,10 @@ The Gemini and Kimi entries were rechecked against the providers' current offici
 
 | Provider | Current default | Other current approved choices | Request compatibility enforced by the app |
 | --- | --- | --- | --- |
-| Gemini | `gemini-3.6-flash` | `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview` | Uses `thinkingConfig.thinkingLevel`; omits deprecated `temperature`, `topP`, and `topK` sampling controls |
+| Gemini | `gemini-3.6-flash` | `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview` | Uses `thinkingConfig.thinkingLevel`; omits deprecated `temperature`, `topP`, and `topK` sampling controls |
 | Kimi Open Platform | `kimi-k3` | `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` | K3 is always-reasoning and uses `reasoning_effort` plus `max_completion_tokens`; K2.7 Code keeps thinking on and does not receive `reasoning_effort`; fixed sampling fields are omitted |
 
-Gemini 3.6 Flash replaces Gemini 3.5 Flash in the current Flash line. Gemini 3.5 Flash-Lite replaces Gemini 3.1 Flash-Lite. Kimi K3 replaces K2.6 as the current general-purpose default. Removed entries remain usable by existing profiles while **Approved models only** is off, and old harness results remain historical evidence; they are no longer offered as current choices.
+Gemini 3.6 Flash is the current default for balanced agent work. Gemini 3.5 Flash remains a current stable choice because Google separately positions it for sustained frontier agentic and coding work; it is not retained merely as a rollback. Gemini 3.5 Flash-Lite replaces Gemini 3.1 Flash-Lite. Kimi K3 replaces K2.6 as the current general-purpose default. Removed entries remain usable by existing profiles while **Approved models only** is off, and old harness results remain historical evidence; they are no longer offered as current choices.
 
 Kimi Open Platform and the separate Kimi Code membership API are not interchangeable. This app's `kimi` provider uses `https://api.moonshot.ai/v1` and Open Platform model IDs such as `kimi-k3`. It must not send Kimi Code membership IDs such as `k3` or `kimi-for-coding` unless a separate provider, base URL, and credential type are deliberately added.
 
@@ -30,7 +30,7 @@ Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/ge
 | Layer | Location | Responsibility |
 | --- | --- | --- |
 | Curated provider capabilities | `shared/ai-provider-catalog.json` | Provider transport, default model, effort support, image support, and request behavior |
-| Curated model inventory | `shared/ai-model-catalog.json` | Models already reviewed with the application and their release channel/capabilities |
+| Curated model inventory and review attestation | `shared/ai-model-catalog.json` | Models already reviewed with the application, official source links, review date, expiry, release channel, and capabilities |
 | Operator policy and discoveries | `server/data/ai-management.json` | Local enabled/disabled state, discovered candidates, validation evidence, and enforcement mode |
 | Agent assignments | `AgentIdentity.runtime` | Primary/fallback provider and model for each agent |
 | Runtime enforcement | `server/src/services/ai-management.js` | Final allowed/blocked decision before provider execution |
@@ -40,13 +40,13 @@ If an existing policy file is malformed, server startup fails with its exact pat
 
 ## Dynamic model discovery
 
-“Check for new models” asks each configured provider for the models available to the current account. It does not treat a provider announcement or a returned model ID as proof that the app can use that model correctly.
+“Check provider lists” asks each configured provider for the models visible to the current account. It does not treat a provider announcement or a returned model ID as proof that the app can use that model correctly.
 
 | Provider | Discovery source | Notes |
 | --- | --- | --- |
 | OpenAI API | `GET https://api.openai.com/v1/models` | Filters out audio, image-generation, embedding, moderation, and realtime-only entries |
-| Anthropic API | `GET https://api.anthropic.com/v1/models` | Captures capability metadata returned by the Models API |
-| Gemini API | `GET https://generativelanguage.googleapis.com/v1beta/models` | Keeps models that support `generateContent` |
+| Anthropic API | Paginated `GET https://api.anthropic.com/v1/models` | Follows `has_more`/`last_id` and captures capability metadata returned by the Models API |
+| Gemini API | Paginated `GET https://generativelanguage.googleapis.com/v1beta/models` | Follows `nextPageToken`; keeps text/agent `generateContent` models and ignores TTS, Live, image, video, embedding, robotics, and computer-use surfaces |
 | Kimi API | `GET https://api.moonshot.ai/v1/models` | Captures context, image-input, and reasoning fields when returned |
 | LLM Gateway | OpenAI-compatible `GET /v1/models` | Availability depends on the configured gateway |
 | LM Studio | OpenAI-compatible `GET /v1/models` | Represents models visible to the local LM Studio server |
@@ -58,16 +58,25 @@ Unknown discovered models enter the catalog as **Needs review**, disabled. They 
 
 A model-list response proves only that the account can see an ID. It often does not fully describe replacement status, deprecated request fields, reasoning requirements, fixed sampling parameters, pricing, or whether similarly named products use different credentials and base URLs. Every discovery therefore still requires the official-document and request-builder review below.
 
+The app records the two kinds of evidence separately:
+
+- **Account visibility evidence:** endpoint, attempt time, last successful time, page count, raw count, accepted count, ignored count, candidates, and reviewed IDs not returned.
+- **Maintained release evidence:** the official source links and review date stored with the curated catalog. Cloud-provider reviews expire after 14 days so the UI can say that a review is overdue instead of presenting an old review as current.
+
+A complete successful response that unexpectedly omits a reviewed model creates a warning; it does not silently remove or disable that model after one account-specific check. An empty, malformed, repeated-cursor, over-pagination, or entirely unusable success response fails closed and preserves the previous successful evidence. A failed attempt updates only the attempt time, never the last-successful time.
+
+The maintained review also records provider-specific ignore patterns for model generations and aliases already classified as superseded. Those known older IDs and non-agent surfaces do not flood **Needs review** after every check. A future model generation that does not match a reviewed ignore rule still appears as a quarantined candidate, so filtering old results does not hide genuinely new releases.
+
 ## Required new-model release procedure
 
-1. **Discover availability.** Run “Check for new models” for the provider. Record whether the current account can see the model.
+1. **Discover availability.** Run “Check provider lists” for the provider. Record whether the current account can see the model and whether any reviewed IDs disappeared from the response.
 2. **Confirm official support.** Read current provider documentation. Confirm the exact model ID, release channel, API surface, image input, reasoning controls, context window, output limit, pricing, and deprecation status.
 3. **Update request compatibility.** If the model needs a different request body, effort value, thinking mode, endpoint, or response parser, update the provider adapter and focused request-builder tests before approval.
 4. **Run the deterministic harness.** Test representative real fixtures for every role being considered. At minimum capture task accuracy, mandatory output contract, latency, cost, fallback behavior, provider package evidence, and any operator correction.
-5. **Record evidence and approve.** Add the passing harness run ID or equivalent evidence in AI Management. Approval makes the model available to every picker but does not assign it to an agent.
+5. **Release cloud models as maintained code.** Update the curated catalog, review date and sources, request compatibility, focused tests, and documentation together. A cloud candidate cannot be approved from the browser with typed evidence alone. Operator-managed OpenAI-compatible gateway or local models may still be approved after real harness evidence is recorded.
 6. **Assign deliberately.** Change only the relevant agent profiles. Preserve their fallbacks and explain why the new model fits each role.
 7. **Monitor after release.** Watch pass rate, latency, cost, provider errors, effective model, fallback use, and user corrections. Keep older results as historical evidence rather than as a reason to leave an obsolete model selectable.
-8. **Complete the maintained update.** When a model becomes the current appropriate release, update the curated catalog, defaults, request compatibility, focused tests, and this documentation together.
+8. **Complete the maintained update.** When a model becomes the current appropriate default, update defaults and every affected harness or chatbot together; do not rewrite unrelated agent assignments automatically.
 
 ## Enforcement and migration
 
@@ -80,7 +89,7 @@ The **Approved models only** switch controls old custom model IDs that predate A
 
 A newly discovered candidate also remains runnable only if an older profile already names it while migration mode is off. Discovery therefore cannot break a legacy assignment merely by recognizing its ID. The model still stays out of every picker until it passes review, and strict mode blocks it until approval.
 
-Catalog reconciliation is automatic. If discovery saved a model as an untouched candidate before it was officially reviewed, adding that ID to the curated catalog promotes it to an approved current choice. If an earlier curated model is removed, an old auto-approved discovery record is demoted to a disabled candidate so it cannot linger in every picker. A separately validated custom approval with recorded evidence is preserved.
+Catalog reconciliation is automatic. If discovery saved a model as an untouched candidate before it was officially reviewed, adding that ID to the curated catalog promotes it to an approved current choice. If an earlier curated model is removed, an old auto-approved discovery record is demoted to a disabled candidate so it cannot linger in every picker. A separately validated operator-managed custom approval with recorded evidence is preserved.
 
 Before turning strict mode on, review existing agent profiles and approve or replace intentional custom IDs. Do not silently normalize them to a different model.
 
@@ -107,7 +116,7 @@ The reveal control shows only the value currently being typed. It cannot reveal 
 ## Verification checklist for catalog changes
 
 - Shared provider and model catalogs parse successfully.
-- AI Management route tests cover list, provider toggle, model approval, key redaction, and discovery failure behavior.
+- AI Management route tests cover list, provider toggle, model approval, cloud release enforcement, key redaction, discovery pagination, irrelevant-surface filtering, missing-model warnings, and fail-closed discovery behavior.
 - Provider catalog tests cover default model and request compatibility.
 - Agent runtime saves reject disabled providers/models.
 - Chat, Copilot, Workspace, image parser, and Agent profile pickers show the same approved inventory.

@@ -30,7 +30,7 @@ const KEY_ENVIRONMENT_VARIABLES = Object.freeze({
 
 function sendKnownError(res, err) {
   const status = err?.code === 'INVALID_PROVIDER' || err?.code === 'INVALID_MODEL' ? 400
-    : err?.code === 'MODEL_VALIDATION_REQUIRED' ? 409
+    : err?.code === 'MODEL_VALIDATION_REQUIRED' || err?.code === 'MODEL_CATALOG_RELEASE_REQUIRED' ? 409
       : 500;
   return res.status(status).json({
     ok: false,

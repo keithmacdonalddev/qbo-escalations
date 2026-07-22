@@ -4,12 +4,12 @@
 
 This section is the current Gemini contract. The older research snapshot below is retained as historical evidence and its old model IDs, line numbers, request shapes, and “current” wording are superseded by this section.
 
-- Current default: `gemini-3.6-flash`. Other current choices: `gemini-3.5-flash-lite` and `gemini-3.1-pro-preview`.
-- Gemini 3.6 Flash replaces Gemini 3.5 Flash in the Flash line. Gemini 3.5 Flash-Lite replaces Gemini 3.1 Flash-Lite.
+- Current default: `gemini-3.6-flash`. Other current choices: `gemini-3.5-flash`, `gemini-3.5-flash-lite`, and `gemini-3.1-pro-preview`.
+- Google lists Gemini 3.6 Flash and Gemini 3.5 Flash as separate current stable choices: 3.6 is the balanced default, while 3.5 is positioned for sustained frontier agentic and coding work. Gemini 3.5 Flash-Lite replaces Gemini 3.1 Flash-Lite.
 - The app still uses the supported `generateContent` REST surface. Chat, image parsing, triage, and the key-validation probe now use the current default where a model is not explicitly selected.
 - Current Gemini reasoning control is `generationConfig.thinkingConfig.thinkingLevel`. The app normalizes its shared effort selection to supported Gemini levels and does not send `minimal` to Gemini 3.1 Pro Preview.
 - Beginning with Gemini 3.6 Flash and Gemini 3.5 Flash-Lite, `temperature`, `topP`, and `topK` are deprecated and may produce errors. All current app Gemini paths omit those fields.
-- Current catalog metadata records a 1,048,576-token input context and 65,536-token maximum output for these choices. Pricing records use the 2026-07-21 paid-tier rates: Gemini 3.6 Flash at $1.50 input / $7.50 output per million tokens, and Gemini 3.5 Flash-Lite at $0.30 / $2.50.
+- Current catalog metadata records a 1,048,576-token input context and 65,536-token maximum output for these choices. Pricing records use the 2026-07-21 paid-tier rates: Gemini 3.6 Flash at $1.50 input / $7.50 output per million tokens, Gemini 3.5 Flash at $1.50 / $9, and Gemini 3.5 Flash-Lite at $0.30 / $2.50.
 
 Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/generate-content/latest-model), [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations), and [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing).
 

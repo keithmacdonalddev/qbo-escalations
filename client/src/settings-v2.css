@@ -195,6 +195,12 @@
 .ai-discovery-row span { display: block; }
 .ai-discovery-row strong { font-size: 0.74rem; }
 .ai-discovery-row span { margin-top: 4px; color: var(--settings-muted); font-size: 0.66rem; line-height: 1.45; }
+.ai-discovery-row .ai-catalog-review { margin-top: 8px; color: #72d9b2; }
+.ai-discovery-row .ai-catalog-review.is-overdue,
+.ai-discovery-row .ai-catalog-review.is-missing { color: #efbd6d; }
+.ai-discovery-row .ai-official-sources { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; }
+.ai-discovery-row .ai-official-sources a { color: #a99cff; font-size: 0.62rem; text-decoration: none; }
+.ai-discovery-row .ai-official-sources a:hover { text-decoration: underline; }
 
 .ai-key-card { margin: 16px 0; padding: 16px; border: 1px solid rgba(143, 124, 255, 0.18); border-radius: 12px; background: rgba(143, 124, 255, 0.045); }
 .ai-section-title-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
@@ -220,7 +226,8 @@
 .ai-model-channel { padding: 3px 6px; border-radius: 6px; background: rgba(91, 209, 164, 0.1); color: #6ed3ad; font-size: 0.58rem; font-weight: 700; }
 .ai-model-status.is-candidate { background: rgba(240, 176, 77, 0.12); color: #efbd6d; }
 .ai-model-status.is-blocked,
-.ai-model-status.is-off { background: rgba(255, 109, 109, 0.1); color: #ef8b8b; }
+.ai-model-status.is-off,
+.ai-model-status.is-missing { background: rgba(255, 109, 109, 0.1); color: #ef8b8b; }
 .ai-model-channel { background: rgba(255, 255, 255, 0.055); color: #9198a3; font-weight: 600; }
 .ai-model-capabilities { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
 .ai-model-capabilities span { padding: 3px 6px; border: 1px solid var(--settings-border); border-radius: 6px; color: #848b96; font-size: 0.58rem; }
@@ -228,6 +235,8 @@
 .ai-model-review label span { display: block; margin-bottom: 5px; color: var(--settings-muted); font-size: 0.62rem; }
 .ai-model-review input { width: 100%; }
 .ai-model-review > div { display: flex; gap: 6px; margin-top: 7px; }
+.ai-model-review.is-release-locked strong { color: #efbd6d; font-size: 0.68rem; }
+.ai-model-review.is-release-locked p { margin: 5px 0 0; color: var(--settings-muted); font-size: 0.62rem; line-height: 1.45; }
 
 .ai-release-procedure { margin-top: 16px; }
 .ai-release-procedure ol { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; counter-reset: release-step; }

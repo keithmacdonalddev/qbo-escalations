@@ -18,6 +18,13 @@ function formatDate(value) {
   return date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+function formatReviewDate(value) {
+  if (!value) return 'an unknown date';
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T12:00:00Z` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString([], { dateStyle: 'medium' });
+}
+
 function modelKey(providerId, modelId) {
   return `${providerId}:${modelId}`;
 }
@@ -25,8 +32,35 @@ function modelKey(providerId, modelId) {
 function statusLabel(model) {
   if (model.approval === 'candidate') return 'Needs review';
   if (model.approval === 'blocked') return 'Blocked';
+  if (model.availability === 'not-seen') return 'Not seen by account';
   if (!model.enabled) return 'Disabled';
   return 'Available';
+}
+
+function discoverySummaryText(provider) {
+  const summary = provider?.discoverySummary;
+  if (!summary && provider?.lastSuccessfulCheckAt) {
+    return 'A prior successful check exists, but it predates detailed evidence counts. Run Check now to replace it with auditable results.';
+  }
+  if (!summary) return 'No successful account model-list check has been recorded yet.';
+  const parts = [
+    `${summary.acceptedCount || 0} usable IDs returned`,
+    `${summary.reviewedVisible || 0} match the reviewed catalog`,
+  ];
+  if (summary.candidates) parts.push(`${summary.candidates} need maintained release review`);
+  if (summary.ignoredCount) parts.push(`${summary.ignoredCount} non-agent entries ignored`);
+  if (summary.missingReviewed) parts.push(`${summary.missingReviewed} reviewed IDs not returned`);
+  return `${parts.join(' · ')}. This proves account visibility only, not request compatibility or quality.`;
+}
+
+function catalogReviewText(review) {
+  if (!review?.reviewedAt) return 'No maintained catalog review has been recorded.';
+  if (review.reviewKind === 'operator-managed') {
+    return `Operator-managed catalog reviewed ${formatReviewDate(review.reviewedAt)}.`;
+  }
+  const freshness = review.status === 'overdue' ? 'Review overdue' : 'Current review';
+  return `${freshness}: official release, deprecation, and request documentation checked ${formatReviewDate(review.reviewedAt)}`
+    + `${review.expiresAfterDays ? `; recheck required after ${review.expiresAfterDays} days` : ''}.`;
 }
 
 export default function AiManagementSettings({ onOpenAgents }) {
@@ -79,15 +113,29 @@ export default function AiManagementSettings({ onOpenAgents }) {
   async function refreshModels(providerIds) {
     const result = await runAction(
       `refresh:${providerIds.join(',')}`,
-      () => request('/refresh', jsonOptions('POST', { providerIds })),
-      'Model availability check finished.'
+      () => request('/refresh', jsonOptions('POST', { providerIds }))
     );
     if (!result?.results) return;
     const failed = result.results.filter((entry) => !entry.ok);
+    const succeeded = result.results.filter((entry) => entry.ok && entry.status !== 'manual');
+    const messages = succeeded.map((entry) => {
+      const provider = providers.find((candidate) => candidate.id === entry.providerId);
+      const label = provider?.shortLabel || entry.providerId;
+      const details = [`${entry.found || 0} usable IDs`];
+      if (entry.candidates) details.push(`${entry.candidates} need review`);
+      if (entry.missingReviewed) details.push(`${entry.missingReviewed} reviewed IDs not returned`);
+      if (entry.ignoredCount) details.push(`${entry.ignoredCount} ignored`);
+      return `${label}: ${details.join(', ')}`;
+    });
     if (failed.length > 0) {
-      const message = failed.map((entry) => `${entry.providerId}: ${entry.error}`).join(' · ');
-      setActionMessage(message);
+      messages.push(...failed.map((entry) => `${entry.providerId}: failed — ${entry.error}`));
+    }
+    const message = messages.join(' · ') || 'No provider model-list check was run.';
+    setActionMessage(message);
+    if (failed.length > 0 || succeeded.some((entry) => entry.missingReviewed > 0)) {
       toast.error(message, { duration: 6500 });
+    } else {
+      toast.success(message, { duration: 5000 });
     }
   }
 
@@ -220,7 +268,8 @@ export default function AiManagementSettings({ onOpenAgents }) {
           <h2>AI Management</h2>
           <p>
             Control which providers and models the application is allowed to use. Agent profiles still own each agent&apos;s
-            primary and fallback choices; this catalog governs what those profiles may choose.
+            primary and fallback choices; this reviewed catalog governs what those profiles may choose. Provider-list checks
+            can find candidates, but cannot approve them or claim that their request contract is compatible.
           </p>
         </div>
         <button
@@ -229,7 +278,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
           disabled={pending.startsWith('refresh:') || refreshableProviderIds.length === 0}
           onClick={() => refreshModels(refreshableProviderIds)}
         >
-          {pending.startsWith('refresh:') ? 'Checking…' : 'Check for new models'}
+          {pending.startsWith('refresh:') ? 'Checking…' : 'Check provider lists'}
         </button>
       </header>
 
@@ -239,7 +288,9 @@ export default function AiManagementSettings({ onOpenAgents }) {
         <div className={catalog?.summary?.candidates ? 'needs-attention' : ''}>
           <strong>{catalog?.summary?.candidates || 0}</strong><span>models need review</span>
         </div>
-        <div><strong>Profiles</strong><span>keep agent assignments</span></div>
+        <div className={(catalog?.summary?.discoveryWarnings || catalog?.summary?.overdueCatalogReviews) ? 'needs-attention' : ''}>
+          <strong>{(catalog?.summary?.discoveryWarnings || 0) + (catalog?.summary?.overdueCatalogReviews || 0)}</strong><span>trust warnings</span>
+        </div>
       </div>
 
       <section className="ai-management-policy-card">
@@ -292,7 +343,7 @@ export default function AiManagementSettings({ onOpenAgents }) {
                 <span className="settings-v2-eyebrow">{selectedProvider.transport}</span>
                 <h3>{selectedProvider.label}</h3>
                 <p>
-                  Default: <code>{selectedProvider.defaultModel || 'provider controlled'}</code> · Last model check: {formatDate(selectedProvider.lastCheckedAt)}
+                  Default: <code>{selectedProvider.defaultModel || 'provider controlled'}</code> · Last successful account check: {formatDate(selectedProvider.lastSuccessfulCheckAt)}
                 </p>
               </div>
               <button
@@ -308,11 +359,22 @@ export default function AiManagementSettings({ onOpenAgents }) {
             {selectedProvider.discoveryMode === 'api' ? (
               <div className="ai-discovery-row">
                 <div>
-                  <strong>Model discovery</strong>
+                  <strong>Account model-list check</strong>
                   <span>
                     {selectedProvider.discoveryError
-                      || 'Checks the provider model-list API. New results enter review and do not go live automatically.'}
+                      ? `Latest attempt ${formatDate(selectedProvider.lastAttemptedAt)} failed: ${selectedProvider.discoveryError} Previous successful evidence is preserved.`
+                      : discoverySummaryText(selectedProvider)}
                   </span>
+                  <span className={`ai-catalog-review is-${selectedProvider.catalogReview?.status || 'missing'}`}>
+                    {catalogReviewText(selectedProvider.catalogReview)}
+                  </span>
+                  {selectedProvider.catalogReview?.officialSources?.length > 0 && (
+                    <span className="ai-official-sources">
+                      {selectedProvider.catalogReview.officialSources.map((source, index) => (
+                        <a key={source} href={source} target="_blank" rel="noreferrer">Official source {index + 1}</a>
+                      ))}
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -397,12 +459,15 @@ export default function AiManagementSettings({ onOpenAgents }) {
               <div className="ai-model-list">
                 {selectedProvider.models.map((model) => {
                   const key = modelKey(selectedProvider.id, model.id);
+                  const statusClass = model.availability === 'not-seen'
+                    ? 'is-missing'
+                    : `is-${model.approval}${!model.enabled ? ' is-off' : ''}`;
                   return (
                     <article key={model.id} className={`ai-model-row is-${model.approval}`}>
                       <div className="ai-model-main">
                         <div className="ai-model-name-row">
                           <strong>{model.label || model.id}</strong>
-                          <span className={`ai-model-status is-${model.approval}${!model.enabled ? ' is-off' : ''}`}>{statusLabel(model)}</span>
+                          <span className={`ai-model-status ${statusClass}`}>{statusLabel(model)}</span>
                           {model.releaseChannel && <span className="ai-model-channel">{model.releaseChannel}</span>}
                         </div>
                         <code>{model.id}</code>
@@ -414,20 +479,30 @@ export default function AiManagementSettings({ onOpenAgents }) {
                         </div>
                       </div>
                       {model.approval === 'candidate' ? (
-                        <div className="ai-model-review">
-                          <label>
-                            <span>Harness evidence before approval</span>
-                            <input
-                              value={validationEvidence[key] || ''}
-                              placeholder="Example: pipeline run 1042, all fixtures passed"
-                              onChange={(event) => setValidationEvidence((current) => ({ ...current, [key]: event.target.value }))}
-                            />
-                          </label>
-                          <div>
-                            <button type="button" className="btn btn-primary btn-sm" disabled={pending === `approve:${key}`} onClick={() => approveCandidate(selectedProvider, model)}>Approve after pass</button>
-                            <button type="button" className="btn btn-ghost btn-sm is-danger" disabled={pending === `block:${key}`} onClick={() => blockCandidate(selectedProvider, model)}>Block</button>
+                        selectedProvider.requiresMaintainedCatalogRelease ? (
+                          <div className="ai-model-review is-release-locked">
+                            <strong>Maintained release required</strong>
+                            <p>Official docs, request compatibility, focused tests, catalog metadata, and harness evidence must be updated together. This ID cannot be approved from the browser.</p>
+                            <div>
+                              <button type="button" className="btn btn-ghost btn-sm is-danger" disabled={pending === `block:${key}`} onClick={() => blockCandidate(selectedProvider, model)}>Block candidate</button>
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="ai-model-review">
+                            <label>
+                              <span>Harness evidence before approval</span>
+                              <input
+                                value={validationEvidence[key] || ''}
+                                placeholder="Example: pipeline run 1042, all fixtures passed"
+                                onChange={(event) => setValidationEvidence((current) => ({ ...current, [key]: event.target.value }))}
+                              />
+                            </label>
+                            <div>
+                              <button type="button" className="btn btn-primary btn-sm" disabled={pending === `approve:${key}`} onClick={() => approveCandidate(selectedProvider, model)}>Approve after pass</button>
+                              <button type="button" className="btn btn-ghost btn-sm is-danger" disabled={pending === `block:${key}`} onClick={() => blockCandidate(selectedProvider, model)}>Block</button>
+                            </div>
+                          </div>
+                        )
                       ) : (
                         <label className="settings-v2-switch" title={`${model.enabled ? 'Disable' : 'Enable'} ${model.label || model.id}`}>
                           <input
@@ -454,10 +529,10 @@ export default function AiManagementSettings({ onOpenAgents }) {
           {onOpenAgents && <button type="button" className="btn btn-secondary btn-sm" onClick={onOpenAgents}>Open Agent profiles</button>}
         </div>
         <ol>
-          <li><strong>Discover.</strong> Check provider APIs. Unknown models enter “Needs review” and remain unavailable.</li>
-          <li><strong>Classify.</strong> Confirm image input, reasoning controls, context limits, request shape, pricing, and release channel.</li>
-          <li><strong>Validate.</strong> Run the existing deterministic agent harness on real fixtures and record the passing evidence here.</li>
-          <li><strong>Approve.</strong> Approval makes the model appear everywhere at once; it does not rewrite any agent profile.</li>
+          <li><strong>Discover.</strong> Check every provider page. Unknown IDs enter “Needs review”; missing reviewed IDs become warnings.</li>
+          <li><strong>Classify.</strong> Recheck official release, deprecation, pricing, capability, and exact request documentation.</li>
+          <li><strong>Update and validate.</strong> Change request builders and focused tests, then run the deterministic harness on real fixtures.</li>
+          <li><strong>Release together.</strong> Update the reviewed catalog, defaults, tests, and documentation in one maintained change.</li>
           <li><strong>Assign and monitor.</strong> Change only the relevant agent profiles, then watch saved pass rates, latency, cost, and fallback evidence.</li>
         </ol>
       </section>

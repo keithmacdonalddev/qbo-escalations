@@ -1,5 +1,96 @@
 {
   "schemaVersion": 1,
+  "catalogReviews": {
+    "claude": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": 14,
+      "reviewKind": "maintained-release",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "https://code.claude.com/docs/en/model-config"
+      ]
+    },
+    "anthropic": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": 14,
+      "reviewKind": "maintained-release",
+      "officialSources": [
+        "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "https://platform.claude.com/docs/en/api/models/list"
+      ],
+      "ignoredModelIdPatterns": [
+        "^claude-[1-3](?:\\.|-|$)",
+        "^claude-(?:opus|sonnet)-4-[0-7](?:-|$)"
+      ]
+    },
+    "codex": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": 14,
+      "reviewKind": "maintained-release",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models",
+        "https://learn.chatgpt.com/codex/models"
+      ]
+    },
+    "openai": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": 14,
+      "reviewKind": "maintained-release",
+      "officialSources": [
+        "https://developers.openai.com/api/docs/models",
+        "https://developers.openai.com/api/reference/resources/models/methods/list"
+      ],
+      "ignoredModelIdPatterns": [
+        "^gpt-[1-4](?:\\.|-|$)",
+        "^gpt-5\\.[0-3](?:-|$)",
+        "^o[1-4](?:-|$)",
+        "^chatgpt-[1-4](?:\\.|-|$)"
+      ]
+    },
+    "llm-gateway": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": null,
+      "reviewKind": "operator-managed",
+      "officialSources": []
+    },
+    "gemini": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": 14,
+      "reviewKind": "maintained-release",
+      "officialSources": [
+        "https://ai.google.dev/gemini-api/docs/models",
+        "https://ai.google.dev/gemini-api/docs/deprecations",
+        "https://ai.google.dev/api/models"
+      ],
+      "ignoredModelIdPatterns": [
+        "^gemini-2(?:\\.|-)",
+        "^gemini-3-(?:flash|pro)-preview$",
+        "^gemini-3\\.1-flash-lite(?:-preview)?$",
+        "^gemini-(?:flash|flash-lite|pro)-latest$"
+      ]
+    },
+    "kimi": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": 14,
+      "reviewKind": "maintained-release",
+      "officialSources": [
+        "https://platform.kimi.ai/docs/api/models-overview",
+        "https://platform.kimi.ai/docs/api/list-models"
+      ],
+      "ignoredModelIdPatterns": [
+        "^kimi-k2\\.[0-6](?:-|$)",
+        "^moonshot-"
+      ]
+    },
+    "lm-studio": {
+      "reviewedAt": "2026-07-21",
+      "expiresAfterDays": null,
+      "reviewKind": "operator-managed",
+      "officialSources": [
+        "https://lmstudio.ai/docs/developer/openai-compat/models"
+      ]
+    }
+  },
   "providers": {
     "claude": {
       "discovery": "manual",
@@ -53,6 +144,7 @@
       "discovery": "api",
       "models": [
         { "id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
+        { "id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
         { "id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
         { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 }
       ]
