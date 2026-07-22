@@ -27,6 +27,22 @@ Before planning or editing:
 
 If Phase 1 is absent, incomplete, failing, uncommitted, or too unreliable to drive recovery, stop and report the blocker. Do not build recovery on guessed or untrusted completeness results.
 
+### Phase 1 hardening required by the implementation review
+
+Phase 1 is implemented, but an independent review found several gaps that must be verified against the current source and corrected before recovery actions are allowed to rely on its verdict. Treat this as prerequisite hardening within this task, not as permission to redesign Phase 1.
+
+At minimum:
+
+1. **Correct the analyst produced-but-not-saved path.** If an analyst answer was generated and streamed but the conversation save failed, preserve `contentProduced: true` separately from `messageSaved: false`. The evidence checker must classify the answer as `produced-not-saved` and `incomplete`, not `not-produced` or quietly complete. Protect the already-visible analyst answer with the same Copy, Download, dismiss-confirmation, refresh/close, route-navigation, and session-switch safeguards used for an unsaved triage result.
+2. **Match evidence to the current run.** An older conversation trace must not prove that the current analyst run's trace exists. Match by the current trace ID or request ID while retaining older traces as Audit history.
+3. **Scope acknowledgements to the finding.** Acknowledgement of an earlier incomplete run must not make a new or changed finding appear already acknowledged. Bind acknowledgement to a stable finding fingerprint, run, or equivalent evidence version without erasing the underlying Audit history.
+4. **Make the positive count truthful and visible.** A complete run must show a quiet saved/expected count for required user results. Do not display a contradictory count such as `18 of 20` beside `complete` merely because supporting evidence is unverifiable; separate required results from supporting audit evidence.
+5. **Let unknown settling states resolve.** A deferred save failure checked during the settling window must receive a safe recheck path. Provide `Check again` for `unknown` and/or one bounded automatic recheck after settling; do not leave instructions to refresh without an available action.
+6. **Use the real retention policy.** Evidence-expiry explanations must use shared environment-aware retention settings or actual `expiresAt` values rather than hardcoded periods that can drift from the stored records.
+7. **Add missing client behavior tests.** Cover complete, incomplete, and unknown rendering; accurate counts; unsaved triage and analyst result protection; Copy/Download; dismiss and navigation guards; current-finding acknowledgement; and unknown recheck behavior.
+
+Run the focused Phase 1 server tests and the client build/test validation after these corrections. Do not begin Phase 2 recovery implementation until the central checker can truthfully drive a recovery decision. If any prerequisite cannot be corrected safely within the current source and concurrent-work constraints, stop and report the exact blocker.
+
 ## Codex collaboration requirement
 
 Use the connected Codex MCP server for substantive, bounded sub-agent work during this task. Its configured default is GPT-5.6 Sol with medium reasoning; do not override that default for ordinary delegated work.
