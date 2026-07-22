@@ -4,7 +4,7 @@ import {
   getAgentTestHarness,
   normalizeHarnessError,
 } from './agentTestHarnesses.js';
-import { getProviderMeta } from '../../lib/providerCatalog.js';
+import { getProviderIconPath, getProviderMeta } from '../../lib/providerCatalog.js';
 import './AgentTestModal.css';
 
 const EMPTY_EVENTS = [];
@@ -496,7 +496,7 @@ function normalizeStageEvent(payload, index, context = {}) {
 // by the caller, so this only emits the icon slot.
 function ProviderLogo({ providerId }) {
   const meta = getProviderMeta(cleanText(providerId).toLowerCase());
-  const iconSrc = meta?.iconLightPath || meta?.iconPath || '';
+  const iconSrc = getProviderIconPath(meta);
   const [errored, setErrored] = useState(false);
   if (!iconSrc || errored) return null;
   return (

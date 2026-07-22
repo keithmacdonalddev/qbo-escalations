@@ -33,6 +33,7 @@ import {
 } from '../lib/escalationKnowledgeLifecycle.js';
 import {
   REASONING_EFFORT_OPTIONS,
+  getProviderIconPath,
   getProviderMeta,
   getProviderModelSuggestions,
   getSupportsThinking,
@@ -2184,7 +2185,7 @@ function kbAgentEffortLabel(effort) {
 function KbAgentProviderMark({ provider, providerLabel }) {
   const [errored, setErrored] = useState(false);
   const meta = getProviderMeta(provider);
-  const iconSrc = meta?.iconLightPath || meta?.iconPath || '';
+  const iconSrc = getProviderIconPath(meta);
   const altLabel = meta?.shortLabel || meta?.label || providerLabel || 'Provider';
 
   const providerText = `${provider || ''} ${meta?.label || ''} ${meta?.family || ''}`.toLowerCase();

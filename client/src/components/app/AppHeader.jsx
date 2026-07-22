@@ -14,6 +14,8 @@ import {
   PROVIDER_OPTIONS,
   getAlternateProvider,
   getProviderDefaultModel,
+  getProviderDisplayMeta,
+  getProviderIconPath,
   getProviderLabel,
   getProviderModelSuggestions,
   isProviderModelEnabled,
@@ -139,9 +141,22 @@ function getAgentState(agentId, { chat, workspaceMonitor, health }) {
 }
 
 function ProviderStatusGlyph({ providerId, label }) {
-  const providerText = `${providerId || ''} ${label || ''}`.toLowerCase();
+  const provider = getProviderDisplayMeta(providerId, label);
+  const providerText = `${providerId || ''} ${label || ''} ${provider?.family || ''}`.toLowerCase();
   if (providerText.includes('claude') || providerText.includes('anthropic')) {
     return <AnthropicMark />;
+  }
+
+  const iconSrc = getProviderIconPath(provider);
+  if (iconSrc) {
+    return (
+      <img
+        className="app-header-provider-status-logo"
+        src={iconSrc}
+        alt=""
+        aria-hidden="true"
+      />
+    );
   }
 
   return (
@@ -240,10 +255,11 @@ function ProviderLogo({ provider }) {
       </span>
     );
   }
-  if (provider?.iconPath) {
+  const iconSrc = getProviderIconPath(provider);
+  if (iconSrc) {
     return (
       <span className="app-header-provider-picker-logo">
-        <img src={provider.iconLightPath || provider.iconPath} alt="" aria-hidden="true" />
+        <img src={iconSrc} alt="" aria-hidden="true" />
       </span>
     );
   }

@@ -51,6 +51,7 @@ import {
 import {
   CODEX_SERVICE_TIER_OPTIONS,
   PROVIDER_OPTIONS,
+  getProviderIconPath,
   getProviderMeta,
   getReasoningEffortOptions,
   isProviderModelEnabled,
@@ -3147,7 +3148,7 @@ function PipelineDiagram({ agentId }) {
 // getProviderMeta → iconPath/iconLightPath); we do not invent a new mapping.
 //
 // HONESTY: we only render a real asset. When a provider's catalog entry has an
-// iconPath we render that file (preferring the light variant on this dark
+// iconPath we render that file (preferring the dark-surface variant on this
 // surface, matching AppHeader's ProviderLogo). When the entry has NO icon
 // (e.g. the LLM Gateway uses a runtime-model-family strategy with no static
 // asset) we fall back to a tasteful neutral monogram built from the provider's
@@ -3155,7 +3156,7 @@ function PipelineDiagram({ agentId }) {
 // cheap; a load error hides the broken image so we degrade to text-only.
 function ProviderModelLogo({ providerMeta, providerLabel }) {
   const [errored, setErrored] = useState(false);
-  const iconSrc = providerMeta?.iconLightPath || providerMeta?.iconPath || '';
+  const iconSrc = getProviderIconPath(providerMeta);
   const altLabel = providerMeta?.shortLabel || providerMeta?.label || providerLabel || 'Provider';
 
   if (iconSrc && !errored) {

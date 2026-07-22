@@ -135,6 +135,49 @@ export function getProviderMeta(provider) {
   return resolveProviderMeta(provider);
 }
 
+// Resolve provider identity for display-only surfaces without silently falling
+// back to the default provider. Health payloads sometimes provide only a model
+// name, so match both provider ids and governed model ids/labels.
+export function getProviderDisplayMeta(...identifiers) {
+  for (const identifier of identifiers) {
+    const normalized = String(identifier || '').trim().toLowerCase();
+    if (!normalized) continue;
+
+    const exactMatch = PROVIDER_CATALOG.find((entry) => [
+      entry.id,
+      entry.model,
+      entry.label,
+      entry.shortLabel,
+    ].some((value) => String(value || '').trim().toLowerCase() === normalized));
+    if (exactMatch) return exactMatch;
+  }
+
+  const combined = identifiers.map((value) => String(value || '').toLowerCase()).join(' ');
+  if (!combined.trim()) return null;
+
+  const familyId = combined.includes('claude') || combined.includes('anthropic')
+    ? 'anthropic'
+    : combined.includes('gpt') || combined.includes('openai') || combined.includes('codex')
+      ? 'codex'
+      : combined.includes('gemini') || combined.includes('gemma')
+        ? 'gemini'
+        : combined.includes('kimi') || combined.includes('moonshot')
+          ? 'kimi'
+          : combined.includes('lm-studio')
+            ? 'lm-studio'
+            : '';
+  return familyId ? (PROVIDER_MAP[familyId] || null) : null;
+}
+
+// iconPath is the asset intended for the app's dark surfaces; iconLightPath
+// is the contrasting variant for light backgrounds.
+export function getProviderIconPath(providerMeta, surface = 'dark') {
+  if (!providerMeta) return '';
+  return surface === 'light'
+    ? (providerMeta.iconLightPath || providerMeta.iconPath || '')
+    : (providerMeta.iconPath || providerMeta.iconLightPath || '');
+}
+
 export function getProviderCapabilities(providerOrFamily) {
   const meta = resolveProviderMeta(providerOrFamily);
   const defaultMeta = getDefaultProviderMeta();

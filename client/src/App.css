@@ -370,7 +370,10 @@ a:hover {
 }
 
 .app-header-provider-status-logo {
+  width: 15px;
+  height: 15px;
   flex: 0 0 auto;
+  object-fit: contain;
 }
 
 .app-header-provider-status-dot {

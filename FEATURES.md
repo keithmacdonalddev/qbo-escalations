@@ -263,3 +263,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: medium
 Special Feature: Provider Contract Change Watch - Extend model discovery beyond “a new ID exists” by creating a review packet when a provider changes a model line: replacement/deprecation status, reasoning and sampling rules, endpoint or credential differences, context/output limits, pricing, affected agent assignments, and the exact harness tests that must pass. It would never auto-enable the model; it would turn fast-moving vendor changes into one governed release decision and prevent the catalog, request builders, saved policy, documentation, and pickers from drifting apart.
+
+Date: 2026-07-21
+Time: 21:22 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: medium
+Special Feature: Execution Identity Verification - Attach the provider, model, transport, and fallback path that actually produced each agent result, then compare that evidence with what the workflow was configured to use. Unexpected fallbacks or routing mismatches would be visibly flagged before a human trusts or publishes the result, turning provider identity from a decorative label into auditable evidence.
