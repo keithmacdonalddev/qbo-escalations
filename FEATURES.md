@@ -298,3 +298,10 @@ Model: Codex GPT-5.6 Sol (xhigh)
 Is duplicate?: no
 Complexity: high
 Special Feature: Release Evidence Seal - When a release candidate is ready, create an immutable review packet binding the exact commit and dirty state, dependency lockfiles, check-profile and capability-map versions, child-report hashes, and browser artifacts. Any later code, config, map, or evidence change invalidates the seal and requires a new human-reviewed run; unlike the existing Completion Claim Verifier, this protects the chain of custody across an entire multi-run release decision.
+
+Date: 2026-07-22
+Time: 16:42 AST
+Model: Claude Opus 4.8
+Is duplicate?: no
+Complexity: high
+Special Feature: Consent Drift Protection - Whenever a human confirms a consequential agent action anywhere in the platform (starting a paid provider run, publishing a knowledge entry, sending an escalation response, changing spending limits), the app fingerprints exactly what the person reviewed — inputs, provider/model/cost basis, affected records, downstream impacts — and binds the confirmation to that fingerprint. If any of it drifts between review and execution (settings changed in another tab, another agent modified the record, prices or models changed), execution is refused and the person is shown precisely what changed before re-approving, with an audit trail of what was consented to versus what would have run. Phase 2 recovery already does this for one flow; this makes it a platform-wide governance primitive. Distinct from Release Evidence Seal (release-decision chain of custody, not per-action runtime consent) and Execution Identity Verification (compares actual vs. configured provider after a run, rather than refusing execution before it when the reviewed basis drifts).
