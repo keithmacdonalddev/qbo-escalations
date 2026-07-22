@@ -65,6 +65,7 @@ function IncompleteDetails({ evidence, acknowledging, onAcknowledge, acknowledge
         <strong>What can I trust</strong>
         {trusted.length > 0 && <p>Saved: {trusted.join(', ')}</p>}
         {noRepeatNeeded.length > 0 && <p>No repeat needed: {noRepeatNeeded.join(', ')}</p>}
+        {summary.supportingNote && <p>{summary.supportingNote}</p>}
       </div>
 
       <div className="v5-run-evidence__answer">
@@ -87,7 +88,7 @@ function IncompleteDetails({ evidence, acknowledging, onAcknowledge, acknowledge
   );
 }
 
-export default function EvidenceSummary({ runEvidence, acknowledged = false, acknowledging = false, acknowledgeError = '', onAcknowledge, onRefresh }) {
+export default function EvidenceSummary({ runEvidence, acknowledging = false, acknowledgeError = '', onAcknowledge, onRefresh }) {
   if (!runEvidence || runEvidence.state === 'idle') return null;
   if (runEvidence.state === 'loading') {
     return <div className="v5-run-evidence v5-run-evidence--neutral">Checking whether this run’s evidence was saved…</div>;
@@ -104,16 +105,25 @@ export default function EvidenceSummary({ runEvidence, acknowledged = false, ack
   const evidence = runEvidence.evidence;
   if (!evidence?.summary) return null;
   if (evidence.status === 'complete') {
-    return <div className="v5-run-evidence v5-run-evidence--complete">✓ {evidence.summary.headline}</div>;
+    return (
+      <div className="v5-run-evidence v5-run-evidence--complete">
+        <span>✓ {evidence.summary.headline}</span>
+        {evidence.summary.supportingNote && <span>{evidence.summary.supportingNote}</span>}
+      </div>
+    );
   }
   if (evidence.status !== 'incomplete') {
     return (
       <div className="v5-run-evidence v5-run-evidence--neutral">
-        {evidence.summary.headline} {evidence.summary.nextStep}
+        <span>{evidence.summary.headline} {evidence.summary.nextStep}</span>
+        {evidence.status === 'unknown' && (
+          <button type="button" className="v5-run-evidence__retry" onClick={onRefresh}>Check again</button>
+        )}
       </div>
     );
   }
 
+  const acknowledged = evidence.acknowledged === true;
   if (acknowledged) {
     return (
       <details className="v5-run-evidence v5-run-evidence--acknowledged">

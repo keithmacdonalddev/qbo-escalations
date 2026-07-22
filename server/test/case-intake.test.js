@@ -309,6 +309,13 @@ test('pipeline receipts ignore unknown fields, bound client strings, and preserv
   const stamped = stampCaseIntakeEvidence({ status: 'analyst-running', runs: [] }, normalized, {
     updatedAt: STARTED_AT,
   });
+  stamped.evidence.acknowledgedAt = STARTED_AT;
+  stamped.evidence.acknowledgedNote = 'Reviewed before retry.';
+  stamped.evidence.acknowledgedFingerprint = {
+    contractVersion: 1,
+    evidenceUpdatedAt: STARTED_AT.toISOString(),
+    missingCodes: ['TRIAGE_CARD'],
+  };
   const restamped = stampCaseIntakeEvidence(stamped, {
     analyst: { attempted: true, completed: true, messageSaved: true },
   }, { updatedAt: COMPLETED_AT });
@@ -317,4 +324,7 @@ test('pipeline receipts ignore unknown fields, bound client strings, and preserv
   assert.equal(restamped.evidence.receipts.parser.historySaveOk, false);
   assert.equal(restamped.evidence.receipts.triage.skipped, true);
   assert.equal(restamped.evidence.receipts.analyst.messageSaved, true);
+  assert.equal(restamped.evidence.acknowledgedNote, 'Reviewed before retry.');
+  assert.deepEqual(restamped.evidence.acknowledgedFingerprint, stamped.evidence.acknowledgedFingerprint);
+  assert.notEqual(new Date(restamped.evidence.updatedAt).toISOString(), STARTED_AT.toISOString());
 });

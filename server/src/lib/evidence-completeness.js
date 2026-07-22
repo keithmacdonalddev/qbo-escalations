@@ -1,12 +1,18 @@
 'use strict';
 
 const { PROVIDER_CATALOG } = require('../services/providers/catalog');
+const { RETENTION_KEYS, resolveRetentionMs } = require('./retention-config');
 
 const EVIDENCE_CONTRACT_VERSION = 1;
 const SETTLING_WINDOW_MS = 2 * 60 * 1000;
-const IMAGE_PARSE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
-const TRIAGE_RESULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const PROVIDER_PACKAGE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+const USER_RESULT_CODES = new Set([
+  'PARSED_FIELDS',
+  'CANONICAL_TEMPLATE',
+  'INV_SEARCH_RESULT',
+  'TRIAGE_CARD',
+  'ANALYST_MESSAGE',
+]);
 
 const PHASES = [
   'parse-template',
@@ -58,6 +64,29 @@ function toTimestamp(value) {
 
 function uniqueStrings(values) {
   return [...new Set(values.map((value) => safeString(value, '').trim()).filter(Boolean))];
+}
+
+function buildEvidenceAcknowledgementFingerprint({
+  contractVersion = EVIDENCE_CONTRACT_VERSION,
+  evidenceUpdatedAt,
+  missingCodes = [],
+} = {}) {
+  const updatedAtMs = toTimestamp(evidenceUpdatedAt);
+  return {
+    contractVersion: Number(contractVersion) || EVIDENCE_CONTRACT_VERSION,
+    evidenceUpdatedAt: updatedAtMs === null ? '' : new Date(updatedAtMs).toISOString(),
+    missingCodes: uniqueStrings(Array.isArray(missingCodes) ? missingCodes : []).sort(),
+  };
+}
+
+function evidenceAcknowledgementFingerprintMatches(stored, current) {
+  if (!isObject(stored) || !isObject(current)) return false;
+  const normalizedStored = buildEvidenceAcknowledgementFingerprint(stored);
+  const normalizedCurrent = buildEvidenceAcknowledgementFingerprint(current);
+  return normalizedStored.contractVersion === normalizedCurrent.contractVersion
+    && normalizedStored.evidenceUpdatedAt === normalizedCurrent.evidenceUpdatedAt
+    && normalizedStored.missingCodes.length === normalizedCurrent.missingCodes.length
+    && normalizedStored.missingCodes.every((code, index) => code === normalizedCurrent.missingCodes[index]);
 }
 
 function compactIds(ids) {
@@ -125,9 +154,23 @@ function getReceiptTimestamp(receipt, run, evidence, conversation) {
   return null;
 }
 
-function isLikelyExpired({ receipt, run, evidence, conversation, nowMs, ttlMs }) {
+function isLikelyExpired({ expiresAt, receipt, run, evidence, conversation, nowMs, retentionKey }) {
+  const actualExpiry = toTimestamp(expiresAt);
+  if (actualExpiry !== null) return nowMs >= actualExpiry;
   const savedAt = getReceiptTimestamp(receipt, run, evidence, conversation);
-  return savedAt !== null && nowMs - savedAt >= ttlMs;
+  return savedAt !== null && nowMs - savedAt >= resolveRetentionMs(retentionKey);
+}
+
+function traceMatchesAnalystReceipt(trace, analystReceipt) {
+  const receiptTraceId = safeString(analystReceipt?.traceId, '').trim();
+  const receiptRequestId = safeString(analystReceipt?.requestId, '').trim();
+  if (!receiptTraceId && !receiptRequestId) return false;
+  const traceId = safeString(trace?._id || trace?.id, '').trim();
+  const requestId = safeString(trace?.requestId, '').trim();
+  return Boolean(
+    (receiptTraceId && traceId === receiptTraceId)
+    || (receiptRequestId && requestId === receiptRequestId)
+  );
 }
 
 function getProviderReasoningCapability(providerId) {
@@ -328,12 +371,13 @@ function providerPackageArtifact({
   }
   if (packageId) {
     const expired = isLikelyExpired({
+      expiresAt: receipt?.providerPackageExpiresAt,
       receipt,
       run,
       evidence,
       conversation,
       nowMs,
-      ttlMs: PROVIDER_PACKAGE_TTL_MS,
+      retentionKey: RETENTION_KEYS.PROVIDER_CALL_PACKAGE,
     });
     return artifact({
       code,
@@ -343,7 +387,7 @@ function providerPackageArtifact({
       state: expired ? 'unverifiable' : 'confirmed',
       reason: expired ? 'evidence-expired-likely' : 'saved',
       explanation: expired
-        ? `${label} was saved, but its 30-day retention window has likely passed. The original work does not need to be repeated.`
+        ? `${label} was saved, but its configured retention window has passed or likely passed. The original work does not need to be repeated.`
         : `${label} has a saved package identifier.`,
       ids: { providerPackageId: packageId },
     });
@@ -521,22 +565,26 @@ function buildLegacyResult(conversation, now) {
     explanation: 'This session predates evidence receipts, so its completeness cannot be judged reliably. It is not marked incomplete.',
     ids: {},
   });
+  const acknowledgementFingerprint = buildEvidenceAcknowledgementFingerprint();
   return {
     status: 'unknown',
     settled: false,
+    settlingUntil: null,
     checkedAt: now.toISOString(),
     contractVersion: EVIDENCE_CONTRACT_VERSION,
+    acknowledged: false,
+    acknowledgementFingerprint,
     stages: [],
     artifacts: [legacyArtifact],
     missing: [],
     summary: {
       headline: 'Evidence completeness is unknown for this older session.',
-      savedCount: 0,
-      expectedCount: 0,
+      userResults: { savedCount: 0, expectedCount: 0 },
+      supportingNote: 'Supporting records cannot be verified for this older session.',
       trusted: [],
       atRisk: [],
       unverifiable: [legacyArtifact.label],
-      noRepeatNeeded: [legacyArtifact.label],
+      noRepeatNeeded: [],
       nextStep: 'No action is required now. Repeat work only if the original answer itself needs review.',
     },
     identifiers,
@@ -671,6 +719,7 @@ function evaluateEvidenceCompleteness({
   const invReceipt = receipts.inv || {};
   const triageReceipt = receipts.triage || {};
   const analystReceipt = receipts.analyst || {};
+  const matchingAnalystTraces = traces.filter((trace) => traceMatchesAnalystReceipt(trace, analystReceipt));
   const parserRun = runByPhase['parse-template'];
   const invRun = runByPhase['known-issue-search'];
   const triageRun = runByPhase.triage;
@@ -710,6 +759,7 @@ function evaluateEvidenceCompleteness({
   const analystMessagePresent = messagesAvailable
     ? Boolean(assistantMessage)
     : analystReceipt.messageSaved === true;
+  const analystContentProduced = analystReceipt.contentProduced === true;
 
   const artifacts = [];
   artifacts.push(outputArtifact({
@@ -757,8 +807,8 @@ function evaluateEvidenceCompleteness({
     label: 'Analyst answer in the conversation',
     stage: 'analyst',
     present: analystMessagePresent,
-    applicable: expectedByPhase.analyst && attemptedByPhase.analyst,
-    failed: analystFailed,
+    applicable: analystContentProduced || (expectedByPhase.analyst && attemptedByPhase.analyst),
+    failed: analystFailed && !analystContentProduced,
     settling: !finalIntakeStatus,
     ids: { traceId: analystReceipt.traceId, requestId: analystReceipt.requestId },
   }));
@@ -806,24 +856,36 @@ function evaluateEvidenceCompleteness({
       ids: { parseResultId: parserReceipt.resultId },
     }));
   } else if (imageParseResult) {
-    artifacts.push(artifact({
-      code: 'IMAGE_PARSE_RESULT',
-      label: 'Parser history record',
-      stage: 'parse-template',
-      kind: 'supporting',
-      state: 'confirmed',
-      reason: 'saved',
-      explanation: 'The parser history record is readable.',
-      ids: { parseResultId: imageParseResult._id || imageParseResult.id || parserReceipt.resultId },
-    }));
-  } else if (parserReceipt.historySaveOk === true && parserReceipt.resultId) {
-    const expired = imageParseResultProvided && isLikelyExpired({
+    const expired = isLikelyExpired({
+      expiresAt: imageParseResult.expiresAt || parserReceipt.expiresAt,
       receipt: parserReceipt,
       run: parserRun,
       evidence,
       conversation,
       nowMs,
-      ttlMs: IMAGE_PARSE_TTL_MS,
+      retentionKey: RETENTION_KEYS.IMAGE_PARSE_RESULT,
+    });
+    artifacts.push(artifact({
+      code: 'IMAGE_PARSE_RESULT',
+      label: 'Parser history record',
+      stage: 'parse-template',
+      kind: 'supporting',
+      state: expired ? 'unverifiable' : 'confirmed',
+      reason: expired ? 'evidence-expired-likely' : 'saved',
+      explanation: expired
+        ? 'The parser history record reached its configured expiry. The parse does not need to be repeated.'
+        : 'The parser history record is readable.',
+      ids: { parseResultId: imageParseResult._id || imageParseResult.id || parserReceipt.resultId },
+    }));
+  } else if (parserReceipt.historySaveOk === true && parserReceipt.resultId) {
+    const expired = imageParseResultProvided && isLikelyExpired({
+      expiresAt: parserReceipt.expiresAt,
+      receipt: parserReceipt,
+      run: parserRun,
+      evidence,
+      conversation,
+      nowMs,
+      retentionKey: RETENTION_KEYS.IMAGE_PARSE_RESULT,
     });
     artifacts.push(artifact({
       code: 'IMAGE_PARSE_RESULT',
@@ -833,7 +895,7 @@ function evaluateEvidenceCompleteness({
       state: 'unverifiable',
       reason: expired ? 'evidence-expired-likely' : 'client-reported',
       explanation: expired
-        ? 'The parser history record was saved, but its 90-day retention window has likely passed. The parse does not need to be repeated.'
+        ? 'The parser history record was saved, but its configured retention window has passed or likely passed. The parse does not need to be repeated.'
         : 'The parser history save was reported by the workflow, not independently confirmed because the record is not readable.',
       ids: { parseResultId: parserReceipt.resultId },
     }));
@@ -884,14 +946,25 @@ function evaluateEvidenceCompleteness({
       ids: { triageRunId: triageReceipt.standaloneRunId },
     }));
   } else if (triageResult) {
+    const expired = isLikelyExpired({
+      expiresAt: triageResult.expiresAt || triageReceipt.expiresAt,
+      receipt: triageReceipt,
+      run: triageRun,
+      evidence,
+      conversation,
+      nowMs,
+      retentionKey: RETENTION_KEYS.TRIAGE_RESULT,
+    });
     artifacts.push(artifact({
       code: 'TRIAGE_RESULT',
       label: 'Triage history record',
       stage: 'triage',
       kind: 'supporting',
-      state: 'confirmed',
-      reason: 'saved',
-      explanation: 'The triage history record is readable.',
+      state: expired ? 'unverifiable' : 'confirmed',
+      reason: expired ? 'evidence-expired-likely' : 'saved',
+      explanation: expired
+        ? 'The triage history record reached its configured expiry. Triage does not need to be repeated.'
+        : 'The triage history record is readable.',
       ids: {
         triageResultId: triageResult._id || triageResult.id || triageReceipt.savedResultId,
         triageRunId: triageResult.runId || triageReceipt.standaloneRunId,
@@ -900,12 +973,13 @@ function evaluateEvidenceCompleteness({
   } else if (triageReceipt.savedResultId || triageReceipt.standaloneRunId) {
     const triageSaveProven = triageReceipt.resultSaveOk === true || Boolean(triageReceipt.savedResultId);
     const expired = triageResultProvided && triageSaveProven && isLikelyExpired({
+      expiresAt: triageReceipt.expiresAt,
       receipt: triageReceipt,
       run: triageRun,
       evidence,
       conversation,
       nowMs,
-      ttlMs: TRIAGE_RESULT_TTL_MS,
+      retentionKey: RETENTION_KEYS.TRIAGE_RESULT,
     });
     artifacts.push(artifact({
       code: 'TRIAGE_RESULT',
@@ -915,7 +989,7 @@ function evaluateEvidenceCompleteness({
       state: !triageResultProvided && triageSaveProven ? 'confirmed' : 'unverifiable',
       reason: expired ? 'evidence-expired-likely' : triageSaveProven ? 'saved' : 'legacy-unknowable',
       explanation: expired
-        ? 'The triage history record was saved, but its 30-day retention window has likely passed. Triage does not need to be repeated.'
+        ? 'The triage history record was saved, but its configured retention window has passed or likely passed. Triage does not need to be repeated.'
         : triageResultProvided && triageSaveProven
           ? 'The triage history identifier was saved, but the record is not currently readable.'
           : triageResultProvided
@@ -1045,7 +1119,7 @@ function evaluateEvidenceCompleteness({
       explanation: 'The AI request trace save was reported as failed.',
       ids: { traceId: analystReceipt.traceId, requestId: analystReceipt.requestId },
     }));
-  } else if (traces.length > 0) {
+  } else if (matchingAnalystTraces.length > 0) {
     artifacts.push(artifact({
       code: 'AI_TRACE',
       label: 'AI request trace',
@@ -1053,10 +1127,10 @@ function evaluateEvidenceCompleteness({
       kind: 'supporting',
       state: 'confirmed',
       reason: 'saved',
-      explanation: 'At least one AI request trace is readable for this conversation.',
+      explanation: 'An AI request trace matching the current analyst run is readable.',
       ids: {
-        traceIds: uniqueStrings(traces.map((trace) => trace?._id || trace?.id)),
-        requestIds: uniqueStrings(traces.map((trace) => trace?.requestId)),
+        traceIds: uniqueStrings(matchingAnalystTraces.map((trace) => trace?._id || trace?.id)),
+        requestIds: uniqueStrings(matchingAnalystTraces.map((trace) => trace?.requestId)),
       },
     }));
   } else if (!tracesProvided && analystReceipt.traceId) {
@@ -1157,17 +1231,26 @@ function evaluateEvidenceCompleteness({
       : unreceiptedOccurredPhases.length > 0
         ? 'unknown'
         : 'complete';
-  const expectedArtifacts = evaluatedArtifacts.filter((item) => item.state !== 'not-applicable');
-  const trusted = evaluatedArtifacts.filter((item) => item.state === 'confirmed').map((item) => item.label);
+  const userResultArtifacts = evaluatedArtifacts.filter((item) => USER_RESULT_CODES.has(item.code));
+  const expectedUserResults = userResultArtifacts.filter((item) => item.state !== 'not-applicable');
+  const savedUserResults = expectedUserResults.filter((item) => item.state === 'confirmed');
+  const supportingIssues = evaluatedArtifacts.filter((item) => (
+    !USER_RESULT_CODES.has(item.code)
+    && (item.state === 'missing' || item.state === 'pending' || item.state === 'unverifiable')
+  ));
+  const trusted = userResultArtifacts.filter((item) => item.state === 'confirmed').map((item) => item.label);
   const atRisk = evaluatedArtifacts
     .filter((item) => item.state === 'missing' || item.state === 'pending')
     .map((item) => item.label);
   const unverifiable = evaluatedArtifacts.filter((item) => item.state === 'unverifiable').map((item) => item.label);
-  const noRepeatNeeded = evaluatedArtifacts
-    .filter((item) => item.state === 'confirmed' || item.state === 'not-applicable' || item.state === 'unverifiable')
+  const noRepeatNeeded = userResultArtifacts
+    .filter((item) => item.state === 'not-applicable' || item.state === 'unverifiable')
     .map((item) => item.label);
+  const supportingNote = supportingIssues.length > 0
+    ? `${supportingIssues.length} supporting record${supportingIssues.length === 1 ? '' : 's'} could not be verified.`
+    : 'All applicable supporting records were verified.';
 
-  let headline = 'Required session evidence is saved.';
+  let headline = `Workflow complete — ${savedUserResults.length} of ${expectedUserResults.length} expected results safely saved.`;
   let nextStep = 'No repeat is needed.';
   if (!settled) {
     headline = 'Evidence is still settling, so completeness is not known yet.';
@@ -1179,22 +1262,42 @@ function evaluateEvidenceCompleteness({
     headline = 'Some completed stages predate their evidence receipts, so completeness is unknown.';
     nextStep = 'No repeat is needed unless the underlying answer itself needs review.';
   } else if (unverifiable.length > 0) {
-    headline = 'Required session evidence is saved; some supporting evidence cannot be verified.';
     nextStep = 'No repeat is needed unless the underlying answer itself needs review.';
   }
+
+  const acknowledgementFingerprint = buildEvidenceAcknowledgementFingerprint({
+    contractVersion: EVIDENCE_CONTRACT_VERSION,
+    evidenceUpdatedAt: evidence.updatedAt,
+    missingCodes: missing.map((item) => item.code),
+  });
+  const acknowledged = status === 'incomplete'
+    && Boolean(evidence.acknowledgedAt)
+    && evidenceAcknowledgementFingerprintMatches(
+      evidence.acknowledgedFingerprint,
+      acknowledgementFingerprint
+    );
+  const settlingUntil = !settled && analystCompletedAt !== null
+    ? new Date(analystCompletedAt + SETTLING_WINDOW_MS).toISOString()
+    : null;
 
   return {
     status,
     settled,
+    settlingUntil,
     checkedAt: now.toISOString(),
     contractVersion: EVIDENCE_CONTRACT_VERSION,
+    acknowledged,
+    acknowledgementFingerprint,
     stages,
     artifacts: evaluatedArtifacts,
     missing,
     summary: {
       headline,
-      savedCount: trusted.length,
-      expectedCount: expectedArtifacts.length,
+      userResults: {
+        savedCount: savedUserResults.length,
+        expectedCount: expectedUserResults.length,
+      },
+      supportingNote,
       trusted,
       atRisk,
       unverifiable,
@@ -1218,6 +1321,8 @@ function evaluateEvidenceStatusFromConversation(conversation, now) {
 
 module.exports = {
   EVIDENCE_CONTRACT_VERSION,
+  buildEvidenceAcknowledgementFingerprint,
+  evidenceAcknowledgementFingerprintMatches,
   evaluateEvidenceCompleteness,
   evaluateEvidenceStatusFromConversation,
 };

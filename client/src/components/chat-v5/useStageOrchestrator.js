@@ -151,6 +151,8 @@ function buildEmptyAnalystState() {
     isStreaming: false,
     error: null,
     conversationId: null,
+    unsavedText: '',
+    unsavedError: '',
   };
 }
 
@@ -379,6 +381,8 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
   const conversationIdRef = useRef(null);
   const tokenRef = useRef(0);
   const evidenceFetchSequenceRef = useRef(0);
+  const evidenceRecheckTimerRef = useRef(null);
+  const evidenceAutoRecheckKeyRef = useRef('');
   const streamingTextRef = useRef('');
   const toastedStageKeysRef = useRef(new Set());
   // Deferred widget-switch timer scheduled in captureImage(). Tracked so it can
@@ -404,6 +408,11 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
       clearTimeout(widgetSwitchTimerRef.current);
       widgetSwitchTimerRef.current = null;
     }
+    if (evidenceRecheckTimerRef.current) {
+      clearTimeout(evidenceRecheckTimerRef.current);
+      evidenceRecheckTimerRef.current = null;
+    }
+    evidenceAutoRecheckKeyRef.current = '';
     streamingTextRef.current = '';
     toastedStageKeysRef.current.clear();
     imageCapturedRef.current = false;
@@ -804,8 +813,19 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
 
   const handleError = useCallback((err) => {
     const normalized = normalizeError(err);
+    const visibleText = streamingTextRef.current;
+    const completedButUnsaved = normalized.code === 'ONDONE_SAVE_FAILED' && Boolean(visibleText.trim());
     setRequestError(normalized);
-    setAnalyst((prev) => ({ ...prev, isStreaming: false, error: normalized }));
+    setAnalyst((prev) => ({
+      ...prev,
+      isStreaming: false,
+      error: normalized,
+      ...(completedButUnsaved ? {
+        text: visibleText,
+        unsavedText: visibleText,
+        unsavedError: normalized.message,
+      } : {}),
+    }));
     markFailureInProgress(normalized);
     streamingTextRef.current = '';
     // Failed chat legs still settle — persist the triage result so the
@@ -1059,6 +1079,11 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     const parseAbort = new AbortController();
     parseAbortRef.current = parseAbort;
     streamingTextRef.current = '';
+    if (evidenceRecheckTimerRef.current) {
+      clearTimeout(evidenceRecheckTimerRef.current);
+      evidenceRecheckTimerRef.current = null;
+    }
+    evidenceAutoRecheckKeyRef.current = '';
     // Fresh pipeline run: drop any stale triage persistence state from a
     // previous run so this run's result is stashed and posted on its own.
     pendingTriagePersistRef.current = null;
@@ -1289,6 +1314,12 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     if (!clean) return;
     setChatLog((prev) => [...prev, { role: 'operator', text: clean }, { role: 'analyst-stream', text: '', isStreaming: true }]);
     streamingTextRef.current = '';
+    if (evidenceRecheckTimerRef.current) {
+      clearTimeout(evidenceRecheckTimerRef.current);
+      evidenceRecheckTimerRef.current = null;
+    }
+    evidenceAutoRecheckKeyRef.current = '';
+    setRunEvidence(INITIAL_RUN_EVIDENCE);
     setAnalyst((prev) => ({ ...prev, isStreaming: true, text: '', error: null }));
 
     const token = ++tokenRef.current;
@@ -1353,7 +1384,18 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
       onError: (err) => {
         if (tokenRef.current !== token) return;
         const normalized = normalizeError(err);
-        setAnalyst((prev) => ({ ...prev, isStreaming: false, error: normalized }));
+        const visibleText = streamingTextRef.current;
+        const completedButUnsaved = normalized.code === 'ONDONE_SAVE_FAILED' && Boolean(visibleText.trim());
+        setAnalyst((prev) => ({
+          ...prev,
+          isStreaming: false,
+          error: normalized,
+          ...(completedButUnsaved ? {
+            text: visibleText,
+            unsavedText: visibleText,
+            unsavedError: normalized.message,
+          } : {}),
+        }));
         setChatLog((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
@@ -1550,6 +1592,33 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     if ((!resumedSessionSettled && (!mainSettled || !triageSettled)) || runEvidence.state !== 'idle') return;
     void refreshRunEvidence();
   }, [caseIntake?.status, refreshRunEvidence, runEvidence.state, stageState.main.status, triageConversationSave.state]);
+
+  useEffect(() => {
+    if (evidenceRecheckTimerRef.current) {
+      clearTimeout(evidenceRecheckTimerRef.current);
+      evidenceRecheckTimerRef.current = null;
+    }
+    const evidence = runEvidence.state === 'ready' ? runEvidence.evidence : null;
+    const settlingUntilMs = Date.parse(evidence?.settlingUntil || '');
+    if (evidence?.status !== 'unknown' || !Number.isFinite(settlingUntilMs)) return undefined;
+
+    const id = conversationIdRef.current || conversationId || resumeTargetId || 'unsaved';
+    const recheckKey = `${id}:${evidence.settlingUntil}`;
+    if (evidenceAutoRecheckKeyRef.current === recheckKey) return undefined;
+
+    const delayMs = Math.max(0, settlingUntilMs - Date.now() + 50);
+    evidenceRecheckTimerRef.current = setTimeout(() => {
+      evidenceRecheckTimerRef.current = null;
+      evidenceAutoRecheckKeyRef.current = recheckKey;
+      void refreshRunEvidence();
+    }, delayMs);
+    return () => {
+      if (evidenceRecheckTimerRef.current) {
+        clearTimeout(evidenceRecheckTimerRef.current);
+        evidenceRecheckTimerRef.current = null;
+      }
+    };
+  }, [conversationId, refreshRunEvidence, resumeTargetId, runEvidence.evidence, runEvidence.state]);
 
   return {
     imageCaptured,

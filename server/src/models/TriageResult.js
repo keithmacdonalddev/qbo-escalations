@@ -1,12 +1,9 @@
 'use strict';
 
 const mongoose = require('mongoose');
+const { RETENTION_KEYS, resolveRetentionDays } = require('../lib/retention-config');
 
-const DEFAULT_TTL_DAYS = 30;
-const ttlDays = (() => {
-  const env = Number.parseInt(process.env.TRIAGE_RESULT_TTL_DAYS, 10);
-  return Number.isFinite(env) && env > 0 ? env : DEFAULT_TTL_DAYS;
-})();
+const ttlDays = resolveRetentionDays(RETENTION_KEYS.TRIAGE_RESULT);
 
 const triageResultSchema = new mongoose.Schema({
   agentId: { type: String, default: 'triage-agent', index: true },

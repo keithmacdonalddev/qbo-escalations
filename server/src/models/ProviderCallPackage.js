@@ -1,6 +1,7 @@
 'use strict';
 
 const mongoose = require('mongoose');
+const { RETENTION_KEYS, resolveRetentionDays } = require('../lib/retention-config');
 
 // Forensic capture data — moderate default retention. Env-tunable. Mirrors the
 // UsageLog TTL pattern (dedicated expiresAt field + expireAfterSeconds:0 index)
@@ -8,11 +9,7 @@ const mongoose = require('mongoose');
 // BACKLOG: large payloads are also externalized to disk under
 // server/data/provider-call-packages/...; this Mongo TTL deletes the document
 // but NOT the on-disk files. An on-disk cleanup job is still needed.
-const DEFAULT_TTL_DAYS = 30;
-const ttlDays = (() => {
-  const env = Number.parseInt(process.env.PROVIDER_CALL_PACKAGE_TTL_DAYS, 10);
-  return Number.isFinite(env) && env > 0 ? env : DEFAULT_TTL_DAYS;
-})();
+const ttlDays = resolveRetentionDays(RETENTION_KEYS.PROVIDER_CALL_PACKAGE);
 
 const strictSubdocumentOptions = {
   _id: false,

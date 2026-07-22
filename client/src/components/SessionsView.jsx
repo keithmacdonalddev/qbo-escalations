@@ -148,7 +148,6 @@ export default function SessionsView({ sessionId = null }) {
   const [editTitle, setEditTitle] = useState('');
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [evidenceState, setEvidenceState] = useState({ state: 'idle', evidence: null, error: '' });
-  const [evidenceAcknowledged, setEvidenceAcknowledged] = useState(false);
   const [evidenceAcknowledging, setEvidenceAcknowledging] = useState(false);
   const fetchGenRef = useRef(0);
   const evidenceFetchGenRef = useRef(0);
@@ -206,14 +205,12 @@ export default function SessionsView({ sessionId = null }) {
       setActiveSession(null);
       setTraces([]);
       setActiveTab('overview');
-      setEvidenceAcknowledged(false);
       return;
     }
 
     let cancelled = false;
     setLoadingDetail(true);
     setActiveTab('overview');
-    setEvidenceAcknowledged(false);
     Promise.all([
       getConversation(sessionId),
       getConversationTraces(sessionId).catch(() => []),
@@ -221,7 +218,6 @@ export default function SessionsView({ sessionId = null }) {
       if (cancelled) return;
       setActiveSession(session);
       setTraces(Array.isArray(traceList) ? traceList : []);
-      setEvidenceAcknowledged(Boolean(session?.caseIntake?.evidence?.acknowledgedAt));
     }).catch(() => {
       if (cancelled) return;
       setActiveSession(null);
@@ -245,7 +241,6 @@ export default function SessionsView({ sessionId = null }) {
     setEvidenceAcknowledging(true);
     try {
       await acknowledgeConversationEvidence(sessionId);
-      setEvidenceAcknowledged(true);
       await loadEvidence(sessionId, true);
     } catch {
       toast.error('The evidence warning could not be acknowledged.');
@@ -406,7 +401,6 @@ export default function SessionsView({ sessionId = null }) {
           activeTab={activeTab}
           setActiveTab={setActiveTab}
           evidenceState={evidenceState}
-          evidenceAcknowledged={evidenceAcknowledged}
           evidenceAcknowledging={evidenceAcknowledging}
           onAcknowledgeEvidence={acknowledgeEvidence}
           onRefreshEvidence={() => loadEvidence(sessionId, true)}
@@ -541,7 +535,6 @@ function SessionDetail({
   activeTab,
   setActiveTab,
   evidenceState,
-  evidenceAcknowledged,
   evidenceAcknowledging,
   onAcknowledgeEvidence,
   onRefreshEvidence,
@@ -592,7 +585,6 @@ function SessionDetail({
       <div className="session-tab-panel">
         {renderTab(activeTab, session, traces, summary, {
           evidenceState,
-          evidenceAcknowledged,
           evidenceAcknowledging,
           onAcknowledgeEvidence,
           onRefreshEvidence,
@@ -855,6 +847,7 @@ function EvidenceOverviewLine({ evidenceState }) {
   return (
     <div className={`session-evidence-line is-${evidence.status}`}>
       {evidence.status === 'complete' ? '✓ ' : ''}{evidence.summary.headline}
+      {evidence.summary.supportingNote ? ` ${evidence.summary.supportingNote}` : ''}
     </div>
   );
 }
@@ -905,7 +898,7 @@ function SessionEvidenceTechnical({ evidence }) {
   );
 }
 
-function EvidenceAuditSection({ evidenceState, acknowledged, acknowledging, onAcknowledge, onRefresh }) {
+function EvidenceAuditSection({ evidenceState, acknowledging, onAcknowledge, onRefresh }) {
   if (!evidenceState || evidenceState.state === 'idle' || evidenceState.state === 'loading') {
     return (
       <section className="session-evidence-audit">
@@ -925,6 +918,7 @@ function EvidenceAuditSection({ evidenceState, acknowledged, acknowledging, onAc
   }
 
   const evidence = evidenceState.evidence;
+  const acknowledged = evidence?.acknowledged === true;
   const stages = Array.isArray(evidence?.stages) ? evidence.stages : [];
   const artifacts = Array.isArray(evidence?.artifacts) ? evidence.artifacts : [];
   const groups = [
@@ -1002,7 +996,6 @@ function AuditTab({
   session,
   traces,
   evidenceState,
-  evidenceAcknowledged,
   evidenceAcknowledging,
   onAcknowledgeEvidence,
   onRefreshEvidence,
@@ -1011,7 +1004,6 @@ function AuditTab({
     <div className="session-stack">
       <EvidenceAuditSection
         evidenceState={evidenceState}
-        acknowledged={evidenceAcknowledged}
         acknowledging={evidenceAcknowledging}
         onAcknowledge={onAcknowledgeEvidence}
         onRefresh={onRefreshEvidence}

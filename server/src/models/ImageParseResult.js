@@ -1,16 +1,13 @@
 'use strict';
 
 const mongoose = require('mongoose');
+const { RETENTION_KEYS, resolveRetentionDays } = require('../lib/retention-config');
 
 // Operational history — longer default retention than the disposable test
 // collections. Env-tunable. Mirrors the UsageLog TTL pattern (dedicated
 // expiresAt field + expireAfterSeconds:0 index) to avoid conflicting with the
 // existing { createdAt: -1 } query index.
-const DEFAULT_TTL_DAYS = 90;
-const ttlDays = (() => {
-  const env = Number.parseInt(process.env.IMAGE_PARSE_RESULT_TTL_DAYS, 10);
-  return Number.isFinite(env) && env > 0 ? env : DEFAULT_TTL_DAYS;
-})();
+const ttlDays = resolveRetentionDays(RETENTION_KEYS.IMAGE_PARSE_RESULT);
 
 const imageParseResultSchema = new mongoose.Schema({
   // Request context

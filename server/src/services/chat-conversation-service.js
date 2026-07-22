@@ -164,6 +164,7 @@ async function getConversationEvidence(id, { now = new Date() } = {}) {
 
   const parserReceipt = conversation.caseIntake?.evidence?.receipts?.parser || {};
   const triageReceipt = conversation.caseIntake?.evidence?.receipts?.triage || {};
+  const analystReceipt = conversation.caseIntake?.evidence?.receipts?.analyst || {};
   const parseResultId = safeString(parserReceipt.resultId, '').trim();
   const triageResultId = safeString(triageReceipt.savedResultId, '').trim();
   const standaloneRunId = safeString(triageReceipt.standaloneRunId, '').trim();
@@ -187,10 +188,22 @@ async function getConversationEvidence(id, { now = new Date() } = {}) {
       .catch(() => null)
     : Promise.resolve(null);
 
-  const tracesPromise = AiTrace.find({ conversationId: conversation._id })
-    .sort({ createdAt: -1 })
-    .lean()
-    .catch(() => []);
+  const traceFilters = [];
+  const analystTraceId = safeString(analystReceipt.traceId, '').trim();
+  const analystRequestId = safeString(analystReceipt.requestId, '').trim();
+  if (analystTraceId && mongoose.isValidObjectId(analystTraceId)) {
+    traceFilters.push({ _id: analystTraceId });
+  }
+  if (analystRequestId) traceFilters.push({ requestId: analystRequestId });
+  const tracesPromise = traceFilters.length > 0
+    ? AiTrace.find({
+        conversationId: conversation._id,
+        $or: traceFilters,
+      })
+      .sort({ createdAt: -1 })
+      .lean()
+      .catch(() => [])
+    : Promise.resolve([]);
 
   const [imageParseResult, triageResult, traces] = await Promise.all([
     imageParsePromise,
@@ -219,12 +232,15 @@ async function acknowledgeConversationEvidence(id, { acknowledged, acknowledgedN
   const note = typeof acknowledgedNote === 'string'
     ? acknowledgedNote.trim().slice(0, 1000)
     : '';
+  const currentEvidence = await getConversationEvidence(id);
+  const fingerprint = currentEvidence.acknowledgementFingerprint;
   const conversation = await Conversation.findByIdAndUpdate(
     id,
     {
       $set: {
         'caseIntake.evidence.acknowledgedAt': acknowledgedAt,
         'caseIntake.evidence.acknowledgedNote': note,
+        'caseIntake.evidence.acknowledgedFingerprint': fingerprint,
       },
     },
     { returnDocument: 'after' }
@@ -236,6 +252,7 @@ async function acknowledgeConversationEvidence(id, { acknowledged, acknowledgedN
   return {
     acknowledgedAt: conversation.caseIntake?.evidence?.acknowledgedAt || acknowledgedAt,
     acknowledgedNote: conversation.caseIntake?.evidence?.acknowledgedNote || '',
+    fingerprint: conversation.caseIntake?.evidence?.acknowledgedFingerprint || fingerprint,
   };
 }
 

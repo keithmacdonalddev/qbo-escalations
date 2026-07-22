@@ -42,7 +42,7 @@ export default function useAppRouteState({ chatConversationId, onRouteChange } =
       if (
         discardsCurrentChat(previous, next)
         && hasUnsavedWork()
-        && !window.confirm('This triage card was not saved and this screen is the only copy. Copy or download it before leaving. Leave anyway?')
+        && !window.confirm('An AI result was not saved and this screen may hold the only copy. Copy or download it before leaving. Leave anyway?')
       ) {
         window.history.replaceState(null, '', currentHashRef.current || '#/chat');
         return;

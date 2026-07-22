@@ -110,6 +110,7 @@ async function persistRetryAnalystFailure(conversation, {
   errorCode,
   errorMessage,
   directUpdate = false,
+  contentProduced = false,
 } = {}) {
   if (!conversation.caseIntake || conversation.caseIntake.status === 'none') return;
   const completedAt = new Date();
@@ -123,6 +124,9 @@ async function persistRetryAnalystFailure(conversation, {
       completed: false,
       failed: true,
       messageSaved: false,
+      // Provider failures/aborts may leave only partial streamed text, so they
+      // keep the default false. Only an onDone persistence failure passes true.
+      contentProduced: contentProduced === true,
       thinkingCaptured: false,
       traceId: safeString(traceId, ''),
       requestId,
@@ -1687,6 +1691,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
               completed: false,
               failed: true,
               messageSaved: false,
+              contentProduced: true,
               thinkingCaptured: false,
               traceId: trace ? trace._id.toString() : '',
               requestId: req.requestId,
@@ -3010,6 +3015,7 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
           errorCode: 'ONDONE_SAVE_FAILED',
           errorMessage: onDoneErr.message || 'Failed to save retried chat conversation',
           directUpdate: true,
+          contentProduced: true,
         });
         try {
           res.write('event: error\ndata: ' + JSON.stringify({

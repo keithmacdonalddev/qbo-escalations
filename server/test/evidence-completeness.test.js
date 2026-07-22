@@ -18,6 +18,7 @@ const {
   EVIDENCE_CONTRACT_VERSION,
   evaluateEvidenceCompleteness,
 } = require('../src/lib/evidence-completeness');
+const { stampCaseIntakeEvidence } = require('../src/lib/case-intake');
 const { conversationsRouter } = require('../src/routes/chat');
 
 const NOW = new Date('2026-07-20T12:00:00.000Z');
@@ -159,8 +160,11 @@ test('complete successful pipeline reports complete with correct saved and expec
   assert.equal(result.status, 'complete');
   assert.equal(result.settled, true);
   assert.equal(result.contractVersion, 1);
-  assert.equal(result.summary.savedCount, 18);
-  assert.equal(result.summary.expectedCount, 20);
+  assert.deepEqual(result.summary.userResults, { savedCount: 5, expectedCount: 5 });
+  assert.equal(result.summary.headline, 'Workflow complete — 5 of 5 expected results safely saved.');
+  assert.equal(result.summary.supportingNote, '2 supporting records could not be verified.');
+  assert.equal(result.summary.trusted.length, 5);
+  assert.deepEqual(result.summary.trusted.filter((label) => result.summary.noRepeatNeeded.includes(label)), []);
   assert.deepEqual(result.missing, []);
   assert.equal(artifactByCode(result, 'INV_PROVIDER_PACKAGE').state, 'unverifiable');
   assert.equal(artifactByCode(result, 'ANALYST_PROVIDER_PACKAGE').state, 'unverifiable');
@@ -176,6 +180,7 @@ test('planned completed triage without a saved card is incomplete', () => {
   const result = evaluate(fixture);
 
   assert.equal(result.status, 'incomplete');
+  assert.deepEqual(result.summary.userResults, { savedCount: 4, expectedCount: 5 });
   assert.equal(artifactByCode(result, 'TRIAGE_CARD').state, 'missing');
   assert.ok(result.missing.some((item) => item.code === 'TRIAGE_CARD'));
 });
@@ -196,6 +201,7 @@ test('deferred triage inside the settling window remains unknown with pending ar
 
   assert.equal(result.status, 'unknown');
   assert.equal(result.settled, false);
+  assert.equal(result.settlingUntil, new Date(NOW.getTime() + 90_000).toISOString());
   assert.equal(artifactByCode(result, 'TRIAGE_CARD').state, 'pending');
   assert.equal(artifactByCode(result, 'TRIAGE_RUN').state, 'pending');
   assert.equal(artifactByCode(result, 'TRIAGE_RESULT').state, 'pending');
@@ -243,7 +249,7 @@ test('deliberately skipped triage and INV are not missing', () => {
   assert.equal(result.missing.some((item) => item.stage === 'triage'), false);
 });
 
-test('failed analyst stage records honest failure without faking an answer artifact', () => {
+test('provider-mid-failure records honest failure without faking an answer artifact', () => {
   const fixture = makeCompleteFixture();
   fixture.conversation.caseIntake.status = 'failed';
   fixture.conversation.messages = fixture.conversation.messages.filter((message) => message.role !== 'assistant');
@@ -270,6 +276,100 @@ test('failed analyst stage records honest failure without faking an answer artif
   assert.equal(message.state, 'not-applicable');
   assert.equal(message.reason, 'not-produced');
   assert.equal(artifactByCode(result, 'ANALYST_RUN').state, 'confirmed');
+});
+
+test('produced analyst answer whose final save failed is incomplete', () => {
+  const fixture = makeCompleteFixture();
+  fixture.conversation.caseIntake.status = 'failed';
+  fixture.conversation.messages = fixture.conversation.messages.filter((message) => message.role !== 'assistant');
+  const analystRun = fixture.conversation.caseIntake.runs.find((run) => run.phase === 'analyst');
+  analystRun.status = 'failed';
+  analystRun.detail = { code: 'ONDONE_SAVE_FAILED', message: 'Final save failed' };
+  fixture.conversation.caseIntake.evidence.receipts.analyst = {
+    attempted: true,
+    completed: false,
+    failed: true,
+    contentProduced: true,
+    messageSaved: false,
+    traceId: fixture.traces[0]._id,
+    requestId: fixture.traces[0].requestId,
+    provider: 'claude',
+    errorCode: 'ONDONE_SAVE_FAILED',
+    completedAt: COMPLETED_AT,
+  };
+
+  const result = evaluate(fixture);
+  const message = artifactByCode(result, 'ANALYST_MESSAGE');
+
+  assert.equal(result.status, 'incomplete');
+  assert.equal(message.state, 'missing');
+  assert.equal(message.reason, 'produced-not-saved');
+  assert.ok(result.missing.some((item) => item.code === 'ANALYST_MESSAGE'));
+});
+
+test('only a trace matching the current analyst receipt confirms AI trace evidence', () => {
+  const fixture = makeCompleteFixture();
+  fixture.traces = [{
+    _id: new mongoose.Types.ObjectId().toString(),
+    requestId: 'an-old-request',
+    status: 'ok',
+  }];
+
+  const unmatched = evaluate(fixture);
+  assert.equal(artifactByCode(unmatched, 'AI_TRACE').state, 'unverifiable');
+
+  fixture.traces.push({
+    _id: fixture.conversation.caseIntake.evidence.receipts.analyst.traceId,
+    requestId: fixture.conversation.caseIntake.evidence.receipts.analyst.requestId,
+    status: 'ok',
+  });
+  const matched = evaluate(fixture);
+  assert.equal(artifactByCode(matched, 'AI_TRACE').state, 'confirmed');
+});
+
+test('acknowledgement applies only to the matching current finding fingerprint', () => {
+  const fixture = makeCompleteFixture();
+  fixture.conversation.caseIntake.triageCard = null;
+  fixture.conversation.caseIntake.runs = fixture.conversation.caseIntake.runs
+    .filter((run) => run.phase !== 'triage');
+  fixture.conversation.caseIntake.evidence.receipts.triage.cardSaved = false;
+
+  const beforeAck = evaluate(fixture);
+  assert.equal(beforeAck.status, 'incomplete');
+  assert.equal(beforeAck.acknowledged, false);
+
+  fixture.conversation.caseIntake.evidence.acknowledgedAt = NOW;
+  fixture.conversation.caseIntake.evidence.acknowledgedNote = 'Reviewed.';
+  fixture.conversation.caseIntake.evidence.acknowledgedFingerprint = beforeAck.acknowledgementFingerprint;
+  assert.equal(evaluate(fixture).acknowledged, true);
+
+  fixture.conversation.caseIntake = stampCaseIntakeEvidence(
+    fixture.conversation.caseIntake,
+    {
+      analyst: {
+        attempted: true,
+        completed: false,
+        failed: true,
+        contentProduced: true,
+        messageSaved: false,
+        errorCode: 'ONDONE_SAVE_FAILED',
+        completedAt: new Date(NOW.getTime() + 60_000),
+      },
+    },
+    { updatedAt: new Date(NOW.getTime() + 60_000) }
+  );
+  fixture.conversation.caseIntake.status = 'failed';
+  fixture.conversation.messages = fixture.conversation.messages.filter((message) => message.role !== 'assistant');
+  fixture.conversation.caseIntake.runs.find((run) => run.phase === 'analyst').status = 'failed';
+
+  assert.deepEqual(
+    fixture.conversation.caseIntake.evidence.acknowledgedFingerprint,
+    beforeAck.acknowledgementFingerprint
+  );
+  const afterRetry = evaluate(fixture, new Date(NOW.getTime() + 5 * 60_000));
+  assert.equal(afterRetry.status, 'incomplete');
+  assert.equal(afterRetry.acknowledged, false);
+  assert.ok(afterRetry.missing.some((item) => item.code === 'ANALYST_MESSAGE'));
 });
 
 test('reasoning capture unsupported by the actual provider is unverifiable, not incomplete', () => {
@@ -301,6 +401,37 @@ test('receipt-proven provider package past retention is expired-likely, not inco
   assert.equal(result.status, 'complete');
   assert.equal(providerPackage.state, 'unverifiable');
   assert.equal(providerPackage.reason, 'evidence-expired-likely');
+});
+
+test('record expiresAt takes precedence over inferred retention', () => {
+  const fixture = makeCompleteFixture();
+  fixture.imageParseResult.expiresAt = new Date(NOW.getTime() - 1_000);
+
+  const result = evaluate(fixture);
+  const parserHistory = artifactByCode(result, 'IMAGE_PARSE_RESULT');
+
+  assert.equal(parserHistory.state, 'unverifiable');
+  assert.equal(parserHistory.reason, 'evidence-expired-likely');
+});
+
+test('missing history expiry uses the shared env-configured retention', () => {
+  const originalTtl = process.env.IMAGE_PARSE_RESULT_TTL_DAYS;
+  try {
+    process.env.IMAGE_PARSE_RESULT_TTL_DAYS = '10';
+    const fixture = makeCompleteFixture();
+    const oldDate = new Date(NOW.getTime() - 11 * 24 * 60 * 60 * 1000);
+    fixture.imageParseResult = null;
+    fixture.conversation.caseIntake.evidence.receipts.parser.recordedAt = oldDate;
+    fixture.conversation.caseIntake.runs.find((run) => run.phase === 'parse-template').completedAt = oldDate;
+
+    const result = evaluate(fixture);
+    const parserHistory = artifactByCode(result, 'IMAGE_PARSE_RESULT');
+    assert.equal(parserHistory.state, 'unverifiable');
+    assert.equal(parserHistory.reason, 'evidence-expired-likely');
+  } finally {
+    if (originalTtl === undefined) delete process.env.IMAGE_PARSE_RESULT_TTL_DAYS;
+    else process.env.IMAGE_PARSE_RESULT_TTL_DAYS = originalTtl;
+  }
 });
 
 test('legacy conversation without evidence receipts remains unknown', () => {
@@ -507,6 +638,10 @@ test('evidence routes enrich without writes, acknowledge without falsifying, and
     assert.equal(ack.body.ok, true);
     assert.ok(ack.body.acknowledgement.acknowledgedAt);
     assert.equal(ack.body.acknowledgement.acknowledgedNote, 'Reviewed by the operator.');
+    assert.deepEqual(
+      ack.body.acknowledgement.fingerprint,
+      afterAck.caseIntake.evidence.acknowledgedFingerprint
+    );
     assert.deepEqual(afterAck.caseIntake.evidence.receipts, beforeAck.caseIntake.evidence.receipts);
     assert.equal(afterAck.caseIntake.status, beforeAck.caseIntake.status);
 

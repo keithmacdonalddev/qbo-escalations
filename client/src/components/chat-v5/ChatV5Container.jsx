@@ -7,7 +7,7 @@ import WebcamCapture from '../WebcamCapture.jsx';
 import StageEventLogPanel from './StageEventLogPanel.jsx';
 import TriageReasoningView from './TriageReasoningView.jsx';
 import EvidenceSummary from './EvidenceSummary.jsx';
-import UnsavedTriageNotice from './UnsavedTriageNotice.jsx';
+import UnsavedResultNotice from './UnsavedResultNotice.jsx';
 import WorkflowLogPanel from './WorkflowLogPanel.jsx';
 import { listAgentIdentities } from '../../api/agentIdentitiesApi.js';
 import { apiFetch, apiFetchJson } from '../../api/http.js';
@@ -1899,7 +1899,7 @@ function TriageOutput({ stage, card, testRun, onClearTest, onMarkTestResult, con
     <div className="v5-triage-panel">
       <TestBanner run={testRun} agentLabel={agentLabel} onClear={onClearTest} />
       {!testCard && conversationSave?.state === 'failed' && (
-        <UnsavedTriageNotice
+        <UnsavedResultNotice
           text={buildTriageCopyText(displayCard)}
           error={conversationSave.error}
           onDismiss={onDismissUnsaved}
@@ -2352,11 +2352,12 @@ function AnalystWorkbench({
   liveEventCounts,
   eventEstimates,
   runEvidence,
-  evidenceAcknowledged,
   evidenceAcknowledging,
   evidenceAcknowledgeError,
   onAcknowledgeEvidence,
   onRefreshEvidence,
+  unsavedAnalystAtRisk,
+  onDismissUnsavedAnalyst,
 }) {
   const [input, setInput] = useState('');
   const [workbenchDragOver, setWorkbenchDragOver] = useState(false);
@@ -2604,6 +2605,16 @@ function AnalystWorkbench({
                 agentLabel={mainAgentLabel}
               />
             ))}
+            {unsavedAnalystAtRisk && cleanValue(analyst?.unsavedText) && (
+              <UnsavedResultNotice
+                text={analyst.unsavedText}
+                error={analyst.unsavedError}
+                onDismiss={onDismissUnsavedAnalyst}
+                resultLabel="analyst answer"
+                downloadName="unsaved-analyst-answer.txt"
+                ariaLabel="Analyst answer not saved"
+              />
+            )}
             {mainStatus === 'running' && messages.length === 0 && (
               <div className="v5-analyst-waiting">
                 <span className="v5-empty-state__spinner" />
@@ -2618,7 +2629,6 @@ function AnalystWorkbench({
             )}
             <EvidenceSummary
               runEvidence={runEvidence}
-              acknowledged={evidenceAcknowledged}
               acknowledging={evidenceAcknowledging}
               acknowledgeError={evidenceAcknowledgeError}
               onAcknowledge={onAcknowledgeEvidence}
@@ -2809,29 +2819,42 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     : '';
   const [dismissedTriageRiskKey, setDismissedTriageRiskKey] = useState('');
   const unsavedTriageAtRisk = Boolean(unsavedTriageRiskKey && dismissedTriageRiskKey !== unsavedTriageRiskKey);
-  const [evidenceAcknowledged, setEvidenceAcknowledged] = useState(false);
+  const unsavedAnalystText = cleanValue(analyst?.unsavedText);
+  const unsavedAnalystRiskKey = unsavedAnalystText
+    ? `${effectiveConversationId || 'unsaved'}:${unsavedAnalystText}`
+    : '';
+  const [dismissedAnalystRiskKey, setDismissedAnalystRiskKey] = useState('');
+  const unsavedAnalystAtRisk = Boolean(
+    unsavedAnalystRiskKey && dismissedAnalystRiskKey !== unsavedAnalystRiskKey
+  );
+  const unsavedResultAtRisk = unsavedTriageAtRisk || unsavedAnalystAtRisk;
   const [evidenceAcknowledging, setEvidenceAcknowledging] = useState(false);
   const [evidenceAcknowledgeError, setEvidenceAcknowledgeError] = useState('');
 
   useEffect(() => {
-    if (!unsavedTriageAtRisk) return undefined;
-    const protectUnsavedCard = (event) => {
+    if (!unsavedResultAtRisk) return undefined;
+    const protectUnsavedResult = (event) => {
       event.preventDefault();
       event.returnValue = '';
     };
-    window.addEventListener('beforeunload', protectUnsavedCard);
-    return () => window.removeEventListener('beforeunload', protectUnsavedCard);
-  }, [unsavedTriageAtRisk]);
+    window.addEventListener('beforeunload', protectUnsavedResult);
+    return () => window.removeEventListener('beforeunload', protectUnsavedResult);
+  }, [unsavedResultAtRisk]);
 
-  useEffect(() => registerUnsavedWorkGuard(() => unsavedTriageAtRisk), [unsavedTriageAtRisk]);
+  useEffect(() => registerUnsavedWorkGuard(() => unsavedResultAtRisk), [unsavedResultAtRisk]);
 
   // Container-owned actions use this callback; sidebar, session, settings, and
   // other hash navigation are guarded centrally by the app shell. Browser/UI
   // actions that do not emit beforeunload or hashchange remain outside app control.
-  const confirmUnsavedTriageNavigation = useCallback(() => {
-    if (!unsavedTriageAtRisk) return true;
-    return window.confirm('This triage card was not saved and this screen is the only copy. Copy or download it before leaving. Leave anyway?');
-  }, [unsavedTriageAtRisk]);
+  const confirmUnsavedResultNavigation = useCallback(() => {
+    if (!unsavedResultAtRisk) return true;
+    const message = unsavedTriageAtRisk && unsavedAnalystAtRisk
+      ? 'Some results were not saved and this screen has the only copies. Copy or download them before leaving. Leave anyway?'
+      : unsavedAnalystAtRisk
+        ? 'This analyst answer was not saved and this screen is the only copy. Copy or download it before leaving. Leave anyway?'
+        : 'This triage card was not saved and this screen is the only copy. Copy or download it before leaving. Leave anyway?';
+    return window.confirm(message);
+  }, [unsavedAnalystAtRisk, unsavedResultAtRisk, unsavedTriageAtRisk]);
 
   const dismissUnsavedTriageWarning = useCallback(() => {
     if (!unsavedTriageRiskKey) return;
@@ -2839,9 +2862,14 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     if (confirmed) setDismissedTriageRiskKey(unsavedTriageRiskKey);
   }, [unsavedTriageRiskKey]);
 
+  const dismissUnsavedAnalystWarning = useCallback(() => {
+    if (!unsavedAnalystRiskKey) return;
+    const confirmed = window.confirm('Dismiss this warning? The analyst answer has not been saved to the session.');
+    if (confirmed) setDismissedAnalystRiskKey(unsavedAnalystRiskKey);
+  }, [unsavedAnalystRiskKey]);
+
   useEffect(() => {
     if (runEvidence.state === 'idle') {
-      setEvidenceAcknowledged(false);
       setEvidenceAcknowledgeError('');
     }
   }, [runEvidence.state]);
@@ -2852,7 +2880,6 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     setEvidenceAcknowledgeError('');
     try {
       await acknowledgeConversationEvidence(effectiveConversationId);
-      setEvidenceAcknowledged(true);
       await refreshRunEvidence();
     } catch (err) {
       setEvidenceAcknowledgeError(err?.message || 'The evidence warning could not be acknowledged.');
@@ -3449,7 +3476,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   }, []);
 
   const markParserTestResult = useCallback(async (resultId, status) => {
-    if (status === 'pass' && !confirmUnsavedTriageNavigation()) return;
+    if (status === 'pass' && !confirmUnsavedResultNavigation()) return;
     const data = await apiFetchJson(`/api/pipeline-tests/parser-results/${encodeURIComponent(resultId)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -3484,7 +3511,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           }
         : prev.parser,
     }));
-  }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, confirmUnsavedTriageNavigation, reset, resetWorkflowReveal]);
+  }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, confirmUnsavedResultNavigation, reset, resetWorkflowReveal]);
 
   // Mirror of markParserTestResult but targeting the triage test result
   // collection. PATCH succeeds, then we replace testRuns.triage.data with
@@ -3519,7 +3546,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   }, []);
 
   const startNewWorkflow = useCallback(() => {
-    if (!confirmUnsavedTriageNavigation()) return;
+    if (!confirmUnsavedResultNavigation()) return;
     closeTransientWorkbenchTabs();
     clearSavedWorkflowResume();
     resetWorkflowReveal();
@@ -3527,7 +3554,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     setTestRuns({});
     // clearSavedWorkflowResume() also invalidates any in-flight resumed
     // transcript/case fetch so late responses cannot repopulate this fresh run.
-  }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, confirmUnsavedTriageNavigation, reset, resetWorkflowReveal]);
+  }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, confirmUnsavedResultNavigation, reset, resetWorkflowReveal]);
 
   const started = isStarted(stageState) || imageCaptured || Object.keys(testRuns).length > 0;
   const workflowHasActivity = started || Boolean(effectiveCaseIntake) || Boolean(pastCaseIntake);
@@ -3544,7 +3571,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
         <LinkedCaseLifecycleBanner
           escalation={linkedEscalation}
           knowledge={linkedKnowledge}
-          onRequestNavigation={confirmUnsavedTriageNavigation}
+          onRequestNavigation={confirmUnsavedResultNavigation}
         />
         <WorkflowLane
           workflowSteps={workflowSteps}
@@ -3566,7 +3593,7 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           liveEventCounts={liveEventCounts}
           eventEstimates={eventEstimates}
           evidenceMissingByStage={evidenceMissingByStage}
-          onRequestNavigation={confirmUnsavedTriageNavigation}
+          onRequestNavigation={confirmUnsavedResultNavigation}
         />
         <AnalystWorkbench
           workflowSteps={workflowSteps}
@@ -3591,11 +3618,12 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
           liveEventCounts={liveEventCounts}
           eventEstimates={eventEstimates}
           runEvidence={runEvidence}
-          evidenceAcknowledged={evidenceAcknowledged}
           evidenceAcknowledging={evidenceAcknowledging}
           evidenceAcknowledgeError={evidenceAcknowledgeError}
           onAcknowledgeEvidence={acknowledgeRunEvidence}
           onRefreshEvidence={refreshRunEvidence}
+          unsavedAnalystAtRisk={unsavedAnalystAtRisk}
+          onDismissUnsavedAnalyst={dismissUnsavedAnalystWarning}
         />
       </main>
       <div className={`v5-evidence-dock-wrap${dockCollapsed ? ' is-leaving' : ''}`} aria-hidden={dockCollapsed}>
