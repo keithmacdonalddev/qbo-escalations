@@ -319,3 +319,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
 Special Feature: Agent Identity Growth Review - Let each persistent agent turn repeated interactions, user corrections, relationship changes, and successful behavior into proposed identity updates such as “speak sooner in planning conversations” or “defer to the Image Analyst on visual uncertainty.” The profile would keep stable identity separate from learned observations, show the evidence behind every proposed change, and require human approval before it becomes part of how the agent consistently behaves; this turns continuous learning into visible character development without allowing silent personality drift.
+
+Date: 2026-07-23
+Time: 01:20 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: high
+Special Feature: Agent Behavior Causality Replay - From any response or meaningful silence, show which identity traits, memories, relationship signals, workflow state, and routing rules caused an agent to participate, defer, or stay quiet. The user could temporarily change one factor and preview the resulting team participation without altering the live profile, making autonomous social behavior explainable before approving a permanent identity change; this is distinct from Execution Identity Verification, which proves the model that ran, and Agent Identity Growth Review, which governs lasting changes.
