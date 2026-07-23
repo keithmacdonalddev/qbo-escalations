@@ -64,3 +64,27 @@ test('rate limiter allows requests under limit and blocks when exceeded', () => 
     }
   }
 });
+
+test('rate limiter can preserve a request ID on a user-visible rejection', () => {
+  const previousNodeEnv = process.env.NODE_ENV;
+  try {
+    delete process.env.RATE_LIMIT_DISABLED;
+    process.env.NODE_ENV = 'development';
+    const limiter = createRateLimiter({
+      name: 'reporting',
+      limit: 1,
+      windowMs: 1000,
+      disableInTests: false,
+      includeRequestId: true,
+    });
+    const req = { ...makeReq('reporter'), requestId: 'report-rate-request' };
+    limiter(req, makeRes(), () => {});
+    const rejected = makeRes();
+    limiter(req, rejected, () => {});
+    assert.equal(rejected.statusCode, 429);
+    assert.equal(rejected.payload.requestId, 'report-rate-request');
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = previousNodeEnv;
+  }
+});

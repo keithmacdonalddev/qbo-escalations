@@ -7,6 +7,7 @@ import HealthBanner from './components/HealthBanner.jsx';
 import AgentHealthBanner from './components/AgentHealthBanner.jsx';
 import HealthToast from './components/HealthToast.jsx';
 import AppHeader from './components/app/AppHeader.jsx';
+import UserReportDialog from './components/reporting/UserReportDialog.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
 import useShellPreferences from './hooks/useShellPreferences.js';
@@ -73,6 +74,7 @@ function App() {
     } catch { return true; }
   });
   const [agentModalOpen, setAgentModalOpen] = useState(false);
+  const [userReportOpen, setUserReportOpen] = useState(false);
   const [devToolsEnabled, setDevToolsEnabled] = useState(() => {
     try { return localStorage.getItem('dev-tools-enabled') === 'true'; } catch { return false; }
   });
@@ -402,6 +404,7 @@ function App() {
         activeAgentTab={globalDockTab}
         agentModalOpen={agentModalOpen}
         onOpenAgent={openAgentModal}
+        onOpenUserReport={() => setUserReportOpen(true)}
         aiManagementAlertCount={aiManagementAlertCount}
       />
 
@@ -521,6 +524,11 @@ function App() {
 
       {/* Toast notifications for failures */}
       <HealthToast requests={waterfall.requests} />
+
+      <UserReportDialog
+        open={userReportOpen}
+        onClose={() => setUserReportOpen(false)}
+      />
 
       {/* Network waterfall — edge tab + right sidebar overlay */}
       {devToolsEnabled && networkTabEnabled && (

@@ -2,6 +2,24 @@ const crypto = require('crypto');
 
 const SDK_VERSION = 'qbo-escalations/1.0.0';
 
+function cleanText(value, max) {
+  return String(value || '').trim().slice(0, max);
+}
+
+function sanitizePageUrl(value) {
+  const raw = cleanText(value, 2048);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return '';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().slice(0, 2048);
+  } catch {
+    return '';
+  }
+}
+
 function configuration(env = process.env) {
   const baseUrl = String(env.TICKET_SNITCH_API_URL || '').trim().replace(/\/+$/, '');
   const apiKey = String(env.TICKET_SNITCH_API_KEY || '').trim();
@@ -66,15 +84,30 @@ async function callTicketSnitch(path, { method = 'GET', body, requestId, idempot
 
 function buildReport(input, context = {}, trustedReporter = {}) {
   const config = configuration();
+  const diagnosticsApproved = context.diagnosticsApproved === true;
+  const pageUrl = sanitizePageUrl(context.pageUrl);
+  const capturedAt = cleanText(context.observedAt, 100);
   const safeContext = {
-    pageUrl: String(context.pageUrl || '').slice(0, 2048),
-    routeName: String(context.routeName || '').slice(0, 200),
-    browser: String(context.browser || '').slice(0, 500),
-    appVersion: String(context.appVersion || process.env.npm_package_version || '').slice(0, 120),
-    errorCode: String(context.errorCode || '').slice(0, 200),
-    observedAt: String(context.observedAt || new Date().toISOString()).slice(0, 100),
-    sourceRequestId: String(context.sourceRequestId || '').slice(0, 128),
-    captureEnvironment: String(process.env.NODE_ENV || 'development').slice(0, 40),
+    capturedAt: capturedAt || new Date().toISOString(),
+    pageUrl,
+    routeName: cleanText(context.routeName, 200),
+    sourceRequestId: cleanText(context.sourceRequestId, 128),
+    captureEnvironment: cleanText(process.env.NODE_ENV || 'development', 40),
+    consent: {
+      diagnostics: diagnosticsApproved,
+      screenshot: false,
+      reply: false,
+    },
+    environment: {
+      appVersion: cleanText(context.appVersion || process.env.npm_package_version, 120),
+      requestId: cleanText(context.sourceRequestId, 128),
+      ...(diagnosticsApproved ? {
+        browser: cleanText(context.browser, 500),
+        viewport: cleanText(context.viewport, 80),
+        locale: cleanText(context.locale, 80),
+        errorCode: cleanText(context.errorCode, 200),
+      } : {}),
+    },
   };
   return {
     projectId: config.projectId,
@@ -88,12 +121,12 @@ function buildReport(input, context = {}, trustedReporter = {}) {
     ownerId: input.ownerId || '',
     nextAction: input.nextAction || '',
     tags: Array.isArray(input.tags) ? input.tags : [],
-    source: { kind: 'project_api', url: safeContext.pageUrl, externalId: safeContext.sourceRequestId },
+    source: { kind: 'project_api', url: pageUrl, externalId: safeContext.sourceRequestId },
     reporter: {
-      actorId: String(trustedReporter.actorId || '').slice(0, 200),
-      displayName: String(trustedReporter.displayName || '').slice(0, 200),
-      email: '',
-      wantsReply: Boolean(input.wantsReply),
+      actorId: cleanText(trustedReporter.actorId, 128),
+      displayName: cleanText(trustedReporter.displayName, 200),
+      email: cleanText(trustedReporter.email, 320),
+      wantsReply: false,
     },
     details: safeContext,
   };
@@ -101,7 +134,7 @@ function buildReport(input, context = {}, trustedReporter = {}) {
 
 async function reportWork(input, context = {}, requestId = '', trustedReporter = {}) {
   const config = configuration();
-  const sourceIdentity = String(context.sourceRequestId || requestId || crypto.randomUUID()).slice(0, 128);
+  const sourceIdentity = String(context.submissionId || context.sourceRequestId || requestId || crypto.randomUUID()).slice(0, 128);
   const idempotencyKey = crypto.createHash('sha256').update(`qbo:${config.projectId}:${sourceIdentity}`).digest('hex');
   return callTicketSnitch('/work-items', { method: 'POST', body: buildReport(input, context, trustedReporter), requestId, idempotencyKey });
 }

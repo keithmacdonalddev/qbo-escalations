@@ -7,6 +7,7 @@ function createRateLimiter({
   name = 'rate-limit',
   keyFn,
   disableInTests = true,
+  includeRequestId = false,
 } = {}) {
   const buckets = new Map();
   let reqCount = 0;
@@ -58,6 +59,7 @@ function createRateLimiter({
         ok: false,
         code: 'RATE_LIMITED',
         error: `Too many requests for ${name}. Try again in ${Math.max(1, retryAfterSec)}s`,
+        ...(includeRequestId && req.requestId ? { requestId: req.requestId } : {}),
       });
     }
 

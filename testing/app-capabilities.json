@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "lastHumanReviewDate": "2026-07-22",
+  "lastHumanReviewDate": "2026-07-23",
   "knownGlobalGaps": [
     "The five dedicated QBO Chat V5 browser journeys are structurally implemented but have not passed repeatedly because native browser transport cannot currently open even a static local known-good page within its hard bound.",
     "There is no broad automated accessibility audit, visual-regression suite, hosted multi-user run, mutation testing, or large-list browser pressure profile.",
@@ -287,6 +287,27 @@
       ],
       "knownGaps": ["Focused dashboard, detail, linked Chat-to-escalation and Chat-to-knowledge navigation, knowledge states, and the browser lifecycle handoff are implemented; the browser handoff remains untrusted until repeated passing runs exist."],
       "lastHumanReviewDate": "2026-07-22"
+    },
+    {
+      "id": "ticket-snitch-user-reporting",
+      "label": "Ticket Snitch user reporting",
+      "userOutcome": "A QBO Escalations user can safely report a problem, request a feature, or share feedback and receive one duplicate-safe Ticket Snitch case key.",
+      "risk": "high",
+      "owner": "QBO reporting integration",
+      "sourcePaths": [
+        "client/src/components/reporting/UserReportDialog.jsx",
+        "client/src/api/ticketSnitchReporting.js",
+        "server/src/routes/ticket-snitch.js",
+        "server/src/services/ticket-snitch-client.js"
+      ],
+      "requiredCheckTypes": ["unit", "component", "server"],
+      "evidence": [
+        { "type": "unit", "groupId": "client-components", "paths": ["client/src/api/ticketSnitchReporting.test.js"] },
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/reporting/UserReportDialog.test.jsx"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/ticket-snitch-client.test.js", "server/test/ticket-snitch-user-reporting.test.js", "server/test/rate-limit.test.js"] }
+      ],
+      "knownGaps": ["The isolated real-HTTP and Chromium production-build acceptance checks live in the sibling Ticket Snitch repository and are not yet invoked by QBO Escalations' app-check profiles. Live credential activation and a real runtime case remain human-owned gates."],
+      "lastHumanReviewDate": "2026-07-23"
     },
     {
       "id": "provider-controls",

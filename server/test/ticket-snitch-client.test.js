@@ -7,6 +7,7 @@ const {
   commentOnWork,
   getConnectorConfig,
   getWork,
+  reportWork,
   transitionWork,
   updateWork,
 } = require('../src/services/ticket-snitch-client');
@@ -41,6 +42,49 @@ test('trusted server identity can be attached without accepting caller spoofing'
   assert.equal(report.reporter.actorId, 'user-42');
   assert.equal(report.reporter.displayName, 'Taylor');
   assert.equal(report.details.reportingUserId, undefined);
+}));
+
+test('user-approved diagnostics follow the Ticket Snitch contract and secret-bearing URLs are stripped', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1/', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1', NODE_ENV: 'test' }, () => {
+  const report = buildReport(
+    { type: 'problem_report', title: 'Save failed', originalReport: 'Save did not work.' },
+    {
+      pageUrl: 'https://qbo.example.test/escalations?token=secret#private',
+      routeName: '#/escalations',
+      sourceRequestId: 'request-42',
+      diagnosticsApproved: true,
+      browser: 'Test Browser',
+      viewport: '1280x720',
+      locale: 'en-CA',
+      errorCode: 'SAVE_FAILED',
+      password: 'must-not-leak',
+    },
+    { actorId: 'local-user', displayName: 'Local user' },
+  );
+  assert.equal(report.source.url, 'https://qbo.example.test/escalations');
+  assert.equal(report.details.pageUrl, 'https://qbo.example.test/escalations');
+  assert.equal(report.details.environment.browser, 'Test Browser');
+  assert.equal(report.details.environment.viewport, '1280x720');
+  assert.equal(report.details.environment.locale, 'en-CA');
+  assert.equal(report.details.environment.errorCode, 'SAVE_FAILED');
+  assert.equal(report.details.consent.diagnostics, true);
+  assert.equal(report.details.password, undefined);
+}));
+
+test('stable submission identity creates a stable connector idempotency key', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1' }, async () => {
+  const originalFetch = global.fetch;
+  const keys = [];
+  global.fetch = async (_url, options) => {
+    keys.push(options.headers['Idempotency-Key']);
+    return { ok: true, status: 201, headers: new Headers(), json: async () => ({ ok: true, data: { id: 'work-1', key: 'QBO-1' } }) };
+  };
+  try {
+    const input = { type: 'problem_report', title: 'Stable retry', originalReport: 'The same draft should not duplicate.' };
+    const context = { submissionId: 'stable-submission-12345', sourceRequestId: 'request-1' };
+    await reportWork(input, context, 'request-1', { actorId: 'local-user', displayName: 'Local user' });
+    await reportWork(input, { ...context, sourceRequestId: 'request-2' }, 'request-2', { actorId: 'local-user', displayName: 'Local user' });
+    assert.equal(keys.length, 2);
+    assert.equal(keys[0], keys[1]);
+  } finally { global.fetch = originalFetch; }
 }));
 
 test('connector sends project scope, trace, SDK, and idempotency headers', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1' }, async () => {

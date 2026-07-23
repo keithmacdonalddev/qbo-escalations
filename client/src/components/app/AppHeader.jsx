@@ -473,6 +473,7 @@ export default function AppHeader({
   activeAgentTab,
   agentModalOpen,
   onOpenAgent,
+  onOpenUserReport,
   aiManagementAlertCount = 0,
 }) {
   const unreadCount = useUnreadEmailCount();
@@ -953,6 +954,22 @@ export default function AppHeader({
           {unreadCount > 0 && (
             <span className="app-header-mail-badge">{badgeLabel}</span>
           )}
+        </motion.button>
+        {/* User problem, feature, and feedback reporting */}
+        <motion.button
+          className="app-header-icon-btn"
+          onClick={onOpenUserReport}
+          type="button"
+          aria-label="Send feedback"
+          title="Send feedback"
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.92 }}
+        >
+          <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+            <path d="M8 9h8" />
+            <path d="M8 13h5" />
+          </svg>
         </motion.button>
         {/* Test suite */}
         <motion.button

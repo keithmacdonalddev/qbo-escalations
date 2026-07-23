@@ -1,0 +1,352 @@
+.user-report-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(3, 7, 18, 0.72);
+}
+
+.user-report-dialog {
+  width: min(680px, 100%);
+  max-height: min(860px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl, 16px);
+  background: var(--bg-raised);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg);
+}
+
+.user-report-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.user-report-header h2,
+.user-report-success h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.user-report-header p {
+  margin: 5px 0 0;
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.user-report-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.user-report-close:hover {
+  border-color: var(--line);
+  background: var(--bg-elevated);
+  color: var(--ink);
+}
+
+.user-report-dialog form {
+  display: grid;
+  gap: 18px;
+  padding: 20px 24px 24px;
+}
+
+.user-report-types {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.user-report-types legend,
+.user-report-field > label {
+  display: block;
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.user-report-type-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.user-report-type {
+  position: relative;
+  display: flex;
+  min-height: 92px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.user-report-type.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.user-report-type input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.user-report-type span {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+}
+
+.user-report-type strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.user-report-type small,
+.user-report-consent small {
+  color: var(--ink-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.user-report-type:has(input:focus-visible),
+.user-report-consent:has(input:focus-visible),
+.user-report-dialog button:focus-visible,
+.user-report-dialog input:focus-visible,
+.user-report-dialog textarea:focus-visible,
+.user-report-dialog summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.user-report-field input,
+.user-report-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+
+.user-report-field input {
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.user-report-field textarea {
+  min-height: 132px;
+  padding: 11px 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.user-report-field [aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.user-report-help,
+.user-report-field-error {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.user-report-help { color: var(--ink-tertiary); }
+.user-report-field-error { color: var(--danger); }
+
+.user-report-consent {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.user-report-consent input {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+
+.user-report-consent span {
+  display: grid;
+  gap: 4px;
+}
+
+.user-report-consent strong {
+  font-size: 12px;
+}
+
+.user-report-disclosure {
+  color: var(--ink-secondary);
+  font-size: 12px;
+}
+
+.user-report-disclosure summary {
+  width: fit-content;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.user-report-disclosure p {
+  margin: 8px 0 0;
+  line-height: 1.55;
+}
+
+.user-report-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.user-report-primary,
+.user-report-secondary {
+  min-height: 40px;
+  padding: 0 16px;
+  border-radius: var(--radius-md);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.user-report-primary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+.user-report-secondary {
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  color: var(--ink);
+}
+
+.user-report-primary:disabled,
+.user-report-secondary:disabled,
+.user-report-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.user-report-state,
+.user-report-success {
+  display: grid;
+  gap: 9px;
+  margin: 24px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.user-report-state strong { color: var(--ink); }
+.user-report-state.is-warning { border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+.user-report-state.is-error,
+.user-report-inline-error { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+
+.user-report-inline-error {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  background: var(--danger-subtle);
+  color: var(--ink);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.user-report-inline-error small,
+.user-report-state small { color: var(--ink-tertiary); }
+
+.user-report-success {
+  justify-items: center;
+  padding: 30px 24px 24px;
+  text-align: center;
+}
+
+.user-report-success p { margin: 0; }
+
+.user-report-success-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--success-subtle);
+  color: var(--success);
+  font-size: 22px;
+  font-weight: 800;
+}
+
+.user-report-replay {
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--accent-subtle);
+  color: var(--ink);
+}
+
+.user-report-next { color: var(--ink-secondary); }
+
+@media (max-width: 620px) {
+  .user-report-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .user-report-dialog {
+    width: 100%;
+    max-height: 94vh;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+
+  .user-report-header,
+  .user-report-dialog form { padding-right: 16px; padding-left: 16px; }
+  .user-report-type-grid { grid-template-columns: 1fr; }
+  .user-report-type { min-height: 64px; }
+  .user-report-actions { flex-direction: column-reverse; }
+  .user-report-primary,
+  .user-report-secondary { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .user-report-dialog * { scroll-behavior: auto !important; }
+}
