@@ -10,9 +10,11 @@ Read `AGENTS.md`, `PRODUCT_NORTH_STAR.md` when product framing matters, and only
 ## Routing
 
 - Server behavior: `server/src/`, `server/package.json`, and `.claude/rules/server.md`.
-- Client behavior: `client/src/`, `client/package.json`, and `.claude/rules/client.md`.
+- Client behavior: `client/src/`, `client/package.json`, `client/vite.config.js`, and `.claude/rules/client.md`.
 - Provider/model work: `shared/ai-provider-catalog.json`, provider request builders, evidence capture, and focused harness tests.
 - Coding-agent work: `AGENT_HARNESS.md`, `docs/agent-harness/`, `AGENTS.md`, `CLAUDE.md`, `.claude/`, `.codex/`, and `.agents/`.
 - Product hierarchy: `PRODUCT_NORTH_STAR.md`.
 
 Preserve concurrent work. Do not control persistent services unless explicitly asked. Use fresh evidence, proportionate verification, and plain-language reporting.
+
+For live-app checks, never infer that the app is stopped from one refused/default port. Read the live configuration, inspect active listeners and their process owners/command lines, safely probe the discovered loopback URL, and continue the requested review there. Only report a service unavailable after those checks fail to identify it.

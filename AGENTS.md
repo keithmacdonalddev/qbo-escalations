@@ -63,6 +63,19 @@ Before reporting:
 - If a port conflict such as `EADDRINUSE` occurs, first identify the current port owner and whether it is serving the app. Preserve a healthy live instance by default. Ask before killing or replacing it unless the user has already explicitly said to close that process.
 - Test commands may run their own short-lived isolated test servers when that is part of the test runner, but do not leave persistent dev or production services running after verification.
 
+### Runtime Discovery Before Declaring The App Unavailable
+
+- Treat familiar or documented ports as starting points, not proof of where a service is running. A refused connection on `5173`, `5174`, `4000`, or any other expected port proves only that nothing answered at that address.
+- Before saying the client, server, or another local service is not running, check all of the following read-only evidence that applies:
+  1. the live port configuration, including `client/vite.config.js`, environment settings, proxy settings, and package scripts;
+  2. active listening ports and their owning process IDs;
+  3. the owning processes' executable names and command lines, so unrelated listeners are not mistaken for this app;
+  4. discovered loopback URLs with a safe HTTP request or browser navigation; and
+  5. relevant current logs or already-open browser state when the earlier checks are inconclusive.
+- Follow the evidence to the actual running URL and continue the requested inspection there. Do not stop after checking only a conventional default port.
+- Distinguish “the expected port did not answer” from “the service is not running.” Report the latter only after the configured ports and live listeners/process owners have been checked, and state what was checked.
+- Runtime discovery does not grant runtime control: do not start, stop, restart, kill, or replace any service while looking for it unless the user explicitly authorizes that action.
+
 ### Prototype Isolation (Default)
 
 - Build prototypes as standalone files in `prototypes/<prototype-name>/`.
