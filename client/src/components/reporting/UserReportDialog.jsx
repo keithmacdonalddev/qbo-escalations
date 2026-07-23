@@ -4,6 +4,11 @@ import {
   loadReportingBootstrap,
   submitUserReport,
 } from '../../api/ticketSnitchReporting.js';
+import {
+  captureScreenFrame,
+  screenCaptureSupported,
+  validateScreenshotFile,
+} from './screenshotCapture.js';
 import './UserReportDialog.css';
 
 const REPORT_CHOICES = [
@@ -33,18 +38,27 @@ function reportErrorMessage(error) {
   return error?.message || 'The report could not be sent. Your draft is still here.';
 }
 
+function fileSizeLabel(size) {
+  if (size < 1024) return `${size} bytes`;
+  return `${Math.ceil(size / 1024)} KB`;
+}
+
 export default function UserReportDialog({ open, onClose, onAuthenticationRequired, errorCode = '' }) {
   const dialogRef = useRef(null);
   const titleRef = useRef(null);
+  const screenshotInputRef = useRef(null);
   const priorFocusRef = useRef(null);
   const [draft, setDraft] = useState(initialDraft);
-  const [bootstrap, setBootstrap] = useState({ state: 'idle', token: '', requestId: '', reason: '' });
+  const [bootstrap, setBootstrap] = useState({ state: 'idle', token: '', requestId: '', reason: '', screenshotAvailable: false });
   const [submitState, setSubmitState] = useState({ state: 'idle', ticket: null, replay: false, message: '', requestId: '' });
   const [errors, setErrors] = useState({});
   const [online, setOnline] = useState(() => navigator.onLine !== false);
+  const [screenshot, setScreenshot] = useState(null);
+  const [screenshotPreview, setScreenshotPreview] = useState('');
+  const [captureState, setCaptureState] = useState({ state: 'idle', message: '' });
 
   const loadAvailability = useCallback(async () => {
-    setBootstrap({ state: 'loading', token: '', requestId: '', reason: '' });
+    setBootstrap({ state: 'loading', token: '', requestId: '', reason: '', screenshotAvailable: false });
     try {
       const result = await loadReportingBootstrap();
       setBootstrap({
@@ -52,6 +66,7 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
         token: result.reportToken || '',
         requestId: result.requestId || '',
         reason: result.unavailableReason || '',
+        screenshotAvailable: result.screenshotAvailable !== false,
       });
     } catch (error) {
       if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
@@ -60,6 +75,7 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
         token: '',
         requestId: error?.requestId || '',
         reason: reportErrorMessage(error),
+        screenshotAvailable: false,
       });
     }
   }, [onAuthenticationRequired]);
@@ -89,6 +105,17 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
+
+  useEffect(() => {
+    if (!screenshot) {
+      setScreenshotPreview('');
+      return undefined;
+    }
+    if (typeof URL?.createObjectURL !== 'function') return undefined;
+    const url = URL.createObjectURL(screenshot);
+    setScreenshotPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [screenshot]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -125,6 +152,40 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
     if (submitState.state === 'error') setSubmitState({ state: 'idle', ticket: null, replay: false, message: '', requestId: '' });
   };
 
+  const chooseScreenshot = (file) => {
+    try {
+      setScreenshot(validateScreenshotFile(file));
+      setCaptureState({ state: 'ready', message: 'Screenshot ready. Review it before sending.' });
+      if (screenshotInputRef.current) screenshotInputRef.current.value = '';
+    } catch (error) {
+      setCaptureState({ state: 'error', message: error.message });
+    }
+  };
+
+  const handleCapture = async () => {
+    setCaptureState({ state: 'capturing', message: 'Choose the tab, window, or screen you want to share.' });
+    try {
+      chooseScreenshot(await captureScreenFrame());
+    } catch (error) {
+      setCaptureState({
+        state: error?.code === 'SCREENSHOT_CAPTURE_CANCELLED' ? 'notice' : 'error',
+        message: error?.message || 'The screenshot could not be captured.',
+      });
+    }
+  };
+
+  const handleScreenshotPaste = (event) => {
+    const image = Array.from(event.clipboardData?.items || [])
+      .find((item) => item.type?.startsWith('image/'))
+      ?.getAsFile?.();
+    if (!image) {
+      setCaptureState({ state: 'notice', message: 'The clipboard does not contain a supported image.' });
+      return;
+    }
+    event.preventDefault();
+    chooseScreenshot(image);
+  };
+
   const validate = () => {
     const next = {};
     const cleanTitle = draft.title.trim();
@@ -139,14 +200,25 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    if (!validate()) return;
+  const sendDraft = async ({ retryEvidence = false } = {}) => {
+    if (!retryEvidence && !validate()) return;
     if (!online) {
-      setSubmitState({ state: 'error', ticket: null, replay: false, message: 'You are offline. Your draft is still here; try again after the connection returns.', requestId: '' });
+      setSubmitState((current) => ({
+        state: retryEvidence ? 'partial' : 'error',
+        ticket: retryEvidence ? current.ticket : null,
+        replay: retryEvidence ? current.replay : false,
+        message: 'You are offline. Your draft and screenshot are still here; try again after the connection returns.',
+        requestId: '',
+      }));
       return;
     }
-    setSubmitState({ state: 'submitting', ticket: null, replay: false, message: '', requestId: '' });
+    setSubmitState((current) => ({
+      state: retryEvidence ? 'retrying' : 'submitting',
+      ticket: retryEvidence ? current.ticket : null,
+      replay: retryEvidence ? current.replay : false,
+      message: '',
+      requestId: '',
+    }));
     try {
       const result = await submitUserReport({
         reportToken: bootstrap.token,
@@ -157,35 +229,54 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
         explanation: draft.explanation.trim(),
         includeDiagnostics: draft.includeDiagnostics,
         errorCode,
+        screenshot,
       });
+      if (result.evidence?.status === 'failed') {
+        setSubmitState({
+          state: 'partial',
+          ticket: result.ticket,
+          replay: Boolean(result.idempotentReplay),
+          message: result.evidence.message || 'The report was received, but its screenshot could not be attached.',
+          requestId: result.evidence.requestId || result.requestId || '',
+        });
+        return;
+      }
       setSubmitState({
         state: 'success',
         ticket: result.ticket,
         replay: Boolean(result.idempotentReplay),
         message: '',
         requestId: result.requestId || '',
+        evidenceAttached: result.evidence?.status === 'attached',
       });
     } catch (error) {
       if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
-      setSubmitState({
-        state: 'error',
-        ticket: null,
-        replay: false,
+      setSubmitState((current) => ({
+        state: retryEvidence ? 'partial' : 'error',
+        ticket: retryEvidence ? current.ticket : null,
+        replay: retryEvidence ? current.replay : false,
         message: reportErrorMessage(error),
         requestId: error?.requestId || '',
-      });
+      }));
     }
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    await sendDraft();
   };
 
   const startAnother = () => {
     setDraft(initialDraft());
     setErrors({});
     setSubmitState({ state: 'idle', ticket: null, replay: false, message: '', requestId: '' });
+    setScreenshot(null);
+    setCaptureState({ state: 'idle', message: '' });
     loadAvailability();
     requestAnimationFrame(() => titleRef.current?.focus());
   };
 
-  const busy = bootstrap.state === 'loading' || submitState.state === 'submitting';
+  const busy = bootstrap.state === 'loading' || submitState.state === 'submitting' || submitState.state === 'retrying' || captureState.state === 'capturing';
   const canSubmit = bootstrap.state === 'ready' && online && !busy;
 
   return (
@@ -232,11 +323,27 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
             {bootstrap.requestId ? <small>Request ID: {bootstrap.requestId}</small> : null}
             <button type="button" className="user-report-secondary" onClick={loadAvailability}>Try again</button>
           </div>
+        ) : submitState.state === 'partial' || submitState.state === 'retrying' ? (
+          <div className="user-report-success is-partial" role="alert" aria-live="assertive">
+            <span className="user-report-success-mark" aria-hidden="true">!</span>
+            <h3>Report received; screenshot needs another try</h3>
+            <p>Ticket Snitch case <strong>{submitState.ticket?.key || 'created'}</strong> is safe. Retrying will not create a duplicate case.</p>
+            <p>{submitState.message || 'The screenshot has not been attached yet.'}</p>
+            {submitState.requestId ? <small>Request ID: {submitState.requestId}</small> : null}
+            {!online ? <p className="user-report-replay">You are offline. The screenshot is still in this form.</p> : null}
+            <div className="user-report-actions">
+              <button type="button" className="user-report-secondary" onClick={onClose} disabled={busy}>Close</button>
+              <button type="button" className="user-report-primary" onClick={() => sendDraft({ retryEvidence: true })} disabled={!online || busy || !screenshot}>
+                {submitState.state === 'retrying' ? 'Retrying screenshot…' : 'Retry screenshot'}
+              </button>
+            </div>
+          </div>
         ) : submitState.state === 'success' ? (
           <div className="user-report-success" role="status" aria-live="polite">
             <span className="user-report-success-mark" aria-hidden="true">✓</span>
             <h3>Report received</h3>
             <p>Ticket Snitch case <strong>{submitState.ticket?.key || 'created'}</strong> is ready for human review.</p>
+            {submitState.evidenceAttached ? <p className="user-report-replay">Your approved screenshot is attached as case evidence.</p> : null}
             {submitState.replay ? <p className="user-report-replay">This report was already received. No duplicate was created.</p> : null}
             <p className="user-report-next">The team can now review, prioritize, assign, act on, verify, and close it.</p>
             <div className="user-report-actions">
@@ -296,6 +403,70 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
               {errors.explanation ? <span id="user-report-explanation-error" className="user-report-field-error" role="alert">{errors.explanation}</span> : null}
             </div>
 
+            <section
+              className="user-report-screenshot"
+              aria-labelledby="user-report-screenshot-title"
+              onPaste={bootstrap.screenshotAvailable ? handleScreenshotPaste : undefined}
+              tabIndex={bootstrap.screenshotAvailable ? 0 : undefined}
+            >
+              <div className="user-report-screenshot-heading">
+                <div>
+                  <h3 id="user-report-screenshot-title">Optional screenshot</h3>
+                  <p>A screenshot can contain sensitive information. Review it carefully before you send this report.</p>
+                </div>
+                <span>Optional</span>
+              </div>
+              {bootstrap.screenshotAvailable ? (
+                <>
+                  <p className="user-report-screenshot-explainer">
+                    Capture screenshot asks your browser to let you choose a tab, window, or screen. It takes one still image, never records audio, and stops sharing immediately.
+                  </p>
+                  <input
+                    ref={screenshotInputRef}
+                    className="user-report-file-input"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    aria-label="Add screenshot image"
+                    onChange={(event) => chooseScreenshot(event.target.files?.[0])}
+                  />
+                  {screenshot ? (
+                    <div className="user-report-screenshot-preview">
+                      {screenshotPreview ? <img src={screenshotPreview} alt="Screenshot preview for this report" /> : null}
+                      <div>
+                        <strong>{screenshot.name}</strong>
+                        <small>{fileSizeLabel(screenshot.size)} · {screenshot.type}</small>
+                      </div>
+                      <div className="user-report-screenshot-actions">
+                        {screenCaptureSupported() ? <button type="button" className="user-report-secondary" onClick={handleCapture} disabled={busy}>Retake</button> : null}
+                        <button type="button" className="user-report-secondary" onClick={() => screenshotInputRef.current?.click()} disabled={busy}>Replace</button>
+                        <button type="button" className="user-report-secondary is-danger" onClick={() => {
+                          setScreenshot(null);
+                          setCaptureState({ state: 'notice', message: 'Screenshot removed from this report.' });
+                        }} disabled={busy}>Remove</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="user-report-screenshot-empty">
+                      <div className="user-report-screenshot-actions">
+                        {screenCaptureSupported() ? (
+                          <button type="button" className="user-report-secondary" onClick={handleCapture} disabled={busy}>Capture screenshot</button>
+                        ) : null}
+                        <button type="button" className="user-report-secondary" onClick={() => screenshotInputRef.current?.click()} disabled={busy}>Add image</button>
+                      </div>
+                      <small>{screenCaptureSupported() ? 'Or focus this area and paste an image from your clipboard.' : 'Screen capture is unavailable in this browser. Add an image or focus this area and paste one.'}</small>
+                    </div>
+                  )}
+                  {captureState.message ? (
+                    <div className={`user-report-screenshot-message is-${captureState.state}`} role={captureState.state === 'error' ? 'alert' : 'status'} aria-live="polite">
+                      {captureState.message}
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <p className="user-report-screenshot-unavailable" role="status">Screenshot attachments are not connected on this server yet. You can still send the text report.</p>
+              )}
+            </section>
+
             <label className="user-report-consent">
               <input
                 type="checkbox"
@@ -310,7 +481,7 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
 
             <details className="user-report-disclosure">
               <summary>What will be submitted?</summary>
-              <p>Your selected type, title, explanation, current QBO page name, app version, time, and a private request ID. Optional diagnostics are included only when checked. Ticket Snitch uses this to organize human review and follow-through.</p>
+              <p>Your selected type, title, explanation, current QBO page name, app version, time, and a private request ID. Optional diagnostics are included only when checked. {screenshot ? 'The screenshot shown above will also be attached as private case evidence.' : 'No screenshot will be submitted.'} Ticket Snitch uses this to organize human review and follow-through.</p>
             </details>
 
             {!online ? (

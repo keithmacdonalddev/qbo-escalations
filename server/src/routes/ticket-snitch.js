@@ -7,9 +7,14 @@ const {
   getConnectorConfig,
   getWork,
   reportWork,
+  screenshotEvidenceIdempotencyKey,
   transitionWork,
   updateWork,
 } = require('../services/ticket-snitch-client');
+const {
+  ScreenshotValidationError,
+  prepareScreenshotEvidence,
+} = require('../services/ticket-snitch-screenshot');
 const { createRateLimiter } = require('../middleware/rate-limit');
 const { requireReportingUser } = require('../middleware/app-auth');
 
@@ -148,6 +153,7 @@ router.get('/reporting/bootstrap', requireReportOrigin, requireReportingUser, (r
       ? ''
       : 'TICKET_SNITCH_NOT_CONFIGURED',
     reportToken: available ? issueReportToken(req.reportOrigin, req.authenticatedUser.sessionKey) : '',
+    screenshotAvailable: available && connector.evidenceConfigured,
     expiresInSeconds: available ? Math.floor(REPORT_TOKEN_TTL_MS / 1000) : 0,
     requestId: req.requestId,
   });
@@ -176,6 +182,23 @@ router.post('/reporting/reports', requireReportOrigin, requireReportingUser, use
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(submissionId)) return res.status(400).json({ ok: false, code: 'INVALID_SUBMISSION_ID', error: 'This report draft could not be identified. Reopen the form and try again.', requestId: req.requestId });
   if (!observedAt || Number.isNaN(Date.parse(observedAt))) return res.status(400).json({ ok: false, code: 'INVALID_OBSERVED_AT', error: 'This report draft has an invalid timestamp. Reopen the form and try again.', requestId: req.requestId });
 
+  let screenshot = null;
+  if (input.screenshot !== undefined && input.screenshot !== null) {
+    try {
+      screenshot = await prepareScreenshotEvidence(input.screenshot);
+    } catch (error) {
+      if (error instanceof ScreenshotValidationError) {
+        return res.status(error.status).json({
+          ok: false,
+          code: error.code,
+          error: error.message,
+          requestId: req.requestId,
+        });
+      }
+      throw error;
+    }
+  }
+
   const suppliedContext = input.context && typeof input.context === 'object' ? input.context : {};
   const diagnosticsApproved = input.includeDiagnostics === true;
   const reporter = {
@@ -201,13 +224,49 @@ router.post('/reporting/reports', requireReportOrigin, requireReportingUser, use
   try {
     const result = await reportWork(
       { type, title, originalReport, priority: 'none', severity: 'none' },
-      { ...context, submissionId },
+      { ...context, submissionId, screenshotApproved: Boolean(screenshot) },
       req.requestId,
       reporter
     );
+    let evidence = { requested: false, status: 'not_requested' };
+    if (screenshot) {
+      try {
+        const attached = await attachEvidence(
+          result.data.id,
+          {
+            filename: screenshot.filename,
+            contentType: screenshot.contentType,
+            base64: screenshot.base64,
+            description: screenshot.description,
+            kind: screenshot.kind,
+          },
+          req.requestId,
+          {
+            authority: 'evidence',
+            idempotencyKey: screenshotEvidenceIdempotencyKey(submissionId),
+          },
+        );
+        evidence = {
+          requested: true,
+          status: 'attached',
+          id: attached.data.id,
+          idempotentReplay: Boolean(attached.idempotentReplay),
+        };
+      } catch (error) {
+        evidence = {
+          requested: true,
+          status: 'failed',
+          code: error.code || 'TICKET_SNITCH_EVIDENCE_FAILED',
+          message: error.message || 'The screenshot could not be attached.',
+          requestId: error.requestId || req.requestId,
+          retryable: error.status !== 400 && error.status !== 401 && error.status !== 403 && error.status !== 413 && error.status !== 415,
+        };
+      }
+    }
     return res.status(result.idempotentReplay ? 200 : 201).json({
       ok: true,
       ticket: { id: result.data.id, key: result.data.key },
+      evidence,
       idempotentReplay: Boolean(result.idempotentReplay),
       requestId: req.requestId,
     });
@@ -287,8 +346,16 @@ router.post('/work/:identifier/transitions', mutationRateLimit, async (req, res)
 
 router.post('/work/:identifier/evidence', mutationRateLimit, async (req, res) => {
   try {
-    const result = await attachEvidence(req.params.identifier, req.body || {}, req.requestId);
-    return res.status(201).json({ ok: true, data: result.data, requestId: req.requestId });
+    const result = await attachEvidence(
+      req.params.identifier,
+      req.body || {},
+      req.requestId,
+      {
+        authority: 'agent',
+        idempotencyKey: cleanText(req.headers['idempotency-key'], 200) || undefined,
+      },
+    );
+    return res.status(result.idempotentReplay ? 200 : 201).json({ ok: true, data: result.data, idempotentReplay: Boolean(result.idempotentReplay), requestId: req.requestId });
   } catch (error) {
     return connectorError(res, error, req.requestId);
   }

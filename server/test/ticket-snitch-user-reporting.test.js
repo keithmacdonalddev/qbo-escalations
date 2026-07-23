@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const request = require('supertest');
+const sharp = require('sharp');
 const { createApp } = require('../src/app');
 const { clearSessions, hashPassword } = require('../src/services/app-auth');
 
@@ -21,6 +22,7 @@ function reportEnvironment() {
     QBO_AUTH_COOKIE_SECURE: '0',
     TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1',
     TICKET_SNITCH_API_KEY: 'ts_test.secret',
+    TICKET_SNITCH_EVIDENCE_API_KEY: 'ts_evidence.secret',
     TICKET_SNITCH_PROJECT_ID: 'project-qbo',
     TICKET_SNITCH_REPORT_ALLOWED_ORIGINS: 'http://qbo.example.test',
     TICKET_SNITCH_REPORT_PROXY_SECRET: '',
@@ -194,6 +196,124 @@ test('feedback maps to improvement and diagnostics require explicit approval', a
     assert.equal(body.details.environment.viewport, '390x844');
     assert.equal(body.details.environment.locale, 'en-CA');
     assert.equal(body.details.environment.errorCode, 'SAFE_CODE');
+  } finally { global.fetch = originalFetch; }
+}));
+
+test('an approved screenshot is normalized and attached with a separate retry-safe evidence credential', async () => withEnvironment(reportEnvironment(), async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  const source = await sharp({ create: { width: 120, height: 60, channels: 3, background: '#1f6feb' } })
+    .jpeg()
+    .withMetadata({ orientation: 6 })
+    .toBuffer();
+  global.fetch = async (url, options) => {
+    calls.push({ url, options, body: JSON.parse(options.body) });
+    if (String(url).endsWith('/work-items')) {
+      return ticketResponse({ ok: true, data: { id: 'work-shot-1', key: 'QBO-61' } });
+    }
+    return ticketResponse({ ok: true, data: { id: 'evidence-shot-1' }, idempotentReplay: false });
+  };
+  try {
+    const app = createApp();
+    const agent = await signedInAgent(app);
+    const bootstrap = await agent.get('/api/ticket-snitch/reporting/bootstrap').set('Origin', 'http://qbo.example.test').expect(200);
+    assert.equal(bootstrap.body.screenshotAvailable, true);
+    const response = await agent
+      .post('/api/ticket-snitch/reporting/reports')
+      .set('Origin', 'http://qbo.example.test')
+      .set('X-QBO-Report-Token', bootstrap.body.reportToken)
+      .send({
+        submissionId: 'submission-screenshot-001',
+        observedAt: '2026-07-23T03:12:00.000Z',
+        kind: 'problem',
+        title: 'Page alignment is difficult to review',
+        explanation: 'The attached image shows the alignment problem on the main page.',
+        screenshot: { filename: '../private-view.png', contentType: 'image/png', base64: source.toString('base64') },
+      })
+      .expect(201);
+    assert.equal(response.body.ticket.key, 'QBO-61');
+    assert.equal(response.body.evidence.status, 'attached');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer ts_test.secret');
+    assert.equal(calls[0].body.details.consent.screenshot, true);
+    assert.equal(calls[1].options.headers.Authorization, 'Bearer ts_evidence.secret');
+    assert.match(calls[1].options.headers['Idempotency-Key'], /^[a-f0-9]{64}$/);
+    assert.equal(calls[1].body.filename, 'private-view.jpg');
+    assert.equal(calls[1].body.contentType, 'image/jpeg');
+    assert.equal(calls[1].body.kind, 'screenshot');
+    const metadata = await sharp(Buffer.from(calls[1].body.base64, 'base64')).metadata();
+    assert.equal(metadata.orientation, undefined);
+    assert.equal(metadata.exif, undefined);
+  } finally { global.fetch = originalFetch; }
+}));
+
+test('a failed screenshot attachment preserves the case and retries without duplicating case or evidence identity', async () => withEnvironment(reportEnvironment(), async () => {
+  const originalFetch = global.fetch;
+  const calls = [];
+  let evidenceAttempts = 0;
+  const source = await sharp({ create: { width: 32, height: 24, channels: 3, background: '#fff' } }).png().toBuffer();
+  global.fetch = async (url, options) => {
+    calls.push({ url, options, body: JSON.parse(options.body) });
+    if (String(url).endsWith('/work-items')) {
+      const replay = calls.filter((call) => String(call.url).endsWith('/work-items')).length > 1;
+      return ticketResponse({ ok: true, data: { id: 'work-shot-retry', key: 'QBO-62' }, ...(replay ? { idempotentReplay: true } : {}) }, replay ? 200 : 201);
+    }
+    evidenceAttempts += 1;
+    if (evidenceAttempts === 1) {
+      return ticketResponse({ ok: false, error: { code: 'EVIDENCE_UNAVAILABLE', message: 'Evidence storage is temporarily unavailable.' }, requestId: 'evidence-failed-1' }, 503);
+    }
+    return ticketResponse({ ok: true, data: { id: 'evidence-shot-retry' } }, 201);
+  };
+  try {
+    const app = createApp();
+    const agent = await signedInAgent(app);
+    const bootstrap = await agent.get('/api/ticket-snitch/reporting/bootstrap').set('Origin', 'http://qbo.example.test').expect(200);
+    const payload = {
+      submissionId: 'submission-screenshot-retry-001',
+      observedAt: '2026-07-23T03:13:00.000Z',
+      kind: 'problem',
+      title: 'Screenshot retry proof',
+      explanation: 'The report must survive a temporary screenshot storage failure.',
+      screenshot: { filename: 'retry.png', contentType: 'image/png', base64: source.toString('base64') },
+    };
+    const first = await agent.post('/api/ticket-snitch/reporting/reports').set('Origin', 'http://qbo.example.test').set('X-QBO-Report-Token', bootstrap.body.reportToken).send(payload).expect(201);
+    const retry = await agent.post('/api/ticket-snitch/reporting/reports').set('Origin', 'http://qbo.example.test').set('X-QBO-Report-Token', bootstrap.body.reportToken).send(payload).expect(200);
+    assert.equal(first.body.ticket.key, 'QBO-62');
+    assert.equal(first.body.evidence.status, 'failed');
+    assert.equal(first.body.evidence.retryable, true);
+    assert.equal(retry.body.ticket.key, 'QBO-62');
+    assert.equal(retry.body.idempotentReplay, true);
+    assert.equal(retry.body.evidence.status, 'attached');
+    const caseCalls = calls.filter((call) => String(call.url).endsWith('/work-items'));
+    const evidenceCalls = calls.filter((call) => String(call.url).includes('/evidence/base64'));
+    assert.equal(caseCalls[0].options.headers['Idempotency-Key'], caseCalls[1].options.headers['Idempotency-Key']);
+    assert.equal(evidenceCalls[0].options.headers['Idempotency-Key'], evidenceCalls[1].options.headers['Idempotency-Key']);
+  } finally { global.fetch = originalFetch; }
+}));
+
+test('invalid screenshot bytes are rejected before a case is created', async () => withEnvironment(reportEnvironment(), async () => {
+  const originalFetch = global.fetch;
+  let forwarded = false;
+  global.fetch = async () => { forwarded = true; return ticketResponse({ ok: true, data: {} }); };
+  try {
+    const app = createApp();
+    const agent = await signedInAgent(app);
+    const bootstrap = await agent.get('/api/ticket-snitch/reporting/bootstrap').set('Origin', 'http://qbo.example.test').expect(200);
+    const response = await agent
+      .post('/api/ticket-snitch/reporting/reports')
+      .set('Origin', 'http://qbo.example.test')
+      .set('X-QBO-Report-Token', bootstrap.body.reportToken)
+      .send({
+        submissionId: 'submission-invalid-shot-001',
+        observedAt: '2026-07-23T03:14:00.000Z',
+        kind: 'problem',
+        title: 'Invalid screenshot fixture',
+        explanation: 'This malformed image must not create a Ticket Snitch case.',
+        screenshot: { filename: 'bad.png', contentType: 'image/png', base64: Buffer.from('not an image').toString('base64') },
+      });
+    assert.equal(response.status, 400);
+    assert.equal(response.body.code, 'SCREENSHOT_INVALID');
+    assert.equal(forwarded, false);
   } finally { global.fetch = originalFetch; }
 }));
 

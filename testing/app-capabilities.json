@@ -291,7 +291,7 @@
     {
       "id": "ticket-snitch-user-reporting",
       "label": "Ticket Snitch user reporting",
-      "userOutcome": "A QBO Escalations user can safely report a problem, request a feature, or share feedback and receive one duplicate-safe Ticket Snitch case key.",
+      "userOutcome": "A QBO Escalations user can safely report a problem, request a feature, or share feedback with an optional approved screenshot and receive one duplicate-safe Ticket Snitch case key.",
       "risk": "high",
       "owner": "QBO reporting integration",
       "sourcePaths": [
@@ -299,18 +299,20 @@
         "client/src/context/AppAuthContext.jsx",
         "client/src/api/appAuth.js",
         "client/src/components/reporting/UserReportDialog.jsx",
+        "client/src/components/reporting/screenshotCapture.js",
         "client/src/api/ticketSnitchReporting.js",
         "server/src/routes/app-auth.js",
         "server/src/middleware/app-auth.js",
         "server/src/services/app-auth.js",
         "server/src/routes/ticket-snitch.js",
-        "server/src/services/ticket-snitch-client.js"
+        "server/src/services/ticket-snitch-client.js",
+        "server/src/services/ticket-snitch-screenshot.js"
       ],
       "requiredCheckTypes": ["unit", "component", "server"],
       "evidence": [
-        { "type": "unit", "groupId": "client-components", "paths": ["client/src/api/appAuth.test.js", "client/src/api/ticketSnitchReporting.test.js"] },
+        { "type": "unit", "groupId": "client-components", "paths": ["client/src/api/appAuth.test.js", "client/src/api/ticketSnitchReporting.test.js", "client/src/components/reporting/screenshotCapture.test.js"] },
         { "type": "component", "groupId": "client-components", "paths": ["client/src/components/auth/AppAuthDialog.test.jsx", "client/src/components/reporting/UserReportDialog.test.jsx"] },
-        { "type": "server", "groupId": "server-suite", "paths": ["server/test/app-auth.test.js", "server/test/ticket-snitch-client.test.js", "server/test/ticket-snitch-user-reporting.test.js", "server/test/rate-limit.test.js"] }
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/app-auth.test.js", "server/test/ticket-snitch-client.test.js", "server/test/ticket-snitch-screenshot.test.js", "server/test/ticket-snitch-user-reporting.test.js", "server/test/rate-limit.test.js"] }
       ],
       "knownGaps": ["The sibling Ticket Snitch repository owns isolated real-HTTP QBO-sign-in-to-case and Chromium production-build acceptance checks; QBO Escalations' app-check profiles do not invoke those cross-repository checks. Live credential activation and a real runtime case remain human-owned gates."],
       "lastHumanReviewDate": "2026-07-23"

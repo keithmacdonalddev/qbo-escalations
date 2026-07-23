@@ -58,3 +58,31 @@ it('creates stable non-secret submission identifiers in the browser', () => {
   expect(first).toMatch(/^[A-Za-z0-9_-]{16,128}$/);
   expect(second).not.toBe(first);
 });
+
+it('encodes only the explicitly approved screenshot in the authenticated report request', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true,
+    status: 201,
+    headers: new Headers(),
+    json: async () => ({ ok: true, ticket: { key: 'QBO-2' }, evidence: { status: 'attached' } }),
+  });
+  const screenshot = new File(['safe screenshot bytes'], 'page.png', { type: 'image/png' });
+  await submitUserReport({
+    reportToken: 'form-token',
+    submissionId: 'submission-api-shot-001',
+    observedAt: '2026-07-23T03:15:00.000Z',
+    kind: 'feedback',
+    title: 'Screenshot feedback',
+    explanation: 'This screenshot was deliberately selected for the report.',
+    includeDiagnostics: false,
+    screenshot,
+  });
+  const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+  expect(body.screenshot).toEqual({
+    filename: 'page.png',
+    contentType: 'image/png',
+    base64: btoa('safe screenshot bytes'),
+  });
+  expect(body).not.toHaveProperty('cookies');
+  expect(body).not.toHaveProperty('authorization');
+});

@@ -190,7 +190,7 @@ The report and its consent flags become durable Ticket Snitch evidence. Request 
 - No reporting integrations for QBO Support Lab, LLM Gateway, Windows AI Assistant, or another app.
 - No public anonymous internet reporting endpoint.
 - No automatic bug confirmation, triage decision, assignment, priority, severity, resolution, or closure.
-- No screenshots, file attachments, raw logs, Gmail data, AI transcript capture, or background diagnostics collection in the first workflow.
+- This first-phase exclusion is superseded only for the explicit, user-reviewed screenshot workflow in `C:\Projects\ticket-snitch\04_QBO_SCREENSHOT_EVIDENCE_AND_CASEWORK_IMPLEMENTATION_PLAN.md`. Raw logs, Gmail data, AI transcript capture, and automatic/background screenshot collection remain out of scope.
 - No live Ticket Snitch credential creation/rotation/revocation, `.env` write, database preparation, service restart, deployment, or production authentication.
 
 Live activation will still require a human to generate a scrypt password hash locally, configure the QBO account profile/authentication mode and exact origin in the approved server secret environment, create a least-privilege QBO project credential in Ticket Snitch, configure the private connector values, and restart/deploy the exact approved environment. A real sign-in plus harmless report/case-key check is required before calling it live.

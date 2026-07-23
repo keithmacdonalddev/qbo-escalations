@@ -93,10 +93,10 @@
 }
 
 .v5-workflow-lane.is-preflight {
-  justify-content: flex-start;
+  justify-content: center;
   overflow-x: hidden;
   min-height: 136px;
-  padding-left: clamp(62px, 7vw, 124px);
+  padding-left: 0;
 }
 
 .v5-workflow-lane.is-revealing,
@@ -118,23 +118,9 @@
   z-index: 10;
 }
 
-.v5-workflow-lane.is-preflight .v5-workflow-lane__upload::before,
-.v5-workflow-lane.is-preflight .v5-workflow-lane__upload::after {
-  content: '';
-  position: absolute;
-  inset: 9px -11px 7px 17px;
-  border: 1px solid color-mix(in srgb, var(--v5-border) 72%, transparent);
-  border-radius: 8px;
-  background: var(--bg-raised);
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.24);
-  opacity: 0.46;
-  pointer-events: none;
-  z-index: -1;
-}
-
-.v5-workflow-lane.is-preflight .v5-workflow-lane__upload::after {
-  inset: 15px -20px 13px 31px;
-  opacity: 0.24;
+.v5-workflow-lane.is-preflight > .v5-workflow-connector,
+.v5-workflow-lane.is-preflight > .v5-workflow-lane__group {
+  display: none;
 }
 
 .v5-upload-card,
@@ -2276,7 +2262,7 @@
 
   .v5-workflow-lane.is-preflight {
     overflow-x: hidden;
-    padding-left: clamp(40px, 6vw, 84px);
+    padding-left: 0;
   }
 
   .v5-workflow-lane__group {
@@ -2341,7 +2327,7 @@
     min-height: 104px;
     align-items: center;
     overflow-x: hidden;
-    padding-left: 18px;
+    padding-left: 0;
   }
 
   .v5-upload-card,

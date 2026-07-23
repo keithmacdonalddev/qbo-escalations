@@ -1,5 +1,5 @@
 const REPORTING_BASE = '/api/ticket-snitch/reporting';
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 25_000;
 
 export class ReportingApiError extends Error {
   constructor(message, { code = 'REPORTING_REQUEST_FAILED', status = 0, requestId = '' } = {}) {
@@ -64,9 +64,28 @@ export function loadReportingBootstrap() {
   return reportingFetch('/bootstrap');
 }
 
-export function submitUserReport({ reportToken, submissionId, observedAt, kind, title, explanation, includeDiagnostics, errorCode = '' }) {
+export function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      const result = String(reader.result || '');
+      const comma = result.indexOf(',');
+      if (comma < 0) reject(new ReportingApiError('The screenshot could not be prepared.', { code: 'SCREENSHOT_ENCODING_FAILED' }));
+      else resolve(result.slice(comma + 1));
+    }, { once: true });
+    reader.addEventListener('error', () => reject(new ReportingApiError('The screenshot could not be read.', { code: 'SCREENSHOT_ENCODING_FAILED' })), { once: true });
+    reader.readAsDataURL(file);
+  });
+}
+
+export async function submitUserReport({ reportToken, submissionId, observedAt, kind, title, explanation, includeDiagnostics, errorCode = '', screenshot = null }) {
   const routeName = String(window.location.hash || '#/').split('?')[0].slice(0, 200);
   const pageUrl = `${window.location.origin}${window.location.pathname}`;
+  const screenshotPayload = screenshot ? {
+    filename: screenshot.name,
+    contentType: screenshot.type,
+    base64: await fileToBase64(screenshot),
+  } : undefined;
   return reportingFetch('/reports', {
     method: 'POST',
     headers: { 'X-QBO-Report-Token': reportToken },
@@ -77,6 +96,7 @@ export function submitUserReport({ reportToken, submissionId, observedAt, kind, 
       title,
       explanation,
       includeDiagnostics,
+      ...(screenshotPayload ? { screenshot: screenshotPayload } : {}),
       context: {
         pageUrl,
         routeName,

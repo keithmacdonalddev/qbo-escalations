@@ -4,10 +4,12 @@ const {
   attachEvidence,
   buildReport,
   callTicketSnitch,
+  checkConnection,
   commentOnWork,
   getConnectorConfig,
   getWork,
   reportWork,
+  screenshotEvidenceIdempotencyKey,
   transitionWork,
   updateWork,
 } = require('../src/services/ticket-snitch-client');
@@ -25,6 +27,27 @@ test('Ticket Snitch connector is disabled until all three secrets are configured
   assert.equal(getConnectorConfig().configured, false);
   if (original !== undefined) process.env.TICKET_SNITCH_API_KEY = original;
 });
+
+test('connection health remains available with the report-only credential', async () => withEnvironment({
+  TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1',
+  TICKET_SNITCH_API_KEY: 'ts_report.secret',
+  TICKET_SNITCH_EVIDENCE_API_KEY: '',
+  TICKET_SNITCH_AGENT_API_KEY: '',
+  TICKET_SNITCH_PROJECT_ID: 'project-1',
+}, async () => {
+  const originalFetch = global.fetch;
+  let authorization = '';
+  global.fetch = async (_url, options) => {
+    authorization = options.headers.Authorization;
+    return { ok: true, status: 200, headers: new Headers(), json: async () => ({ ok: true, data: { id: 'project-1' } }) };
+  };
+  try {
+    await checkConnection('connection-request');
+    assert.equal(authorization, 'Bearer ts_report.secret');
+  } finally {
+    global.fetch = originalFetch;
+  }
+}));
 
 test('caller identity is not trusted and report enrichment is allow-listed', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1/', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1', NODE_ENV: 'test' }, () => {
   const report = buildReport({ type: 'problem_report', title: 'Save failed', originalReport: 'I clicked Save and nothing changed.' }, { pageUrl: 'https://qbo.example.test/invoice/42', reportingUserId: 'user-42', reportingUserName: 'Taylor', password: 'must-not-leak' });
@@ -52,6 +75,7 @@ test('user-approved diagnostics follow the Ticket Snitch contract and secret-bea
       routeName: '#/escalations',
       sourceRequestId: 'request-42',
       diagnosticsApproved: true,
+      screenshotApproved: true,
       browser: 'Test Browser',
       viewport: '1280x720',
       locale: 'en-CA',
@@ -67,6 +91,7 @@ test('user-approved diagnostics follow the Ticket Snitch contract and secret-bea
   assert.equal(report.details.environment.locale, 'en-CA');
   assert.equal(report.details.environment.errorCode, 'SAVE_FAILED');
   assert.equal(report.details.consent.diagnostics, true);
+  assert.equal(report.details.consent.screenshot, true);
   assert.equal(report.details.password, undefined);
 }));
 
@@ -102,7 +127,13 @@ test('connector sends project scope, trace, SDK, and idempotency headers', async
   } finally { global.fetch = originalFetch; }
 }));
 
-test('agent connector supports read, update, comment, transition, and evidence journeys', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1' }, async () => {
+test('report, evidence, and Codex agent operations use separate least-privileged credentials', async () => withEnvironment({
+  TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1',
+  TICKET_SNITCH_API_KEY: 'ts_report.secret',
+  TICKET_SNITCH_EVIDENCE_API_KEY: 'ts_evidence.secret',
+  TICKET_SNITCH_AGENT_API_KEY: 'ts_agent.secret',
+  TICKET_SNITCH_PROJECT_ID: 'project-1',
+}, async () => {
   const originalFetch = global.fetch;
   const calls = [];
   global.fetch = async (url, options) => {
@@ -114,7 +145,15 @@ test('agent connector supports read, update, comment, transition, and evidence j
     await updateWork('QBO-42', { version: 2, description: 'Diagnostics', reason: 'Added evidence' }, 'update-1');
     await commentOnWork('QBO-42', { body: 'Reproduced', visibility: 'internal' }, 'comment-1');
     await transitionWork('QBO-42', { version: 3, toStatus: 'verification', reason: 'Ready' }, 'transition-1');
-    await attachEvidence('QBO-42', { filename: 'proof.txt', contentType: 'text/plain', base64: 'cGFzc2Vk' }, 'evidence-1');
+    await attachEvidence(
+      'QBO-42',
+      { filename: 'proof.txt', contentType: 'text/plain', base64: 'cGFzc2Vk' },
+      'evidence-1',
+      {
+        authority: 'evidence',
+        idempotencyKey: screenshotEvidenceIdempotencyKey('submission-42'),
+      },
+    );
     assert.deepEqual(calls.map((call) => [call.options.method, call.url]), [
       ['GET', 'https://tickets.example.test/api/v1/work-items/QBO-42'],
       ['PATCH', 'https://tickets.example.test/api/v1/work-items/QBO-42'],
@@ -123,6 +162,14 @@ test('agent connector supports read, update, comment, transition, and evidence j
       ['POST', 'https://tickets.example.test/api/v1/work-items/QBO-42/evidence/base64'],
     ]);
     assert.equal(calls[4].body.filename, 'proof.txt');
+    assert.deepEqual(calls.slice(0, 4).map((call) => call.options.headers.Authorization), [
+      'Bearer ts_agent.secret',
+      'Bearer ts_agent.secret',
+      'Bearer ts_agent.secret',
+      'Bearer ts_agent.secret',
+    ]);
+    assert.equal(calls[4].options.headers.Authorization, 'Bearer ts_evidence.secret');
+    assert.match(calls[4].options.headers['Idempotency-Key'], /^[a-f0-9]{64}$/);
   } finally { global.fetch = originalFetch; }
 }));
 

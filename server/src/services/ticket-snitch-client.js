@@ -23,14 +23,20 @@ function sanitizePageUrl(value) {
 function configuration(env = process.env) {
   const baseUrl = String(env.TICKET_SNITCH_API_URL || '').trim().replace(/\/+$/, '');
   const apiKey = String(env.TICKET_SNITCH_API_KEY || '').trim();
+  const evidenceApiKey = String(env.TICKET_SNITCH_EVIDENCE_API_KEY || '').trim();
+  const agentApiKey = String(env.TICKET_SNITCH_AGENT_API_KEY || '').trim();
   const projectId = String(env.TICKET_SNITCH_PROJECT_ID || '').trim();
   const parsedTimeout = Number.parseInt(env.TICKET_SNITCH_TIMEOUT_MS || '8000', 10);
   return {
     baseUrl,
     apiKey,
+    evidenceApiKey,
+    agentApiKey,
     projectId,
     timeoutMs: Number.isFinite(parsedTimeout) ? Math.min(30_000, Math.max(1_000, parsedTimeout)) : 8_000,
     configured: Boolean(baseUrl && apiKey && projectId),
+    evidenceConfigured: Boolean(baseUrl && evidenceApiKey && projectId),
+    agentConfigured: Boolean(baseUrl && agentApiKey && projectId),
   };
 }
 
@@ -48,9 +54,23 @@ function getConnectorConfig() {
   return configuration();
 }
 
-async function callTicketSnitch(path, { method = 'GET', body, requestId, idempotencyKey } = {}) {
+function credentialFor(config, authority) {
+  if (authority === 'evidence') return config.evidenceApiKey;
+  if (authority === 'agent') return config.agentApiKey;
+  return config.apiKey;
+}
+
+async function callTicketSnitch(path, { method = 'GET', body, requestId, idempotencyKey, authority = 'report' } = {}) {
   const config = configuration();
-  if (!config.configured) throw new TicketSnitchConnectorError('Ticket Snitch is not configured for this server.', { code: 'TICKET_SNITCH_NOT_CONFIGURED', status: 503 });
+  const apiKey = credentialFor(config, authority);
+  if (!config.baseUrl || !config.projectId || !apiKey) {
+    const code = authority === 'evidence'
+      ? 'TICKET_SNITCH_EVIDENCE_NOT_CONFIGURED'
+      : authority === 'agent'
+        ? 'TICKET_SNITCH_AGENT_NOT_CONFIGURED'
+        : 'TICKET_SNITCH_NOT_CONFIGURED';
+    throw new TicketSnitchConnectorError('Ticket Snitch is not configured for this server operation.', { code, status: 503 });
+  }
   const correlationId = requestId || crypto.randomUUID();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
@@ -59,7 +79,7 @@ async function callTicketSnitch(path, { method = 'GET', body, requestId, idempot
       method,
       signal: controller.signal,
       headers: {
-        Authorization: `Bearer ${config.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
         'X-Request-ID': correlationId,
         'X-Ticket-Snitch-Project': config.projectId,
@@ -93,9 +113,9 @@ function buildReport(input, context = {}, trustedReporter = {}) {
     routeName: cleanText(context.routeName, 200),
     sourceRequestId: cleanText(context.sourceRequestId, 128),
     captureEnvironment: cleanText(process.env.NODE_ENV || 'development', 40),
-    consent: {
-      diagnostics: diagnosticsApproved,
-      screenshot: false,
+      consent: {
+        diagnostics: diagnosticsApproved,
+        screenshot: context.screenshotApproved === true,
       reply: false,
     },
     environment: {
@@ -139,11 +159,28 @@ async function reportWork(input, context = {}, requestId = '', trustedReporter =
   return callTicketSnitch('/work-items', { method: 'POST', body: buildReport(input, context, trustedReporter), requestId, idempotencyKey });
 }
 
-const getWork = (identifier, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}`, { requestId });
-const updateWork = (identifier, changes, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}`, { method: 'PATCH', body: changes, requestId });
-const commentOnWork = (identifier, comment, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}/comments`, { method: 'POST', body: comment, requestId });
-const transitionWork = (identifier, transition, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}/transitions`, { method: 'POST', body: transition, requestId });
-const attachEvidence = (identifier, evidence, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}/evidence/base64`, { method: 'POST', body: evidence, requestId });
-const checkConnection = (requestId) => { const config = configuration(); return callTicketSnitch(`/projects/${encodeURIComponent(config.projectId)}`, { requestId }); };
+const getWork = (identifier, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}`, { requestId, authority: 'agent' });
+const updateWork = (identifier, changes, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}`, { method: 'PATCH', body: changes, requestId, authority: 'agent' });
+const commentOnWork = (identifier, comment, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}/comments`, { method: 'POST', body: comment, requestId, authority: 'agent' });
+const transitionWork = (identifier, transition, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}/transitions`, { method: 'POST', body: transition, requestId, authority: 'agent' });
+const attachEvidence = (identifier, evidence, requestId, { idempotencyKey, authority = 'report' } = {}) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}/evidence/base64`, {
+  method: 'POST',
+  body: evidence,
+  requestId,
+  idempotencyKey,
+  authority,
+});
+const checkConnection = (requestId, { authority = 'report' } = {}) => {
+  const config = configuration();
+  return callTicketSnitch(`/projects/${encodeURIComponent(config.projectId)}`, { requestId, authority });
+};
 
-module.exports = { TicketSnitchConnectorError, attachEvidence, buildReport, callTicketSnitch, checkConnection, commentOnWork, getConnectorConfig, getWork, reportWork, transitionWork, updateWork };
+function screenshotEvidenceIdempotencyKey(submissionId) {
+  const config = configuration();
+  return crypto
+    .createHash('sha256')
+    .update(`qbo-screenshot:${config.projectId}:${String(submissionId || '').slice(0, 128)}`)
+    .digest('hex');
+}
+
+module.exports = { TicketSnitchConnectorError, attachEvidence, buildReport, callTicketSnitch, checkConnection, commentOnWork, getConnectorConfig, getWork, reportWork, screenshotEvidenceIdempotencyKey, transitionWork, updateWork };

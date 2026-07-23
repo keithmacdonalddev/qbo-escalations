@@ -8,8 +8,14 @@ const reportingMocks = vi.hoisted(() => ({
   loadReportingBootstrap: vi.fn(),
   submitUserReport: vi.fn(),
 }));
+const screenshotMocks = vi.hoisted(() => ({
+  captureScreenFrame: vi.fn(),
+  screenCaptureSupported: vi.fn(() => true),
+  validateScreenshotFile: vi.fn((file) => file),
+}));
 
 vi.mock('../../api/ticketSnitchReporting.js', () => reportingMocks);
+vi.mock('./screenshotCapture.js', () => screenshotMocks);
 
 beforeEach(() => {
   reportingMocks.createSubmissionId.mockReturnValue('submission-component-001');
@@ -18,13 +24,18 @@ beforeEach(() => {
     available: true,
     reportToken: 'report-token',
     requestId: 'bootstrap-request',
+    screenshotAvailable: true,
   });
   reportingMocks.submitUserReport.mockReset().mockResolvedValue({
     ok: true,
     ticket: { id: 'work-1', key: 'QBO-51' },
     idempotentReplay: false,
     requestId: 'report-request',
+    evidence: { requested: false, status: 'not_requested' },
   });
+  screenshotMocks.captureScreenFrame.mockReset().mockResolvedValue(new File(['screen'], 'capture.png', { type: 'image/png' }));
+  screenshotMocks.screenCaptureSupported.mockReset().mockReturnValue(true);
+  screenshotMocks.validateScreenshotFile.mockReset().mockImplementation((file) => file);
 });
 
 it('offers the three plain-language choices and validates the short form', async () => {
@@ -62,6 +73,7 @@ it('submits consented feedback and shows the returned Ticket Snitch case key', a
     explanation: 'Grouping the filters would make review much faster.',
     includeDiagnostics: true,
     errorCode: 'SAFE_ERROR',
+    screenshot: null,
   }));
   expect(await screen.findByText('QBO-51')).toBeVisible();
   expect(screen.getByText(/ready for human review/i)).toBeVisible();
@@ -139,4 +151,94 @@ it('hands an expired QBO session back to the sign-in flow without losing the dra
   const onAuthenticationRequired = vi.fn();
   render(<UserReportDialog open onClose={() => {}} onAuthenticationRequired={onAuthenticationRequired} />);
   await waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledOnce());
+});
+
+it('captures only after an explicit action and lets the user preview, replace, and remove the optional image', async () => {
+  const user = userEvent.setup();
+  render(<UserReportDialog open onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Capture screenshot' });
+  expect(screenshotMocks.captureScreenFrame).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
+  expect(screenshotMocks.captureScreenFrame).toHaveBeenCalledOnce();
+  expect(await screen.findByText('capture.png')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Retake' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Replace' })).toBeVisible();
+
+  await user.click(screen.getByRole('button', { name: 'Remove' }));
+  expect(screen.queryByText('capture.png')).not.toBeInTheDocument();
+  expect(screen.getByText('Screenshot removed from this report.')).toBeVisible();
+});
+
+it('submits an approved screenshot and confirms that it became case evidence', async () => {
+  reportingMocks.submitUserReport.mockResolvedValue({
+    ok: true,
+    ticket: { id: 'work-shot', key: 'QBO-63' },
+    idempotentReplay: false,
+    requestId: 'shot-request',
+    evidence: { requested: true, status: 'attached', id: 'evidence-shot' },
+  });
+  const user = userEvent.setup();
+  render(<UserReportDialog open onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Capture screenshot' });
+  await user.type(screen.getByLabelText('Short title'), 'Screenshot evidence report');
+  await user.type(screen.getByLabelText('What should we know?'), 'The selected screenshot shows the reported layout problem.');
+  await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
+  await user.click(screen.getByRole('button', { name: 'Send report' }));
+
+  await waitFor(() => expect(reportingMocks.submitUserReport).toHaveBeenCalledWith(expect.objectContaining({
+    screenshot: expect.objectContaining({ name: 'capture.png', type: 'image/png' }),
+  })));
+  expect(await screen.findByText('QBO-63')).toBeVisible();
+  expect(screen.getByText('Your approved screenshot is attached as case evidence.')).toBeVisible();
+});
+
+it('preserves a created case and retries only with the same duplicate-safe draft identity after evidence failure', async () => {
+  reportingMocks.submitUserReport
+    .mockResolvedValueOnce({
+      ok: true,
+      ticket: { id: 'work-partial', key: 'QBO-64' },
+      idempotentReplay: false,
+      requestId: 'case-created',
+      evidence: { requested: true, status: 'failed', message: 'Evidence storage is temporarily unavailable.', requestId: 'evidence-failed' },
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      ticket: { id: 'work-partial', key: 'QBO-64' },
+      idempotentReplay: true,
+      requestId: 'case-replayed',
+      evidence: { requested: true, status: 'attached', id: 'evidence-partial' },
+    });
+  const user = userEvent.setup();
+  render(<UserReportDialog open onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Capture screenshot' });
+  await user.type(screen.getByLabelText('Short title'), 'Partial evidence retry');
+  await user.type(screen.getByLabelText('What should we know?'), 'The case must remain safe while the screenshot attachment is retried.');
+  await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
+  await user.click(screen.getByRole('button', { name: 'Send report' }));
+
+  expect(await screen.findByText('Report received; screenshot needs another try')).toBeVisible();
+  expect(screen.getByText('QBO-64')).toBeVisible();
+  expect(screen.getByText(/will not create a duplicate case/i)).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Retry screenshot' }));
+  expect(await screen.findByText('Your approved screenshot is attached as case evidence.')).toBeVisible();
+  expect(reportingMocks.submitUserReport).toHaveBeenCalledTimes(2);
+  const first = reportingMocks.submitUserReport.mock.calls[0][0];
+  const second = reportingMocks.submitUserReport.mock.calls[1][0];
+  expect(second.submissionId).toBe(first.submissionId);
+  expect(second.screenshot).toBe(first.screenshot);
+});
+
+it('keeps text reporting usable when the separate screenshot credential is unavailable', async () => {
+  reportingMocks.loadReportingBootstrap.mockResolvedValue({
+    ok: true,
+    available: true,
+    screenshotAvailable: false,
+    reportToken: 'report-token',
+    requestId: 'bootstrap-request',
+  });
+  render(<UserReportDialog open onClose={() => {}} />);
+  expect(await screen.findByText(/Screenshot attachments are not connected/i)).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Send report' })).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'Capture screenshot' })).not.toBeInTheDocument();
 });

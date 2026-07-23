@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatV5Container from './ChatV5Container.jsx';
 import { hasUnsavedWork } from '../../lib/unsavedWorkGuard.js';
@@ -274,6 +275,26 @@ describe('ChatV5Container rendered workflow states', () => {
     expect(screen.getByRole('button', { name: 'Upload escalation screenshot' })).toBeVisible();
     expect(screen.queryByRole('region', { name: 'Analyst answer not saved' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Evidence complete/i)).not.toBeInTheDocument();
+  });
+
+  it('centers image intake without visible workflow cards behind it before upload', () => {
+    Object.assign(mocks.orchestratorOverrides, {
+      imageCaptured: false,
+      stageState: {
+        parser: { status: 'pending' }, inv: { status: 'pending' }, triage: { status: 'pending' }, main: { status: 'pending' },
+      },
+    });
+    const { container } = renderContainer();
+    const lane = container.querySelector('.v5-workflow-lane.is-preflight');
+    const workflowGroup = lane?.querySelector('.v5-workflow-lane__group');
+    const stylesheet = readFileSync('src/components/chat-v5/chat-v5.css', 'utf8');
+
+    expect(lane).not.toBeNull();
+    expect(workflowGroup).not.toBeNull();
+    expect(workflowGroup).toHaveAttribute('aria-hidden', 'true');
+    expect(stylesheet).toMatch(/\.v5-workflow-lane\.is-preflight\s*\{[^}]*justify-content:\s*center;[^}]*padding-left:\s*0;/s);
+    expect(stylesheet).toMatch(/\.v5-workflow-lane\.is-preflight\s*>\s*\.v5-workflow-connector,[\s\S]*?\.v5-workflow-lane\.is-preflight\s*>\s*\.v5-workflow-lane__group\s*\{\s*display:\s*none;/);
+    expect(stylesheet).not.toMatch(/\.v5-workflow-lane\.is-preflight\s+\.v5-workflow-lane__upload::(?:before|after)/);
   });
 
   it('keeps a parser validation failure attached to the parser stage and visible to the user', () => {
