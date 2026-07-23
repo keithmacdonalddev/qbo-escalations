@@ -326,3 +326,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
 Special Feature: Agent Behavior Causality Replay - From any response or meaningful silence, show which identity traits, memories, relationship signals, workflow state, and routing rules caused an agent to participate, defer, or stay quiet. The user could temporarily change one factor and preview the resulting team participation without altering the live profile, making autonomous social behavior explainable before approving a permanent identity change; this is distinct from Execution Identity Verification, which proves the model that ran, and Agent Identity Growth Review, which governs lasting changes.
+
+Date: 2026-07-23
+Time: 01:29 AST
+Model: Claude Fable 5
+Is duplicate?: no
+Complexity: high
+Special Feature: Recovery Fire Drills - On a schedule, create a sandboxed copy of real workflow data, inject simulated evidence-loss scenarios such as a lost triage save, expired source record, provider outage mid-rerun, or interrupted operation, and run the actual recovery machinery without ever touching live records. Score readiness for each failure class with evidence links proving that recovery, markers, provenance, and locks behaved correctly, and alert the operator when a code or configuration change silently breaks a path that ordinary tests missed.
