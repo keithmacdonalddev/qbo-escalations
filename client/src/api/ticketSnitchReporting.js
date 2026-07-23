@@ -111,3 +111,39 @@ export async function submitUserReport({ reportToken, submissionId, observedAt, 
     }),
   });
 }
+
+function receiptHeaders(reportToken, receiptHandle) {
+  return {
+    'X-QBO-Report-Token': reportToken,
+    'X-QBO-Ticket-Receipt': receiptHandle,
+  };
+}
+
+export function loadCustomerReceipt({ reportToken, receiptHandle }) {
+  return reportingFetch('/receipt', {
+    headers: receiptHeaders(reportToken, receiptHandle),
+  });
+}
+
+export function replyToCustomerReceipt({ reportToken, receiptHandle, actionId, body }) {
+  return reportingFetch('/receipt/replies', {
+    method: 'POST',
+    headers: receiptHeaders(reportToken, receiptHandle),
+    body: JSON.stringify({ actionId, body }),
+  });
+}
+
+export function validateCustomerReceipt({
+  reportToken,
+  receiptHandle,
+  actionId,
+  workItemVersion,
+  outcome,
+  note = '',
+}) {
+  return reportingFetch('/receipt/validation', {
+    method: 'POST',
+    headers: receiptHeaders(reportToken, receiptHandle),
+    body: JSON.stringify({ actionId, workItemVersion, outcome, note }),
+  });
+}

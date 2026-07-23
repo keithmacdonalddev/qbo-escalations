@@ -60,7 +60,7 @@ function credentialFor(config, authority) {
   return config.apiKey;
 }
 
-async function callTicketSnitch(path, { method = 'GET', body, requestId, idempotencyKey, authority = 'report' } = {}) {
+async function callTicketSnitch(path, { method = 'GET', body, requestId, idempotencyKey, authority = 'report', issueCustomerReceipt = false } = {}) {
   const config = configuration();
   const apiKey = credentialFor(config, authority);
   if (!config.baseUrl || !config.projectId || !apiKey) {
@@ -85,6 +85,7 @@ async function callTicketSnitch(path, { method = 'GET', body, requestId, idempot
         'X-Ticket-Snitch-Project': config.projectId,
         'X-Ticket-Snitch-SDK': SDK_VERSION,
         ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+        ...(issueCustomerReceipt ? { 'X-Ticket-Snitch-Issue-Receipt': 'true' } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
@@ -102,21 +103,72 @@ async function callTicketSnitch(path, { method = 'GET', body, requestId, idempot
   } finally { clearTimeout(timer); }
 }
 
+async function callCustomerReceipt(path, { method = 'GET', body, requestId, idempotencyKey, receiptToken } = {}) {
+  const config = configuration();
+  if (!config.baseUrl || !/^tsr_[0-9a-f-]{36}\.[A-Za-z0-9_-]{40,64}$/.test(String(receiptToken || ''))) {
+    throw new TicketSnitchConnectorError('This private report receipt is unavailable or invalid.', {
+      code: 'TICKET_SNITCH_CUSTOMER_RECEIPT_INVALID',
+      status: 401,
+      requestId,
+    });
+  }
+  const correlationId = requestId || crypto.randomUUID();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
+  try {
+    const response = await fetch(`${config.baseUrl}/customer/receipt${path}`, {
+      method,
+      signal: controller.signal,
+      headers: {
+        'X-Ticket-Snitch-Receipt': receiptToken,
+        'Content-Type': 'application/json',
+        'X-Request-ID': correlationId,
+        'X-Ticket-Snitch-SDK': SDK_VERSION,
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new TicketSnitchConnectorError(payload?.error?.message || `Ticket Snitch returned HTTP ${response.status}.`, {
+        code: payload?.error?.code || 'TICKET_SNITCH_CUSTOMER_RECEIPT_FAILED',
+        status: response.status,
+        requestId: payload?.requestId || response.headers.get('x-request-id') || correlationId,
+      });
+    }
+    return payload;
+  } catch (error) {
+    if (error instanceof TicketSnitchConnectorError) throw error;
+    if (error.name === 'AbortError') {
+      throw new TicketSnitchConnectorError('Ticket Snitch did not respond before the receipt timeout.', {
+        code: 'TICKET_SNITCH_TIMEOUT', status: 504, requestId: correlationId,
+      });
+    }
+    throw new TicketSnitchConnectorError('QBO Escalations could not reach Ticket Snitch.', {
+      code: 'TICKET_SNITCH_UNAVAILABLE', status: 502, requestId: correlationId,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function buildReport(input, context = {}, trustedReporter = {}) {
   const config = configuration();
   const diagnosticsApproved = context.diagnosticsApproved === true;
   const pageUrl = sanitizePageUrl(context.pageUrl);
   const capturedAt = cleanText(context.observedAt, 100);
+  const reporterActorId = cleanText(trustedReporter.actorId, 128);
+  const hasTrustedReporter = Boolean(reporterActorId);
   const safeContext = {
     capturedAt: capturedAt || new Date().toISOString(),
     pageUrl,
     routeName: cleanText(context.routeName, 200),
     sourceRequestId: cleanText(context.sourceRequestId, 128),
     captureEnvironment: cleanText(process.env.NODE_ENV || 'development', 40),
-      consent: {
-        diagnostics: diagnosticsApproved,
-        screenshot: context.screenshotApproved === true,
-      reply: false,
+    consent: {
+      diagnostics: diagnosticsApproved,
+      screenshot: context.screenshotApproved === true,
+      reply: hasTrustedReporter,
     },
     environment: {
       appVersion: cleanText(context.appVersion || process.env.npm_package_version, 120),
@@ -143,10 +195,10 @@ function buildReport(input, context = {}, trustedReporter = {}) {
     tags: Array.isArray(input.tags) ? input.tags : [],
     source: { kind: 'project_api', url: pageUrl, externalId: safeContext.sourceRequestId },
     reporter: {
-      actorId: cleanText(trustedReporter.actorId, 128),
+      actorId: reporterActorId,
       displayName: cleanText(trustedReporter.displayName, 200),
       email: cleanText(trustedReporter.email, 320),
-      wantsReply: false,
+      wantsReply: hasTrustedReporter,
     },
     details: safeContext,
   };
@@ -156,7 +208,13 @@ async function reportWork(input, context = {}, requestId = '', trustedReporter =
   const config = configuration();
   const sourceIdentity = String(context.submissionId || context.sourceRequestId || requestId || crypto.randomUUID()).slice(0, 128);
   const idempotencyKey = crypto.createHash('sha256').update(`qbo:${config.projectId}:${sourceIdentity}`).digest('hex');
-  return callTicketSnitch('/work-items', { method: 'POST', body: buildReport(input, context, trustedReporter), requestId, idempotencyKey });
+  return callTicketSnitch('/work-items', {
+    method: 'POST',
+    body: buildReport(input, context, trustedReporter),
+    requestId,
+    idempotencyKey,
+    issueCustomerReceipt: Boolean(cleanText(trustedReporter.actorId, 128)),
+  });
 }
 
 const getWork = (identifier, requestId) => callTicketSnitch(`/work-items/${encodeURIComponent(identifier)}`, { requestId, authority: 'agent' });
@@ -183,4 +241,42 @@ function screenshotEvidenceIdempotencyKey(submissionId) {
     .digest('hex');
 }
 
-module.exports = { TicketSnitchConnectorError, attachEvidence, buildReport, callTicketSnitch, checkConnection, commentOnWork, getConnectorConfig, getWork, reportWork, screenshotEvidenceIdempotencyKey, transitionWork, updateWork };
+const getCustomerReceipt = (receiptToken, requestId) => callCustomerReceipt('', {
+  receiptToken,
+  requestId,
+});
+
+const replyToCustomerReceipt = (receiptToken, body, actionId, requestId) => callCustomerReceipt('/replies', {
+  method: 'POST',
+  body: { body },
+  receiptToken,
+  idempotencyKey: actionId,
+  requestId,
+});
+
+const validateCustomerReceipt = (receiptToken, input, actionId, requestId) => callCustomerReceipt('/validation', {
+  method: 'POST',
+  body: input,
+  receiptToken,
+  idempotencyKey: actionId,
+  requestId,
+});
+
+module.exports = {
+  TicketSnitchConnectorError,
+  attachEvidence,
+  buildReport,
+  callCustomerReceipt,
+  callTicketSnitch,
+  checkConnection,
+  commentOnWork,
+  getConnectorConfig,
+  getCustomerReceipt,
+  getWork,
+  replyToCustomerReceipt,
+  reportWork,
+  screenshotEvidenceIdempotencyKey,
+  transitionWork,
+  updateWork,
+  validateCustomerReceipt,
+};

@@ -43,6 +43,258 @@
   line-height: 1.5;
 }
 
+.user-report-view-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 10px 24px 0;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.user-report-view-tabs button,
+.user-report-back-link {
+  min-height: 38px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.user-report-view-tabs button {
+  padding: 0 12px;
+  border-bottom: 2px solid transparent;
+}
+
+.user-report-view-tabs button.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.user-report-receipts,
+.user-report-receipt-detail {
+  display: grid;
+  gap: 16px;
+  padding: 20px 24px 24px;
+}
+
+.user-report-section-heading h3,
+.user-report-section-heading p,
+.user-report-public-status h3,
+.user-report-public-status p,
+.user-report-public-updates h4,
+.user-report-validation h4,
+.user-report-validation p,
+.user-report-update-list p,
+.user-report-empty-copy {
+  margin: 0;
+}
+
+.user-report-section-heading h3,
+.user-report-public-status h3 {
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.user-report-section-heading p,
+.user-report-empty-copy,
+.user-report-validation > p {
+  margin-top: 5px;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.user-report-receipt-list {
+  display: grid;
+  gap: 8px;
+}
+
+.user-report-receipt-row {
+  display: flex;
+  min-width: 0;
+  min-height: 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  color: var(--ink-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-report-receipt-row:hover {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+}
+
+.user-report-receipt-row > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.user-report-receipt-row strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.user-report-receipt-row small {
+  overflow: hidden;
+  color: var(--ink-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-report-receipt-row > span:last-child {
+  flex: none;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.user-report-receipt-row > span.is-expired { color: var(--warning); }
+
+.user-report-back-link {
+  width: fit-content;
+  padding: 0;
+}
+
+.user-report-back-link:hover { color: var(--ink); }
+
+.user-report-public-status,
+.user-report-public-updates,
+.user-report-validation {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+}
+
+.user-report-public-status-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.user-report-case-key {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.user-report-status-pill {
+  flex: none;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--ink-secondary);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.user-report-status-pill.status-verification,
+.user-report-status-pill.status-closed { color: var(--success); }
+.user-report-status-pill.status-blocked,
+.user-report-status-pill.status-reopened { color: var(--danger); }
+.user-report-status-pill.status-needs_info,
+.user-report-status-pill.status-waiting { color: var(--warning); }
+
+.user-report-public-status > p {
+  color: var(--ink-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.user-report-public-status > small {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+}
+
+.user-report-inline-notice {
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  background: var(--accent-subtle);
+  color: var(--ink);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.user-report-update-list {
+  display: grid;
+  gap: 8px;
+}
+
+.user-report-update-list article {
+  display: grid;
+  gap: 6px;
+  padding: 10px 11px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+}
+
+.user-report-update-list article.is-customer { margin-left: 32px; }
+.user-report-update-list article.is-team { margin-right: 32px; }
+
+.user-report-update-list article > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.user-report-update-list strong { color: var(--ink); font-size: 11px; }
+.user-report-update-list time { color: var(--ink-tertiary); font-size: 9px; }
+.user-report-update-list p { color: var(--ink-secondary); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+
+.user-report-dialog .user-report-reply-form {
+  gap: 8px;
+  padding: 4px 0 0;
+}
+
+.user-report-reply-form label,
+.user-report-validation label {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.user-report-reply-form textarea,
+.user-report-validation textarea {
+  width: 100%;
+  min-height: 86px;
+  box-sizing: border-box;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.user-report-reply-form .user-report-primary { justify-self: end; }
+
+.user-report-validation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .user-report-close {
   width: 36px;
   height: 36px;
@@ -478,7 +730,10 @@
   }
 
   .user-report-header,
-  .user-report-dialog form { padding-right: 16px; padding-left: 16px; }
+  .user-report-dialog form,
+  .user-report-view-tabs,
+  .user-report-receipts,
+  .user-report-receipt-detail { padding-right: 16px; padding-left: 16px; }
   .user-report-type-grid { grid-template-columns: 1fr; }
   .user-report-type { min-height: 64px; }
   .user-report-actions { flex-direction: column-reverse; }
@@ -487,6 +742,11 @@
   .user-report-screenshot-preview { grid-template-columns: 1fr; }
   .user-report-screenshot-preview img { width: 100%; height: min(42vw, 190px); }
   .user-report-screenshot-actions { display: grid; grid-template-columns: 1fr; }
+  .user-report-receipt-row { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .user-report-public-status-heading { flex-direction: column; }
+  .user-report-update-list article.is-customer,
+  .user-report-update-list article.is-team { margin: 0; }
+  .user-report-validation-actions { display: grid; grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

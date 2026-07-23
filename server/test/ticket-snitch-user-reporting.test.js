@@ -6,6 +6,7 @@ const request = require('supertest');
 const sharp = require('sharp');
 const { createApp } = require('../src/app');
 const { clearSessions, hashPassword } = require('../src/services/app-auth');
+const { reportWork } = require('../src/services/ticket-snitch-client');
 
 const PASSWORD = 'reporting integration password';
 let passwordHash;
@@ -144,15 +145,40 @@ test('browser report derives identity from the authenticated session, filters co
     assert.equal(calls[0].body.reporter.actorId, 'qbo-local-user');
     assert.equal(calls[0].body.reporter.displayName, 'QBO local user');
     assert.equal(calls[0].body.reporter.email, 'reporter@example.test');
+    assert.equal(calls[0].body.reporter.wantsReply, true);
+    assert.equal(calls[0].body.details.consent.reply, true);
     assert.equal(calls[0].body.source.url, 'http://qbo.example.test/escalations');
     assert.equal(calls[0].body.details.routeName, '#/escalations');
     assert.equal(calls[0].body.details.environment.appVersion, '1.0.0');
     assert.equal(calls[0].body.details.environment.browser, undefined);
     assert.equal(calls[0].body.details.password, undefined);
     assert.equal(calls[0].options.headers.Authorization, 'Bearer ts_test.secret');
+    assert.equal(calls[0].options.headers['X-Ticket-Snitch-Issue-Receipt'], 'true');
     assert.equal(calls[0].options.headers['Idempotency-Key'], calls[1].options.headers['Idempotency-Key']);
     assert.notEqual(first.body.requestId, '');
   } finally { global.fetch = originalFetch; }
+}));
+
+test('trusted automation reports remain compatible and do not request customer receipts', async () => withEnvironment(reportEnvironment(), async () => {
+  const originalFetch = global.fetch;
+  let captured;
+  global.fetch = async (_url, options) => {
+    captured = { options, body: JSON.parse(options.body) };
+    return ticketResponse({ ok: true, data: { id: 'work-agent-1', key: 'QBO-43' } });
+  };
+  try {
+    await reportWork({
+      type: 'agent_discovered_problem',
+      title: 'Agent-only report',
+      originalReport: 'A trusted server integration reported this without a customer identity.',
+    }, { sourceRequestId: 'agent-report-001' }, 'agent-request-001');
+    assert.equal(captured.options.headers['X-Ticket-Snitch-Issue-Receipt'], undefined);
+    assert.equal(captured.body.reporter.actorId, '');
+    assert.equal(captured.body.reporter.wantsReply, false);
+    assert.equal(captured.body.details.consent.reply, false);
+  } finally {
+    global.fetch = originalFetch;
+  }
 }));
 
 test('feedback maps to improvement and diagnostics require explicit approval', async () => withEnvironment(reportEnvironment(), async () => {
@@ -332,6 +358,78 @@ test('browser reporting rejects an invalid anti-forgery token before forwarding'
     assert.equal(response.body.code, 'TICKET_SNITCH_REPORT_TOKEN_INVALID');
     assert.equal(forwarded, false);
   } finally { global.fetch = originalFetch; }
+}));
+
+test('customer follow-up keeps the raw Ticket Snitch receipt server-side behind a user-bound encrypted handle', async () => withEnvironment(reportEnvironment(), async () => {
+  const originalFetch = global.fetch;
+  const rawReceipt = `tsr_11111111-1111-4111-8111-111111111111.${'a'.repeat(43)}`;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url: String(url), options });
+    if (String(url).endsWith('/work-items')) {
+      return ticketResponse({
+        ok: true,
+        data: { id: 'work-receipt-1', key: 'QBO-71' },
+        customerReceipt: {
+          token: rawReceipt,
+          expiresAt: '2027-07-23T03:00:00.000Z',
+        },
+      });
+    }
+    return ticketResponse({
+      ok: true,
+      data: {
+        key: 'QBO-71',
+        title: 'Receipt security',
+        status: 'new',
+        statusLabel: 'New',
+        updates: [],
+        version: 1,
+      },
+    }, 200);
+  };
+  try {
+    const app = createApp();
+    const agent = await signedInAgent(app);
+    const bootstrap = await agent
+      .get('/api/ticket-snitch/reporting/bootstrap')
+      .set('Origin', 'http://qbo.example.test')
+      .expect(200);
+    const report = await agent
+      .post('/api/ticket-snitch/reporting/reports')
+      .set('Origin', 'http://qbo.example.test')
+      .set('X-QBO-Report-Token', bootstrap.body.reportToken)
+      .send({
+        submissionId: 'submission-receipt-security-001',
+        observedAt: '2026-07-23T03:20:00.000Z',
+        kind: 'problem',
+        title: 'Receipt security path',
+        explanation: 'The browser must receive only an opaque QBO receipt handle.',
+      })
+      .expect(201);
+    assert.match(report.body.customerReceipt.handle, /^qtr_/);
+    assert.doesNotMatch(JSON.stringify(report.body), /tsr_/);
+    const status = await agent
+      .get('/api/ticket-snitch/reporting/receipt')
+      .set('Origin', 'http://qbo.example.test')
+      .set('X-QBO-Report-Token', bootstrap.body.reportToken)
+      .set('X-QBO-Ticket-Receipt', report.body.customerReceipt.handle)
+      .expect(200);
+    assert.equal(status.body.data.key, 'QBO-71');
+    assert.equal(calls[1].options.headers['X-Ticket-Snitch-Receipt'], rawReceipt);
+    assert.equal(calls[1].options.headers.Authorization, undefined);
+
+    const forwardedBeforeTamper = calls.length;
+    await agent
+      .get('/api/ticket-snitch/reporting/receipt')
+      .set('Origin', 'http://qbo.example.test')
+      .set('X-QBO-Report-Token', bootstrap.body.reportToken)
+      .set('X-QBO-Ticket-Receipt', `${report.body.customerReceipt.handle.slice(0, -1)}x`)
+      .expect(401);
+    assert.equal(calls.length, forwardedBeforeTamper);
+  } finally {
+    global.fetch = originalFetch;
+  }
 }));
 
 test('a reporting token cannot be replayed from a different authenticated session', async () => withEnvironment(reportEnvironment(), async () => {

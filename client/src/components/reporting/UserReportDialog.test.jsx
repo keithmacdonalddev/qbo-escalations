@@ -6,7 +6,10 @@ import UserReportDialog from './UserReportDialog.jsx';
 const reportingMocks = vi.hoisted(() => ({
   createSubmissionId: vi.fn(() => 'submission-component-001'),
   loadReportingBootstrap: vi.fn(),
+  loadCustomerReceipt: vi.fn(),
+  replyToCustomerReceipt: vi.fn(),
   submitUserReport: vi.fn(),
+  validateCustomerReceipt: vi.fn(),
 }));
 const screenshotMocks = vi.hoisted(() => ({
   captureScreenFrame: vi.fn(),
@@ -15,9 +18,17 @@ const screenshotMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../api/ticketSnitchReporting.js', () => reportingMocks);
+vi.mock('../../context/AppAuthContext.jsx', () => ({
+  useAppAuth: () => ({ user: { id: 'qbo-test-user' } }),
+}));
 vi.mock('./screenshotCapture.js', () => screenshotMocks);
 
 beforeEach(() => {
+  const values = new Map();
+  vi.stubGlobal('localStorage', {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => values.set(key, String(value)),
+  });
   reportingMocks.createSubmissionId.mockReturnValue('submission-component-001');
   reportingMocks.loadReportingBootstrap.mockReset().mockResolvedValue({
     ok: true,
@@ -33,6 +44,25 @@ beforeEach(() => {
     requestId: 'report-request',
     evidence: { requested: false, status: 'not_requested' },
   });
+  reportingMocks.loadCustomerReceipt.mockReset().mockResolvedValue({
+    ok: true,
+    data: {
+      key: 'QBO-71',
+      title: 'Customer follow-up test',
+      status: 'verification',
+      statusLabel: 'Verification',
+      publicSummary: 'The repair is ready for confirmation.',
+      needsReporterReply: false,
+      canValidate: true,
+      reporterValidation: { outcome: '', note: '', submittedAt: null },
+      updates: [{ id: 'update-1', direction: 'team', authorLabel: 'Ticket Snitch team', body: 'Please verify the repair.', createdAt: '2026-07-23T03:00:00.000Z' }],
+      version: 4,
+      updatedAt: '2026-07-23T03:00:00.000Z',
+    },
+    requestId: 'receipt-request',
+  });
+  reportingMocks.replyToCustomerReceipt.mockReset().mockResolvedValue({ ok: true });
+  reportingMocks.validateCustomerReceipt.mockReset().mockResolvedValue({ ok: true });
   screenshotMocks.captureScreenFrame.mockReset().mockResolvedValue(new File(['screen'], 'capture.png', { type: 'image/png' }));
   screenshotMocks.screenCaptureSupported.mockReset().mockReturnValue(true);
   screenshotMocks.validateScreenshotFile.mockReset().mockImplementation((file) => file);
@@ -241,4 +271,47 @@ it('keeps text reporting usable when the separate screenshot credential is unava
   expect(await screen.findByText(/Screenshot attachments are not connected/i)).toBeVisible();
   expect(screen.getByRole('button', { name: 'Send report' })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Capture screenshot' })).not.toBeInTheDocument();
+});
+
+it('saves an opaque report handle and supports public replies and fixed confirmation', async () => {
+  const receiptHandle = `qtr_${'a'.repeat(16)}.${'b'.repeat(112)}.${'c'.repeat(22)}`;
+  reportingMocks.submitUserReport.mockResolvedValue({
+    ok: true,
+    ticket: { id: 'work-receipt', key: 'QBO-71' },
+    customerReceipt: {
+      handle: receiptHandle,
+      expiresAt: '2027-07-23T03:00:00.000Z',
+    },
+    idempotentReplay: false,
+    requestId: 'report-with-receipt',
+    evidence: { requested: false, status: 'not_requested' },
+  });
+  const user = userEvent.setup();
+  render(<UserReportDialog open onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Send report' });
+  await user.type(screen.getByLabelText('Short title'), 'Customer follow-up test');
+  await user.type(screen.getByLabelText('What should we know?'), 'I need to return and confirm whether the repair works.');
+  await user.click(screen.getByRole('button', { name: 'Send report' }));
+  await user.click(await screen.findByRole('button', { name: 'View report status' }));
+  expect(await screen.findByText('The repair is ready for confirmation.')).toBeVisible();
+  expect(reportingMocks.loadCustomerReceipt).toHaveBeenCalledWith({
+    reportToken: 'report-token',
+    receiptHandle,
+  });
+  await user.type(screen.getByLabelText('Add information or ask a question'), 'I can verify this on the same page.');
+  await user.click(screen.getByRole('button', { name: 'Send reply' }));
+  await waitFor(() => expect(reportingMocks.replyToCustomerReceipt).toHaveBeenCalledWith(expect.objectContaining({
+    reportToken: 'report-token',
+    receiptHandle,
+    body: 'I can verify this on the same page.',
+  })));
+  await user.type(screen.getByLabelText('Optional note'), 'The repaired path now works.');
+  await user.click(screen.getByRole('button', { name: 'Fixed' }));
+  await waitFor(() => expect(reportingMocks.validateCustomerReceipt).toHaveBeenCalledWith(expect.objectContaining({
+    reportToken: 'report-token',
+    receiptHandle,
+    workItemVersion: 4,
+    outcome: 'fixed',
+    note: 'The repaired path now works.',
+  })));
 });

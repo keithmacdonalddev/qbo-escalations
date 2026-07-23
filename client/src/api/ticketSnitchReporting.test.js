@@ -1,8 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import {
   createSubmissionId,
+  loadCustomerReceipt,
   loadReportingBootstrap,
+  replyToCustomerReceipt,
   submitUserReport,
+  validateCustomerReceipt,
 } from './ticketSnitchReporting.js';
 
 afterEach(() => {
@@ -85,4 +88,44 @@ it('encodes only the explicitly approved screenshot in the authenticated report 
   });
   expect(body).not.toHaveProperty('cookies');
   expect(body).not.toHaveProperty('authorization');
+});
+
+it('uses only the QBO receipt handle and anti-forgery token for customer follow-up', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    json: async () => ({ ok: true, data: { key: 'QBO-71', version: 4 } }),
+  });
+  const handle = `qtr_${'a'.repeat(16)}.${'b'.repeat(112)}.${'c'.repeat(22)}`;
+  await loadCustomerReceipt({ reportToken: 'report-token', receiptHandle: handle });
+  await replyToCustomerReceipt({
+    reportToken: 'report-token',
+    receiptHandle: handle,
+    actionId: 'reply-action-0001',
+    body: 'More details from the reporter.',
+  });
+  await validateCustomerReceipt({
+    reportToken: 'report-token',
+    receiptHandle: handle,
+    actionId: 'validation-action-0001',
+    workItemVersion: 4,
+    outcome: 'fixed',
+    note: 'The repair works now.',
+  });
+  for (const [, options] of fetchMock.mock.calls) {
+    expect(options.headers['X-QBO-Report-Token']).toBe('report-token');
+    expect(options.headers['X-QBO-Ticket-Receipt']).toBe(handle);
+    expect(JSON.stringify(options)).not.toContain('tsr_');
+  }
+  expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({
+    actionId: 'reply-action-0001',
+    body: 'More details from the reporter.',
+  });
+  expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toEqual({
+    actionId: 'validation-action-0001',
+    workItemVersion: 4,
+    outcome: 'fixed',
+    note: 'The repair works now.',
+  });
 });

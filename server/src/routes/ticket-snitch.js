@@ -5,11 +5,14 @@ const {
   checkConnection,
   commentOnWork,
   getConnectorConfig,
+  getCustomerReceipt,
   getWork,
+  replyToCustomerReceipt,
   reportWork,
   screenshotEvidenceIdempotencyKey,
   transitionWork,
   updateWork,
+  validateCustomerReceipt,
 } = require('../services/ticket-snitch-client');
 const {
   ScreenshotValidationError,
@@ -29,6 +32,44 @@ const USER_REPORT_TYPES = new Map([
 ]);
 const REPORT_TOKEN_TTL_MS = 15 * 60 * 1000;
 const reportTokenSecret = crypto.randomBytes(32);
+
+function receiptHandleKey() {
+  return crypto
+    .createHash('sha256')
+    .update(`qbo-ticket-receipt-handle-v1:${process.env.QBO_AUTH_PASSWORD_HASH || ''}:${process.env.TICKET_SNITCH_PROJECT_ID || ''}`)
+    .digest();
+}
+
+function sealReceiptToken(receiptToken, userId) {
+  if (!/^tsr_[0-9a-f-]{36}\.[A-Za-z0-9_-]{40,64}$/.test(String(receiptToken || ''))) return '';
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', receiptHandleKey(), iv);
+  cipher.setAAD(Buffer.from(`qbo-ticket-receipt-v1:${cleanText(userId, 128)}`));
+  const encrypted = Buffer.concat([cipher.update(receiptToken, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `qtr_${iv.toString('base64url')}.${encrypted.toString('base64url')}.${tag.toString('base64url')}`;
+}
+
+function openReceiptHandle(handle, userId) {
+  const match = /^qtr_([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{80,220})\.([A-Za-z0-9_-]{22})$/.exec(String(handle || ''));
+  if (!match) return '';
+  try {
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      receiptHandleKey(),
+      Buffer.from(match[1], 'base64url'),
+    );
+    decipher.setAAD(Buffer.from(`qbo-ticket-receipt-v1:${cleanText(userId, 128)}`));
+    decipher.setAuthTag(Buffer.from(match[3], 'base64url'));
+    const token = Buffer.concat([
+      decipher.update(Buffer.from(match[2], 'base64url')),
+      decipher.final(),
+    ]).toString('utf8');
+    return /^tsr_[0-9a-f-]{36}\.[A-Za-z0-9_-]{40,64}$/.test(token) ? token : '';
+  } catch {
+    return '';
+  }
+}
 
 function cleanText(value, max) {
   return String(value || '').trim().slice(0, max);
@@ -266,6 +307,15 @@ router.post('/reporting/reports', requireReportOrigin, requireReportingUser, use
     return res.status(result.idempotentReplay ? 200 : 201).json({
       ok: true,
       ticket: { id: result.data.id, key: result.data.key },
+      customerReceipt: result.customerReceipt
+        ? {
+            handle: sealReceiptToken(
+              result.customerReceipt.token,
+              req.authenticatedUser.id,
+            ),
+            expiresAt: result.customerReceipt.expiresAt,
+          }
+        : null,
       evidence,
       idempotentReplay: Boolean(result.idempotentReplay),
       requestId: req.requestId,
@@ -274,6 +324,130 @@ router.post('/reporting/reports', requireReportOrigin, requireReportingUser, use
     return connectorError(res, error, req.requestId);
   }
 });
+
+const customerFollowUpRateLimit = createRateLimiter({
+  name: 'ticket-snitch-customer-follow-up',
+  limit: 30,
+  includeRequestId: true,
+});
+
+function privateReceiptToken(req) {
+  const handle = cleanText(req.headers['x-qbo-ticket-receipt'], 512);
+  return openReceiptHandle(handle, req.authenticatedUser?.id);
+}
+
+function followUpActionId(value) {
+  const actionId = cleanText(value, 128);
+  return /^[A-Za-z0-9_-]{16,128}$/.test(actionId) ? actionId : '';
+}
+
+router.get(
+  '/reporting/receipt',
+  requireReportOrigin,
+  requireReportingUser,
+  customerFollowUpRateLimit,
+  requireReportToken,
+  async (req, res) => {
+    const receiptToken = privateReceiptToken(req);
+    if (!receiptToken) {
+      return res.status(401).json({
+        ok: false,
+        code: 'TICKET_SNITCH_CUSTOMER_RECEIPT_INVALID',
+        error: 'This private report receipt is invalid, expired, or unavailable.',
+        requestId: req.requestId,
+      });
+    }
+    try {
+      const result = await getCustomerReceipt(receiptToken, req.requestId);
+      return res.json({ ok: true, data: result.data, requestId: req.requestId });
+    } catch (error) {
+      return connectorError(res, error, req.requestId);
+    }
+  },
+);
+
+router.post(
+  '/reporting/receipt/replies',
+  requireReportOrigin,
+  requireReportingUser,
+  customerFollowUpRateLimit,
+  requireReportToken,
+  async (req, res) => {
+    const receiptToken = privateReceiptToken(req);
+    const body = cleanText(req.body?.body, 10_001);
+    const actionId = followUpActionId(req.body?.actionId);
+    if (!receiptToken || !actionId || body.length < 1 || body.length > 10_000) {
+      return res.status(400).json({
+        ok: false,
+        code: 'TICKET_SNITCH_CUSTOMER_REPLY_INVALID',
+        error: 'Enter a reply and keep its retry identifier unchanged.',
+        requestId: req.requestId,
+      });
+    }
+    try {
+      const result = await replyToCustomerReceipt(
+        receiptToken,
+        body,
+        actionId,
+        req.requestId,
+      );
+      return res.status(result.idempotentReplay ? 200 : 201).json({
+        ok: true,
+        data: result.data,
+        idempotentReplay: Boolean(result.idempotentReplay),
+        requestId: req.requestId,
+      });
+    } catch (error) {
+      return connectorError(res, error, req.requestId);
+    }
+  },
+);
+
+router.post(
+  '/reporting/receipt/validation',
+  requireReportOrigin,
+  requireReportingUser,
+  customerFollowUpRateLimit,
+  requireReportToken,
+  async (req, res) => {
+    const receiptToken = privateReceiptToken(req);
+    const actionId = followUpActionId(req.body?.actionId);
+    const workItemVersion = Number(req.body?.workItemVersion);
+    const outcome = cleanText(req.body?.outcome, 40);
+    const note = cleanText(req.body?.note, 5001);
+    if (
+      !receiptToken ||
+      !actionId ||
+      !Number.isInteger(workItemVersion) ||
+      workItemVersion < 1 ||
+      !['fixed', 'not_fixed'].includes(outcome) ||
+      note.length > 5000
+    ) {
+      return res.status(400).json({
+        ok: false,
+        code: 'TICKET_SNITCH_CUSTOMER_VALIDATION_INVALID',
+        error: 'Choose fixed or not fixed and refresh the report before retrying.',
+        requestId: req.requestId,
+      });
+    }
+    try {
+      const result = await validateCustomerReceipt(
+        receiptToken,
+        { workItemVersion, outcome, note },
+        actionId,
+        req.requestId,
+      );
+      return res.status(result.idempotentReplay ? 200 : 201).json({
+        ok: true,
+        data: result.data,
+        idempotentReplay: Boolean(result.idempotentReplay),
+        requestId: req.requestId,
+      });
+    } catch (error) {
+      return connectorError(res, error, req.requestId);
+    }
+  },
+);
 
 router.use(requireReportProxySecret);
 
