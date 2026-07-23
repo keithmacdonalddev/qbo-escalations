@@ -10,6 +10,7 @@ import {
 import { getSummary } from '../api/analyticsApi.js';
 import { useToast } from './useToast.jsx';
 import useCaseRealtime from './useCaseRealtime.js';
+import { useLiveWork } from '../context/LiveWorkContext.jsx';
 import { tel, TEL } from '../lib/devTelemetry.js';
 import {
   ESCALATION_STATUS_LABELS as LIFECYCLE_ESCALATION_STATUS_LABELS,
@@ -58,6 +59,7 @@ export const ATTENTION_SORT_LABELS = {
 
 export default function useEscalations({ initialTab = 'escalations' } = {}) {
   const toast = useToast();
+  const { attentionRevision, refreshAttention } = useLiveWork();
   const toastRef = useRef(toast);
   toastRef.current = toast;
 
@@ -208,6 +210,12 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
   }, [activeTab, loadAttentionQueue]);
 
   useEffect(() => {
+    if (attentionRevision > 0 && activeTab === 'attention') {
+      void loadAttentionQueue({ background: true });
+    }
+  }, [activeTab, attentionRevision, loadAttentionQueue]);
+
+  useEffect(() => {
     const visible = new Set(attentionItems.map((item) => item._id));
     setAttentionSelectedIds((previous) => previous.filter((id) => visible.has(id)));
   }, [attentionItems]);
@@ -239,12 +247,12 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     try {
       await updateAttentionItem(id, { status, resolutionNote });
       setAttentionSelectedIds((previous) => previous.filter((value) => value !== id));
-      await loadAttentionQueue();
+      await Promise.all([loadAttentionQueue(), refreshAttention({ background: true })]);
     } catch (err) {
       toastRef.current.error(err?.message || 'Failed to update attention item');
     }
     setAttentionUpdatingId('');
-  }, [attentionUpdatingId, loadAttentionQueue]);
+  }, [attentionUpdatingId, loadAttentionQueue, refreshAttention]);
 
   const handleBulkAttentionStatusChange = useCallback(async (status, resolutionNote = '') => {
     if (!attentionSelectedIds.length || attentionUpdatingId) return;
@@ -253,12 +261,12 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
       const result = await bulkUpdateAttentionItems(attentionSelectedIds, { status, resolutionNote });
       toastRef.current.success(`Updated ${result.modified || result.matched || attentionSelectedIds.length} attention item${attentionSelectedIds.length === 1 ? '' : 's'}.`);
       setAttentionSelectedIds([]);
-      await loadAttentionQueue();
+      await Promise.all([loadAttentionQueue(), refreshAttention({ background: true })]);
     } catch (err) {
       toastRef.current.error(err?.message || 'Failed to update selected attention items');
     }
     setAttentionUpdatingId('');
-  }, [attentionSelectedIds, attentionUpdatingId, loadAttentionQueue]);
+  }, [attentionSelectedIds, attentionUpdatingId, loadAttentionQueue, refreshAttention]);
 
   const requestDelete = useCallback((id) => {
     setDeleteTarget(id);

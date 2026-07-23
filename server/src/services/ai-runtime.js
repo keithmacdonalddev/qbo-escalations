@@ -1,5 +1,10 @@
 'use strict';
 
+const {
+  publishAiOperation,
+  removeWorkItem,
+} = require('./work-center-events');
+
 const activeOperations = new Map();
 const operationControllers = new Map();
 const AI_KINDS = Object.freeze(['chat', 'copilot', 'gmail', 'parse']);
@@ -14,6 +19,7 @@ function pruneStaleOperations() {
     if (op.updatedAt < cutoff) {
       activeOperations.delete(id);
       operationControllers.delete(id);
+      removeWorkItem(`ai:${id}`, { preserveTerminal: true, reason: 'stale-runtime-pruned' });
     }
   }
 }
@@ -125,12 +131,18 @@ function createAiOperation({
     lastError: null,
   };
   activeOperations.set(operation.id, operation);
-  return cloneOperation(operation);
+  const snapshot = cloneOperation(operation);
+  publishAiOperation(snapshot, { reason: 'created' });
+  return snapshot;
 }
 
 function updateAiOperation(id, patch = {}) {
   const operation = activeOperations.get(id);
   if (!operation) return null;
+
+  const previousPhase = operation.phase;
+  const previousProvider = operation.provider;
+  const previousConversationId = operation.conversationId;
 
   if (patch.phase) operation.phase = patch.phase;
   if (patch.provider !== undefined) operation.provider = patch.provider;
@@ -146,12 +158,23 @@ function updateAiOperation(id, patch = {}) {
   }
 
   operation.updatedAt = Date.now();
-  return cloneOperation(operation);
+  const snapshot = cloneOperation(operation);
+  if (
+    snapshot.phase !== previousPhase
+    || snapshot.provider !== previousProvider
+    || snapshot.conversationId !== previousConversationId
+  ) {
+    publishAiOperation(snapshot, { reason: 'updated' });
+  }
+  return snapshot;
 }
 
 function recordAiChunk(id, text, options = {}) {
   const operation = activeOperations.get(id);
   if (!operation) return null;
+
+  const previousPhase = operation.phase;
+  const previousProvider = operation.provider;
 
   const nextText = typeof text === 'string' ? text : '';
   const isThinking = Boolean(options.thinking);
@@ -165,7 +188,11 @@ function recordAiChunk(id, text, options = {}) {
     operation.stats.chunkChars += nextText.length;
   }
   operation.updatedAt = Date.now();
-  return cloneOperation(operation);
+  const snapshot = cloneOperation(operation);
+  if (snapshot.phase !== previousPhase || snapshot.provider !== previousProvider) {
+    publishAiOperation(snapshot, { reason: snapshot.phase });
+  }
+  return snapshot;
 }
 
 function recordAiEvent(id, type, detail = {}) {
@@ -196,12 +223,15 @@ function recordAiEvent(id, type, detail = {}) {
   }
 
   operation.updatedAt = Date.now();
-  return cloneOperation(operation);
+  const snapshot = cloneOperation(operation);
+  publishAiOperation(snapshot, { reason: type || 'event' });
+  return snapshot;
 }
 
 function deleteAiOperation(id) {
   operationControllers.delete(id);
   activeOperations.delete(id);
+  removeWorkItem(`ai:${id}`, { preserveTerminal: true, reason: 'runtime-closed' });
 }
 
 function attachAiOperationController(id, controller) {

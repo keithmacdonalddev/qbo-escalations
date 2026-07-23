@@ -477,6 +477,7 @@ export default function AppHeader({
   appAuth,
   onOpenAppAuth,
   aiManagementAlertCount = 0,
+  liveWorkControl = null,
 }) {
   const unreadCount = useUnreadEmailCount();
   const workspaceMonitor = useWorkspaceMonitorStream();
@@ -939,6 +940,7 @@ export default function AppHeader({
             </motion.svg>
           </motion.button>
         </div>
+        {liveWorkControl}
         {/* Mail inbox */}
         <motion.button
           className="app-header-icon-btn app-header-mail-btn"

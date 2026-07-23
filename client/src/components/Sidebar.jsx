@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { hash: '#/chat', label: 'Chat', short: 'Chat', icon: IconChat },
   { hash: '#/sessions', label: 'Sessions', short: 'Sess', icon: IconSessions },
   { hash: '#/escalations', label: 'Escalations', short: 'Esc', icon: IconDashboard },
+  { hash: '#/attention', label: 'Attention', short: 'Need', icon: IconAttention },
   { hash: '#/knowledge', label: 'Knowledge', short: 'Know', icon: IconKnowledge },
   { hash: '#/investigations', label: 'Investigations', short: 'INV', icon: IconInvestigation },
   { hash: '#/agents', label: 'Agents', short: 'Agt', icon: IconUsers },
@@ -20,7 +21,7 @@ const NAV_ITEMS = [
   { hash: '#/rooms', label: 'Rooms', short: 'Rm', icon: IconRooms },
 ];
 
-export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [] }) {
+export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [], badges = {} }) {
   const [hoverExpanded, setHoverExpanded] = useState(false);
   const hoverTimerRef = useRef(null);
   const mouseOverRef = useRef(false);
@@ -113,6 +114,8 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
       <nav className="sidebar-nav">
         {navItems.map(item => {
           const Icon = item.icon;
+          const badge = badges[item.hash];
+          const badgeCount = Number(badge?.count || 0);
           const isActive = currentRoute === item.hash ||
             (item.hash === '#/chat' && currentRoute.startsWith('#/chat')) ||
             (item.hash === '#/sessions' && currentRoute.startsWith('#/sessions')) ||
@@ -126,8 +129,8 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
               href={item.hash}
               className={`sidebar-nav-item${isActive ? ' is-active' : ''}`}
               onClick={onClose}
-              aria-label={item.label}
-              title={item.label}
+              aria-label={badgeCount > 0 ? `${item.label}, ${badgeCount} ${badge?.label || 'item'}${badgeCount === 1 ? '' : 's'}` : item.label}
+              title={badgeCount > 0 ? `${item.label} · ${badgeCount} ${badge?.label || 'item'}${badgeCount === 1 ? '' : 's'}` : item.label}
               style={{ position: 'relative' }}
             >
               {isActive && (
@@ -139,6 +142,11 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
               )}
               <Icon size={16} />
               <span>{item.label}</span>
+              {badgeCount > 0 && (
+                <span className={`sidebar-nav-badge is-${badge?.tone || 'attention'}`} aria-hidden="true">
+                  {badgeCount > 99 ? '99+' : badgeCount}
+                </span>
+              )}
               {collapsed && showLabels && !hoverExpanded && (
                 <span className="sidebar-nav-short-label">{item.short}</span>
               )}
@@ -179,6 +187,16 @@ function IconChat({ size = 16 }) {
   return (
     <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+    </svg>
+  );
+}
+
+function IconAttention({ size = 16 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10.3 3.6 2.4 17.2A2 2 0 0 0 4.1 20h15.8a2 2 0 0 0 1.7-2.8L13.7 3.6a2 2 0 0 0-3.4 0Z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
     </svg>
   );
 }

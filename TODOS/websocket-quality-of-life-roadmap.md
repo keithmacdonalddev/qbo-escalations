@@ -95,3 +95,30 @@ Phase 1 delivered:
 - Broad replacement of healthy SSE request streams.
 - Browser-run confidence remains separate from component/server proof and must stay marked incomplete when browser transport or a live runtime is unavailable.
 - Replay history is process-local. A future multi-instance deployment needs a shared event broker and shared replay store before cross-instance delivery can be claimed.
+
+## Phase 2 production slice — delivered 2026-07-23
+
+Phase 2 turns realtime delivery into a daily user workflow instead of leaving it inside individual screens:
+
+1. A global **Live Work Center** in the app header shows trustworthy AI and workspace-agent work on every screen, plus recent completion/failure.
+2. The existing saved Attention records now power a persistent **Needs your attention** inbox with direct review actions.
+3. Sidebar badges show open Attention, knowledge review, running agent sessions, and active Chat/QBO work, with a dedicated `#/attention` destination.
+4. The already-mounted QBO Chat workflow reports its real Image Parser, INV Search Agent, Triage Agent, and QBO Assistant stages to the global center, so navigating away no longer hides the handoff.
+5. All successful Attention save and single-update paths publish one shared post-write event contract. Bulk manual actions publish one aggregate event. The open Attention tab and global counts then reload authoritative HTTP data immediately.
+6. The new `work-center` channel reuses `/api/realtime` and its origin checks, optional authentication context, heartbeat, reconnect, replay, deduplication, ordering, and cleanup behavior.
+7. Safe event summaries exclude prompts, responses, raw provider errors, stack traces, and customer-sensitive content. Event and recent-work memory are bounded.
+
+### Phase 2 truth boundary
+
+- **Saved Attention is durable.** It remains through refreshes and restarts until handled, dismissed, or resolved.
+- **Running/recent work is process state.** It is kept in bounded memory and recent terminal work expires after 30 minutes.
+- **Exact QBO handoff stages are local to the originating tab.** Other tabs receive server-observed active work and durable Attention changes; they do not receive fabricated detail for stages the server does not own.
+- Existing HTTP commands, Chat/SSE response streams, room events, case-workflow events, and agent-session streams remain unchanged.
+
+### Phase 2 evidence still required
+
+- A trusted browser run against an already-running app must still prove the full visual journey and another-tab Attention update. If browser transport remains unavailable, this stays **incomplete**, not passed.
+- Replay remains local to one server process. A multi-instance deployment still requires a shared broker and shared replay store.
+- Multi-user presence and soft edit locks remain separate future work.
+
+Detailed user and technical behavior is documented in `docs/live-work-attention-center.md`.

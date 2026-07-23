@@ -121,7 +121,9 @@
           "server/test/usage-integration.test.js",
           "server/test/usage-routes.test.js",
           "server/test/usage-writer-integration.test.js",
-          "server/test/usage-writer.test.js"
+          "server/test/usage-writer.test.js",
+          "server/test/work-center-events.test.js",
+          "server/test/work-center-websocket.test.js"
         ]
       }
     ],
@@ -314,6 +316,34 @@
       "knownGaps": [
         "No trusted real-browser multi-tab run yet proves create, transition, knowledge publication, disconnect, reconnect, and replay on an already-running app.",
         "Presence, soft edit locks, evidence-recovery push progress, and agent/provider health push conversion remain deliberate later roadmap work."
+      ],
+      "lastHumanReviewDate": "2026-07-23"
+    },
+    {
+      "id": "global-live-work-attention",
+      "label": "Global live work and attention",
+      "userOutcome": "The user can leave Chat, see who is working and what stage they own, keep decisions in one persistent inbox, and follow live sidebar counts directly to the relevant review screen.",
+      "risk": "high",
+      "owner": "Application shell and realtime",
+      "sourcePaths": [
+        "server/src/services/work-center-events.js",
+        "server/src/services/realtime-channels/work-center.js",
+        "server/src/models/EscalationAttentionItem.js",
+        "client/src/context/LiveWorkContext.jsx",
+        "client/src/components/live-work/LiveWorkCenter.jsx",
+        "client/src/components/Sidebar.jsx",
+        "client/src/components/chat-v5/ChatV5Container.jsx",
+        "client/src/hooks/useEscalations.js"
+      ],
+      "requiredCheckTypes": ["component", "server", "browser"],
+      "evidence": [
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/context/LiveWorkContext.test.jsx", "client/src/components/live-work/LiveWorkCenter.test.jsx", "client/src/components/Sidebar.test.jsx", "client/src/components/chat-v5/ChatV5Container.test.jsx", "client/src/components/EscalationDashboard.test.jsx"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/work-center-events.test.js", "server/test/work-center-websocket.test.js", "server/test/realtime-websocket.test.js"] }
+      ],
+      "knownGaps": [
+        "No trusted real-browser run yet proves the complete start-work, navigate-away, direct-action, and another-tab Attention journey on the user's running app.",
+        "Exact four-stage QBO handoff detail comes from the originating tab; other tabs receive server-observed active AI/session work and durable Attention changes.",
+        "Current/recent work and replay are process-local; durable Attention records remain authoritative across restarts."
       ],
       "lastHumanReviewDate": "2026-07-23"
     },

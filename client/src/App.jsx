@@ -17,6 +17,7 @@ import useAppRouteState from './hooks/useAppRouteState.js';
 import useAppShellRuntime from './hooks/useAppShellRuntime.js';
 import { useChat } from './hooks/useChat.js';
 import { WorkspaceMonitorProvider } from './context/WorkspaceMonitorContext.jsx';
+import { LiveWorkProvider, useLiveWork } from './context/LiveWorkContext.jsx';
 import { AgentRegistryProvider } from './context/AgentRegistryContext.jsx';
 import { useProviderCatalog } from './context/ProviderCatalogContext.jsx';
 import { useAppAuth } from './context/AppAuthContext.jsx';
@@ -25,6 +26,7 @@ import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
 import { getSidebarCurrentRoute } from './lib/appRoute.js';
 import { tel, TEL } from './lib/devTelemetry.js';
+import LiveWorkCenter from './components/live-work/LiveWorkCenter.jsx';
 
 const ChatView = lazy(() => import('./components/Chat.jsx').then(module => ({ default: module.ChatView })));
 const AgentBootOverlay = lazy(() => import('./components/AgentBootOverlay.jsx'));
@@ -63,12 +65,13 @@ const AGENT_MODAL_TITLES = {
   copilot: 'Global Co-pilot',
 };
 
-function App() {
+function AppContent() {
   const appAuth = useAppAuth();
   // Consuming the catalog version makes every mounted provider/model picker
   // re-render immediately after AI Management changes the governed inventory.
   const { catalog: managedAiCatalog } = useProviderCatalog();
   const aiManagementAlertCount = managedAiCatalog?.summary?.notificationsNeedingReview || 0;
+  const { sidebarBadges } = useLiveWork();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -425,6 +428,7 @@ function App() {
         onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
         hoverExpand={forceCompactSidebar ? false : sidebarHoverExpand}
         showLabels={sidebarShowLabels}
+        badges={sidebarBadges}
       />
 
       <div className="app-content-area">
@@ -442,6 +446,7 @@ function App() {
         appAuth={appAuth}
         onOpenAppAuth={() => setAuthDialogOpen(true)}
         aiManagementAlertCount={aiManagementAlertCount}
+        liveWorkControl={<LiveWorkCenter />}
       />
 
       <main
@@ -640,6 +645,14 @@ function App() {
     </WorkspaceMonitorProvider>
     </MotionConfig>
     </Profiler>
+  );
+}
+
+function App() {
+  return (
+    <LiveWorkProvider>
+      <AppContent />
+    </LiveWorkProvider>
   );
 }
 

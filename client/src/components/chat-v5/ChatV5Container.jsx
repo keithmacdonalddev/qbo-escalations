@@ -40,6 +40,7 @@ import {
 } from './pipelineRuntime.js';
 import { useAgentTestModal } from '../agent-tests/AgentTestModalProvider.jsx';
 import { useStageOrchestrator } from './useStageOrchestrator.js';
+import { useLiveWork } from '../../context/LiveWorkContext.jsx';
 import { useEvidenceRecovery, useEvidenceRecoveryMonitor } from './useEvidenceRecovery.js';
 import { useRunningTimer } from './useRunningTimer.js';
 import './chat-v5.css';
@@ -2780,6 +2781,8 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
     hydrateFromSavedCaseIntake,
   } = useStageOrchestrator({ resumeConversationId: conversationIdFromRoute });
   const { workflowSteps, stageLabels } = usePipelineAgentLabels();
+  const { reportLocalWorkflow } = useLiveWork();
+  const localWorkflowSeenRunningRef = useRef(false);
   const { openAgentTest } = useAgentTestModal();
   // Moving-average denominator per stage, fetched once on mount and refreshed
   // after each completed pipeline run so the bar tracks recent reality. The
@@ -3607,6 +3610,73 @@ export default function ChatV5Container({ isActive = true, conversationIdFromRou
   }, [clearSavedWorkflowResume, closeTransientWorkbenchTabs, confirmUnsavedResultNavigation, reset, resetWorkflowReveal]);
 
   const started = isStarted(stageState) || imageCaptured || Object.keys(testRuns).length > 0;
+  useEffect(() => {
+    const stages = workflowSteps.map((step) => ({
+      key: step.key,
+      label: step.label,
+      status: stageState?.[step.key]?.status || 'pending',
+    }));
+    const hasStartedStage = stages.some((stage) => stage.status !== 'pending');
+    if (!hasStartedStage) {
+      localWorkflowSeenRunningRef.current = false;
+      reportLocalWorkflow(null);
+      return;
+    }
+
+    const runningStages = stages.filter((stage) => stage.status === 'running');
+    const runningStage = runningStages[0];
+    if (runningStage) localWorkflowSeenRunningRef.current = true;
+    const failed = stages.some((stage) => stage.status === 'failed');
+    const allSettled = stages.every((stage) => ['done', 'failed', 'skipped'].includes(stage.status));
+    if (allSettled && !localWorkflowSeenRunningRef.current) {
+      reportLocalWorkflow(null);
+      return;
+    }
+    const status = runningStage ? 'running' : failed ? 'failed' : allSettled ? 'completed' : 'running';
+    const activeOwner = runningStages.length > 1
+      ? runningStages.map((stage) => stage.label).join(' + ')
+      : runningStage?.label || (status === 'completed' ? 'Agent team' : stages.find((stage) => stage.status === 'failed')?.label) || 'Agent team';
+    const phaseLabels = {
+      parser: 'Extracting case details',
+      inv: 'Checking known issues',
+      triage: 'Classifying the escalation',
+      main: 'Preparing support guidance',
+    };
+    const escalationId = linkedEscalation?._id || linkedEscalation?.id || null;
+    const caseNumber = linkedEscalation?.caseNumber || effectiveCaseIntake?.template?.caseNumber || effectiveCaseIntake?.caseNumber;
+    reportLocalWorkflow({
+      id: `local:qbo-workflow:${conversationId || conversationIdFromRoute || 'current'}`,
+      source: 'local-workflow',
+      kind: 'qbo-workflow',
+      title: caseNumber ? `QBO case ${caseNumber}` : 'QBO escalation workflow',
+      owner: activeOwner,
+      status,
+      phase: runningStage?.key || status,
+      phaseLabel: runningStages.length > 1
+        ? `${runningStages.map((stage) => stage.label).join(' and ')} are working in parallel`
+        : runningStage
+          ? phaseLabels[runningStage.key]
+          : status === 'completed'
+            ? 'Ready to review'
+            : 'Needs review',
+      summary: runningStage ? `${activeOwner} ${runningStages.length > 1 ? 'have' : 'has'} the case now.` : status === 'completed' ? 'The agent handoff is complete.' : 'One stage stopped before the handoff completed.',
+      conversationId: conversationId || conversationIdFromRoute || null,
+      escalationId,
+      stages,
+      startedAt: stages.map((stage) => stageState?.[stage.key]?.startedAt).filter(Boolean).sort()[0] || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  }, [
+    conversationId,
+    conversationIdFromRoute,
+    effectiveCaseIntake,
+    linkedEscalation,
+    reportLocalWorkflow,
+    stageState,
+    workflowSteps,
+  ]);
+
+  useEffect(() => () => reportLocalWorkflow(null), [reportLocalWorkflow]);
   const workflowHasActivity = started || Boolean(effectiveCaseIntake) || Boolean(pastCaseIntake);
   useEffect(() => {
     if (!workflowHasActivity) return;

@@ -1,5 +1,10 @@
 'use strict';
 
+const {
+  publishAgentSession,
+  removeWorkItem,
+} = require('./work-center-events');
+
 const sessions = new Map();
 const listeners = new Map();
 const controllers = new Map();
@@ -47,6 +52,7 @@ function pruneExpiredSessions() {
       sessions.delete(id);
       listeners.delete(id);
       controllers.delete(id);
+      removeWorkItem(`agent:${id}`, { preserveTerminal: true, reason: 'session-pruned' });
       continue;
     }
     if (session.updatedAtMs >= cutoff) continue;
@@ -59,6 +65,7 @@ function pruneExpiredSessions() {
         sessions.delete(id);
         listeners.delete(id);
         controllers.delete(id);
+        removeWorkItem(`agent:${id}`, { preserveTerminal: true, reason: 'session-pruned' });
         continue;
       }
       const nextSession = sessions.get(id);
@@ -73,6 +80,7 @@ function pruneExpiredSessions() {
     sessions.delete(id);
     listeners.delete(id);
     controllers.delete(id);
+    removeWorkItem(`agent:${id}`, { preserveTerminal: true, reason: 'session-pruned' });
   }
 }
 
@@ -117,7 +125,9 @@ function createAgentSession({
     pruneRequestedAtMs: 0,
   };
   sessions.set(sessionId, entry);
-  return cloneSession(entry);
+  const snapshot = cloneSession(entry);
+  publishAgentSession(snapshot, { reason: 'created' });
+  return snapshot;
 }
 
 function getAgentSession(id) {
@@ -129,6 +139,15 @@ function getAgentSession(id) {
 function updateAgentSession(id, patch = {}) {
   const session = sessions.get(id);
   if (!session) return null;
+  const previousPresentation = JSON.stringify({
+    status: session.status,
+    title: session.title,
+    provider: session.metadata?.currentProvider || session.metadata?.provider || null,
+    model: session.metadata?.currentModel || session.metadata?.primaryModel || null,
+    phase: session.metadata?.phase || null,
+    fallbackAt: session.metadata?.fallbackAt || null,
+    fallbackTo: session.metadata?.fallbackTo || null,
+  });
   if (patch.status) session.status = patch.status;
   if (patch.title !== undefined) session.title = String(patch.title || session.title);
   if (patch.lastError !== undefined) session.lastError = patch.lastError;
@@ -138,12 +157,26 @@ function updateAgentSession(id, patch = {}) {
   session.updatedAt = nowIso();
   session.updatedAtMs = Date.now();
   session.pruneRequestedAtMs = 0;
-  return cloneSession(session);
+  const snapshot = cloneSession(session);
+  const nextPresentation = JSON.stringify({
+    status: session.status,
+    title: session.title,
+    provider: session.metadata?.currentProvider || session.metadata?.provider || null,
+    model: session.metadata?.currentModel || session.metadata?.primaryModel || null,
+    phase: session.metadata?.phase || null,
+    fallbackAt: session.metadata?.fallbackAt || null,
+    fallbackTo: session.metadata?.fallbackTo || null,
+  });
+  if (previousPresentation !== nextPresentation) {
+    publishAgentSession(snapshot, { reason: 'updated' });
+  }
+  return snapshot;
 }
 
 function appendAgentSessionEvent(id, type, data = {}) {
   const session = sessions.get(id);
   if (!session) return null;
+  const previousStatus = session.status;
   session.lastEventSeq += 1;
   session.updatedAt = nowIso();
   session.updatedAtMs = Date.now();
@@ -164,6 +197,13 @@ function appendAgentSessionEvent(id, type, data = {}) {
   }
   emit(id, event);
   session.pruneRequestedAtMs = 0;
+  // Route handlers update user-visible provider/phase/status metadata before
+  // appending streamed events. Avoid turning every text or thinking chunk into
+  // a global broadcast; only cover a terminal transition that arrived without
+  // a preceding runtime update.
+  if (previousStatus !== session.status && ['done', 'error'].includes(type)) {
+    publishAgentSession(cloneSession(session), { reason: type });
+  }
   return event;
 }
 

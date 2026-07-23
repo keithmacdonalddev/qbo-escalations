@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const Escalation = require('../models/Escalation');
 const KnowledgeCandidate = require('../models/KnowledgeCandidate');
 const EscalationAttentionItem = require('../models/EscalationAttentionItem');
+const { publishAttentionBulkChange } = require('../services/work-center-events');
 const { hasCategoryPlaybook, unpublishKnowledgeCandidate } = require('../lib/knowledge-promotion');
 const {
   buildDuplicateSafetyForEscalation,
@@ -932,6 +933,9 @@ router.patch('/attention-items/bulk', async (req, res) => {
     { $set: update },
     { runValidators: true }
   );
+  if ((result.modifiedCount || 0) > 0) {
+    publishAttentionBulkChange(ids, { status: nextStatus, source: 'attention-bulk-route' });
+  }
   res.json({
     ok: true,
     matched: result.matchedCount || 0,

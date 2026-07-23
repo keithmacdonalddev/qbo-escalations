@@ -7,10 +7,15 @@ const {
   getCaseRealtimeStatus,
   resetCaseRealtimeEvents,
 } = require('./case-realtime-events');
+const {
+  getWorkCenterStatus,
+  resetWorkCenterEvents,
+} = require('./work-center-events');
 const workspaceMonitorChannel = require('./realtime-channels/workspace-monitor');
 const agentSessionChannel = require('./realtime-channels/agent-session');
 const roomChannel = require('./realtime-channels/room');
 const caseWorkflowChannel = require('./realtime-channels/case-workflow');
+const workCenterChannel = require('./realtime-channels/work-center');
 
 const REALTIME_PATH = '/api/realtime';
 const HEARTBEAT_INTERVAL_MS = 25_000;
@@ -20,6 +25,7 @@ const channelHandlers = new Map([
   ['agent-session', agentSessionChannel],
   ['room', roomChannel],
   ['case-workflow', caseWorkflowChannel],
+  ['work-center', workCenterChannel],
 ]);
 
 let _websocketServer = null;
@@ -77,6 +83,7 @@ function getRealtimeStatus() {
     subscriptionCount: subscriptions.length,
     channels,
     caseWorkflow: getCaseRealtimeStatus(),
+    workCenter: getWorkCenterStatus(),
   };
 }
 
@@ -286,6 +293,7 @@ function stopRealtimeServer() {
   _attachedServer = null;
   _clients.clear();
   resetCaseRealtimeEvents();
+  resetWorkCenterEvents();
 }
 
 function attachRealtimeServer(httpServer) {

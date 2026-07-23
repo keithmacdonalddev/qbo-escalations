@@ -22,6 +22,11 @@ const {
   getParserImageFile,
 } = require('../lib/image-parser-archive');
 const { createApiError, sendApiError } = require('../lib/api-errors');
+const {
+  createAiOperation,
+  deleteAiOperation,
+  recordAiEvent,
+} = require('../services/ai-runtime');
 
 const router = express.Router();
 const IMAGE_PARSER_VERBOSE_LOGS = process.env.IMAGE_PARSER_VERBOSE_LOGS === '1';
@@ -262,6 +267,20 @@ router.post('/parse', parseRateLimit, async (req, res) => {
     maxMs: maxTimeout,
   });
 
+  // The Chat V5 parser runs before the main chat operation exists. Register
+  // this real server-owned work so every open tab sees an active workflow
+  // during the otherwise invisible first handoff.
+  const runtimeOperation = createAiOperation({
+    kind: 'parse',
+    route: '/api/image-parser/parse',
+    action: 'image-parse',
+    provider,
+    mode: fallbackProvider ? 'fallback' : 'single',
+    providers: [provider, fallbackProvider].filter(Boolean),
+    hasImages: true,
+  });
+  const runtimeOperationId = runtimeOperation.id;
+
   const startedAt = Date.now();
   const effectivePromptId = normalizeImageParsePromptId(promptId || parserPromptId);
 
@@ -356,6 +375,9 @@ router.post('/parse', parseRateLimit, async (req, res) => {
       }
     }));
 
+    recordAiEvent(runtimeOperationId, 'completed', { provider: providerUsed });
+    deleteAiOperation(runtimeOperationId);
+
     if (streamMode) {
       if (result.providerTrace?.providerPackageId) {
         bus.emit('parser.provider_content_sending_to_client', {
@@ -431,6 +453,12 @@ router.post('/parse', parseRateLimit, async (req, res) => {
         });
       }
     }));
+
+    recordAiEvent(runtimeOperationId, 'error', {
+      provider,
+      lastError: { code: err.code || 'PARSE_FAILED' },
+    });
+    deleteAiOperation(runtimeOperationId);
 
     return respondJson(status, {
       ok: false,

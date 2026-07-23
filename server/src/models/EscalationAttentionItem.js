@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const {
+  changedFieldsFromUpdate,
+  publishAttentionChange,
+} = require('../services/work-center-events');
 
 const ATTENTION_KINDS = [
   'possible-duplicate',
@@ -94,6 +98,47 @@ escalationAttentionItemSchema.index({ status: 1, updatedAt: -1 });
 escalationAttentionItemSchema.index({ kind: 1, status: 1, updatedAt: -1 });
 escalationAttentionItemSchema.index({ sourceEscalationId: 1, status: 1 });
 escalationAttentionItemSchema.index({ 'candidates.escalationId': 1, status: 1 });
+
+// Attention is the durable inbox behind the global live-work UI. Publish only
+// after MongoDB confirms the write so every notification can be reconciled
+// against authoritative saved data.
+escalationAttentionItemSchema.pre('save', function rememberAttentionChange() {
+  this.$locals.realtimeAttentionChange = {
+    action: this.isNew ? 'created' : 'updated',
+    changedFields: this.isNew ? [] : this.modifiedPaths(),
+  };
+});
+
+function publishAttentionSafely(operation, publish) {
+  try {
+    publish();
+  } catch (error) {
+    console.error(`[work-center] Attention ${operation} event was not published:`, error?.message || error);
+  }
+}
+
+escalationAttentionItemSchema.post('save', function publishSavedAttention(doc) {
+  publishAttentionSafely('save', () => {
+    publishAttentionChange(doc, doc.$locals.realtimeAttentionChange || { action: 'updated' });
+  });
+});
+
+escalationAttentionItemSchema.post('findOneAndUpdate', function publishUpdatedAttention(doc) {
+  if (!doc) return;
+  publishAttentionSafely('update', () => {
+    publishAttentionChange(doc, {
+      action: 'updated',
+      changedFields: changedFieldsFromUpdate(this.getUpdate()),
+    });
+  });
+});
+
+escalationAttentionItemSchema.post('findOneAndDelete', function publishDeletedAttention(doc) {
+  if (!doc) return;
+  publishAttentionSafely('delete', () => {
+    publishAttentionChange(doc, { action: 'deleted' });
+  });
+});
 
 module.exports = mongoose.model('EscalationAttentionItem', escalationAttentionItemSchema);
 module.exports.ATTENTION_KINDS = ATTENTION_KINDS;
