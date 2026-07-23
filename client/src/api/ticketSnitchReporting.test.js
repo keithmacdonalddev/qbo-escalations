@@ -53,6 +53,31 @@ it('submits only allow-listed browser context and removes route query data', asy
   expect(body.context.viewport).toBeUndefined();
   expect(body).not.toHaveProperty('reporter');
   expect(body).not.toHaveProperty('projectId');
+  expect(body).not.toHaveProperty('contact');
+});
+
+it('includes only optional self-reported contact details when the user supplies them', async () => {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    ok: true,
+    status: 201,
+    headers: new Headers(),
+    json: async () => ({ ok: true, ticket: { key: 'QBO-3' } }),
+  });
+  await submitUserReport({
+    reportToken: 'form-token',
+    submissionId: 'submission-api-contact-001',
+    observedAt: '2026-07-23T03:01:00.000Z',
+    kind: 'feedback',
+    title: 'Follow-up requested',
+    explanation: 'I would like to be contacted about this feedback in the future.',
+    reporterName: '  Ada Lovelace  ',
+    reporterEmail: ' ADA@Example.TEST ',
+    includeDiagnostics: false,
+  });
+  const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+  expect(body.contact).toEqual({ name: 'Ada Lovelace', email: 'ada@example.test' });
+  expect(body).not.toHaveProperty('reporter');
+  expect(body).not.toHaveProperty('actorId');
 });
 
 it('creates stable non-secret submission identifiers in the browser', () => {
@@ -62,7 +87,7 @@ it('creates stable non-secret submission identifiers in the browser', () => {
   expect(second).not.toBe(first);
 });
 
-it('encodes only the explicitly approved screenshot in the authenticated report request', async () => {
+it('encodes only the explicitly approved screenshot in the report request', async () => {
   const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok: true,
     status: 201,

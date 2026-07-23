@@ -4,7 +4,6 @@ import { ErrorBoundary } from 'react-error-boundary';
 import { TooltipProvider } from './hooks/useTooltipLevel.jsx';
 import { ToastProvider } from './hooks/useToast.jsx';
 import { ProviderCatalogProvider } from './context/ProviderCatalogContext.jsx';
-import { AppAuthProvider } from './context/AppAuthContext.jsx';
 import ErrorFallback from './components/ErrorFallback.jsx';
 import App from './App.jsx';
 import { installRuntimeGuards } from './lib/installRuntimeGuards.js';
@@ -44,11 +43,9 @@ createRoot(document.getElementById('root')).render(
     >
       <TooltipProvider>
         <ToastProvider>
-          <AppAuthProvider>
-            <ProviderCatalogProvider>
-              <App />
-            </ProviderCatalogProvider>
-          </AppAuthProvider>
+          <ProviderCatalogProvider>
+            <App />
+          </ProviderCatalogProvider>
         </ToastProvider>
       </TooltipProvider>
     </ErrorBoundary>

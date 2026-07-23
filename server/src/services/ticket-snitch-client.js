@@ -152,68 +152,6 @@ async function callCustomerReceipt(path, { method = 'GET', body, requestId, idem
   }
 }
 
-async function exchangeProjectSignIn({ code, codeVerifier, redirectUri }, requestId = '') {
-  const config = configuration();
-  if (!config.baseUrl || !config.projectId) {
-    throw new TicketSnitchConnectorError('Ticket Snitch sign-in is not configured for this QBO server.', {
-      code: 'TICKET_SNITCH_SIGN_IN_NOT_CONFIGURED',
-      status: 503,
-      requestId,
-    });
-  }
-  const correlationId = requestId || crypto.randomUUID();
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), config.timeoutMs);
-  try {
-    const response = await fetch(`${config.baseUrl}/auth/project-sign-in/exchange`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        'X-Request-ID': correlationId,
-        'X-Ticket-Snitch-SDK': SDK_VERSION,
-      },
-      body: JSON.stringify({
-        code,
-        codeVerifier,
-        redirectUri,
-        projectId: config.projectId,
-      }),
-    });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new TicketSnitchConnectorError(payload?.error?.message || 'Ticket Snitch could not complete project sign-in.', {
-        code: payload?.error?.code || 'TICKET_SNITCH_SIGN_IN_FAILED',
-        status: response.status,
-        requestId: payload?.requestId || response.headers.get('x-request-id') || correlationId,
-      });
-    }
-    const identity = payload?.data?.identity;
-    const project = payload?.data?.project;
-    if (!identity?.subject || !identity?.displayName || project?.id !== config.projectId) {
-      throw new TicketSnitchConnectorError('Ticket Snitch returned an invalid project identity.', {
-        code: 'TICKET_SNITCH_SIGN_IN_RESPONSE_INVALID',
-        status: 502,
-        requestId: payload?.requestId || correlationId,
-      });
-    }
-    return payload;
-  } catch (error) {
-    if (error instanceof TicketSnitchConnectorError) throw error;
-    if (error.name === 'AbortError') {
-      throw new TicketSnitchConnectorError('Ticket Snitch sign-in took too long to respond.', {
-        code: 'TICKET_SNITCH_SIGN_IN_TIMEOUT', status: 504, requestId: correlationId,
-      });
-    }
-    throw new TicketSnitchConnectorError('QBO Escalations could not reach Ticket Snitch for sign-in.', {
-      code: 'TICKET_SNITCH_SIGN_IN_UNAVAILABLE', status: 502, requestId: correlationId,
-    });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 function buildReport(input, context = {}, trustedReporter = {}) {
   const config = configuration();
   const diagnosticsApproved = context.diagnosticsApproved === true;
@@ -332,7 +270,6 @@ module.exports = {
   callTicketSnitch,
   checkConnection,
   commentOnWork,
-  exchangeProjectSignIn,
   getConnectorConfig,
   getCustomerReceipt,
   getWork,

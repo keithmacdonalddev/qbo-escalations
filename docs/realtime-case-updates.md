@@ -49,9 +49,9 @@ Dashboard reloads are guarded so an older HTTP response cannot overwrite a newer
 
 ## Access boundary
 
-The handshake preserves the existing same-origin policy and rejects unapproved cross-origin connections. It also attaches the same optional QBO app session context used by HTTP middleware, and the realtime server now has a per-channel authorization hook for future protected channels.
+The handshake preserves the existing same-origin policy and rejects unapproved cross-origin connections. The realtime server retains a per-channel authorization hook for future protected channels.
 
-Escalation and knowledge read routes are currently available without the optional reporting sign-in, so the case-workflow channel intentionally uses that same boundary. It does not create a stricter socket-only sign-in rule or a weaker cross-origin path. If those HTTP routes become protected later, the channel must enable the matching authenticated-user requirement in the same change.
+Escalation and knowledge read routes currently use the app's existing deployment boundary, so the case-workflow channel intentionally uses that same boundary. Anonymous feedback continuity applies only to `/api/ticket-snitch/reporting`; it neither protects nor authorizes realtime case data. If those HTTP routes become protected later, the channel must enable the matching authenticated-user requirement in the same change.
 
 ## Deliberate Phase 1 gaps
 

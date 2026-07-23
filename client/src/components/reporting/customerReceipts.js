@@ -1,8 +1,8 @@
 const STORAGE_PREFIX = 'qbo-ticket-snitch-receipts:v1:';
 const MAX_RECEIPTS = 50;
 
-function storageKey(userId) {
-  return `${STORAGE_PREFIX}${encodeURIComponent(String(userId || '').slice(0, 128))}`;
+function storageKey(reporterScope) {
+  return `${STORAGE_PREFIX}${encodeURIComponent(String(reporterScope || '').slice(0, 128))}`;
 }
 
 function validReceipt(value) {
@@ -13,10 +13,10 @@ function validReceipt(value) {
     && !Number.isNaN(Date.parse(value.expiresAt));
 }
 
-export function loadSavedReceipts(userId, storage = globalThis.localStorage) {
-  if (!userId || !storage) return [];
+export function loadSavedReceipts(reporterScope, storage = globalThis.localStorage) {
+  if (!reporterScope || !storage) return [];
   try {
-    const parsed = JSON.parse(storage.getItem(storageKey(userId)) || '[]');
+    const parsed = JSON.parse(storage.getItem(storageKey(reporterScope)) || '[]');
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(validReceipt).slice(0, MAX_RECEIPTS);
   } catch {
@@ -24,9 +24,9 @@ export function loadSavedReceipts(userId, storage = globalThis.localStorage) {
   }
 }
 
-export function saveReceipt(userId, receipt, storage = globalThis.localStorage) {
-  if (!userId || !validReceipt(receipt) || !storage) return [];
-  const current = loadSavedReceipts(userId, storage).filter(
+export function saveReceipt(reporterScope, receipt, storage = globalThis.localStorage) {
+  if (!reporterScope || !validReceipt(receipt) || !storage) return [];
+  const current = loadSavedReceipts(reporterScope, storage).filter(
     (entry) => entry.key !== receipt.key,
   );
   const next = [
@@ -41,15 +41,15 @@ export function saveReceipt(userId, receipt, storage = globalThis.localStorage) 
     },
     ...current,
   ].slice(0, MAX_RECEIPTS);
-  storage.setItem(storageKey(userId), JSON.stringify(next));
+  storage.setItem(storageKey(reporterScope), JSON.stringify(next));
   return next;
 }
 
-export function removeSavedReceipt(userId, key, storage = globalThis.localStorage) {
-  if (!userId || !storage) return [];
-  const next = loadSavedReceipts(userId, storage).filter(
+export function removeSavedReceipt(reporterScope, key, storage = globalThis.localStorage) {
+  if (!reporterScope || !storage) return [];
+  const next = loadSavedReceipts(reporterScope, storage).filter(
     (entry) => entry.key !== key,
   );
-  storage.setItem(storageKey(userId), JSON.stringify(next));
+  storage.setItem(storageKey(reporterScope), JSON.stringify(next));
   return next;
 }

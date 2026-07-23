@@ -78,7 +78,19 @@ export function fileToBase64(file) {
   });
 }
 
-export async function submitUserReport({ reportToken, submissionId, observedAt, kind, title, explanation, includeDiagnostics, errorCode = '', screenshot = null }) {
+export async function submitUserReport({
+  reportToken,
+  submissionId,
+  observedAt,
+  kind,
+  title,
+  explanation,
+  reporterName = '',
+  reporterEmail = '',
+  includeDiagnostics,
+  errorCode = '',
+  screenshot = null,
+}) {
   const routeName = String(window.location.hash || '#/').split('?')[0].slice(0, 200);
   const pageUrl = `${window.location.origin}${window.location.pathname}`;
   const screenshotPayload = screenshot ? {
@@ -95,6 +107,12 @@ export async function submitUserReport({ reportToken, submissionId, observedAt, 
       kind,
       title,
       explanation,
+      ...((reporterName.trim() || reporterEmail.trim()) ? {
+        contact: {
+          ...(reporterName.trim() ? { name: reporterName.trim() } : {}),
+          ...(reporterEmail.trim() ? { email: reporterEmail.trim().toLowerCase() } : {}),
+        },
+      } : {}),
       includeDiagnostics,
       ...(screenshotPayload ? { screenshot: screenshotPayload } : {}),
       context: {

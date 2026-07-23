@@ -474,7 +474,6 @@ export default function AppHeader({
   agentModalOpen,
   onOpenAgent,
   onOpenUserReport,
-  appAuth,
   aiManagementAlertCount = 0,
   liveWorkControl = null,
 }) {
@@ -961,13 +960,11 @@ export default function AppHeader({
           </motion.button>
           {/* User problem, feature, and feedback reporting */}
           <motion.button
-            className={`app-header-icon-btn app-header-auth-btn${appAuth?.authenticated ? ' is-authenticated' : ''}`}
+            className="app-header-icon-btn"
             onClick={onOpenUserReport}
             type="button"
-            aria-label={appAuth?.authenticated
-              ? `Feedback and reports, signed in as ${appAuth.user?.displayName || 'Ticket Snitch user'}`
-              : 'Feedback and reports, sign in with Ticket Snitch'}
-            title={appAuth?.authenticated ? 'Feedback & reports' : 'Feedback & reports — sign in'}
+            aria-label="Feedback and reports"
+            title="Feedback & reports"
             whileHover={{ scale: 1.08 }}
             whileTap={{ scale: 0.92 }}
           >
@@ -976,9 +973,6 @@ export default function AppHeader({
               <path d="M8 9h8" />
               <path d="M8 13h5" />
             </svg>
-            {appAuth?.enabled ? (
-              <span className={`app-header-auth-status${appAuth.authenticated ? ' is-online' : ''}`} aria-hidden="true" />
-            ) : null}
           </motion.button>
           {/* Test suite */}
           <motion.button

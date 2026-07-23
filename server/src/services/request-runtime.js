@@ -4,7 +4,6 @@ const activeRequests = new Map();
 
 function observableRequestPath(req) {
   const raw = String(req.originalUrl || req.url || '');
-  if (raw.startsWith('/api/auth/ticket-snitch/callback')) return raw.split('?', 1)[0];
   return raw;
 }
 

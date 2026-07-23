@@ -19,7 +19,10 @@ const {
   prepareScreenshotEvidence,
 } = require('../services/ticket-snitch-screenshot');
 const { createRateLimiter } = require('../middleware/rate-limit');
-const { requireReportingUser } = require('../middleware/app-auth');
+const {
+  deriveReportingKey,
+  ensureReportingVisitor,
+} = require('../services/reporting-session');
 
 const router = express.Router();
 const TYPES = new Set(['problem_report', 'feature_request', 'improvement', 'task', 'maintenance', 'incident', 'idea', 'decision', 'question', 'agent_discovered_problem']);
@@ -34,10 +37,7 @@ const REPORT_TOKEN_TTL_MS = 15 * 60 * 1000;
 const reportTokenSecret = crypto.randomBytes(32);
 
 function receiptHandleKey() {
-  return crypto
-    .createHash('sha256')
-    .update(`qbo-ticket-receipt-handle-v1:${process.env.QBO_AUTH_PASSWORD_HASH || ''}:${process.env.TICKET_SNITCH_PROJECT_ID || ''}`)
-    .digest();
+  return deriveReportingKey('ticket-receipt-handle');
 }
 
 function sealReceiptToken(receiptToken, userId) {
@@ -150,7 +150,7 @@ function isValidReportToken(token, origin, sessionKey, now = Date.now()) {
 }
 
 function requireReportToken(req, res, next) {
-  if (!isValidReportToken(req.headers['x-qbo-report-token'], req.reportOrigin, req.authenticatedUser?.sessionKey || '')) {
+  if (!isValidReportToken(req.headers['x-qbo-report-token'], req.reportOrigin, req.reportingVisitor?.id || '')) {
     return res.status(403).json({
       ok: false,
       code: 'TICKET_SNITCH_REPORT_TOKEN_INVALID',
@@ -184,7 +184,7 @@ function connectorError(res, error, requestId) {
 
 const userReportRateLimit = createRateLimiter({ name: 'ticket-snitch-user-report', limit: 12, includeRequestId: true });
 
-router.get('/reporting/bootstrap', requireReportOrigin, requireReportingUser, (req, res) => {
+router.get('/reporting/bootstrap', requireReportOrigin, ensureReportingVisitor, (req, res) => {
   const connector = getConnectorConfig();
   const available = connector.configured;
   return res.json({
@@ -193,14 +193,15 @@ router.get('/reporting/bootstrap', requireReportOrigin, requireReportingUser, (r
     unavailableReason: available
       ? ''
       : 'TICKET_SNITCH_NOT_CONFIGURED',
-    reportToken: available ? issueReportToken(req.reportOrigin, req.authenticatedUser.sessionKey) : '',
+    reportToken: available ? issueReportToken(req.reportOrigin, req.reportingVisitor.id) : '',
+    reporterScope: req.reportingVisitor.scope,
     screenshotAvailable: available && connector.evidenceConfigured,
     expiresInSeconds: available ? Math.floor(REPORT_TOKEN_TTL_MS / 1000) : 0,
     requestId: req.requestId,
   });
 });
 
-router.post('/reporting/reports', requireReportOrigin, requireReportingUser, userReportRateLimit, requireReportToken, async (req, res) => {
+router.post('/reporting/reports', requireReportOrigin, ensureReportingVisitor, userReportRateLimit, requireReportToken, async (req, res) => {
   const connector = getConnectorConfig();
   if (!connector.configured) {
     return res.status(503).json({
@@ -217,11 +218,27 @@ router.post('/reporting/reports', requireReportOrigin, requireReportingUser, use
   const originalReport = cleanText(input.explanation, 40_001);
   const submissionId = cleanText(input.submissionId, 128);
   const observedAt = cleanText(input.observedAt, 100);
+  const contact = input.contact === undefined ? {} : input.contact;
   if (!type) return res.status(400).json({ ok: false, code: 'INVALID_REPORT_TYPE', error: 'Choose problem, feature request, or feedback.', requestId: req.requestId });
   if (title.length < 3 || title.length > 240) return res.status(400).json({ ok: false, code: 'INVALID_REPORT_TITLE', error: 'Enter a title between 3 and 240 characters.', requestId: req.requestId });
   if (originalReport.length < 10 || originalReport.length > 40_000) return res.status(400).json({ ok: false, code: 'INVALID_REPORT_EXPLANATION', error: 'Enter an explanation between 10 and 40,000 characters.', requestId: req.requestId });
   if (!/^[A-Za-z0-9_-]{16,128}$/.test(submissionId)) return res.status(400).json({ ok: false, code: 'INVALID_SUBMISSION_ID', error: 'This report draft could not be identified. Reopen the form and try again.', requestId: req.requestId });
   if (!observedAt || Number.isNaN(Date.parse(observedAt))) return res.status(400).json({ ok: false, code: 'INVALID_OBSERVED_AT', error: 'This report draft has an invalid timestamp. Reopen the form and try again.', requestId: req.requestId });
+  if (!contact || typeof contact !== 'object' || Array.isArray(contact)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_REPORTER_CONTACT', error: 'Optional contact details must contain a name or email.', requestId: req.requestId });
+  }
+  if ((contact.name !== undefined && typeof contact.name !== 'string')
+    || (contact.email !== undefined && typeof contact.email !== 'string')) {
+    return res.status(400).json({ ok: false, code: 'INVALID_REPORTER_CONTACT', error: 'Optional contact name and email must be text.', requestId: req.requestId });
+  }
+  const reporterName = String(contact.name || '').trim();
+  const reporterEmail = String(contact.email || '').trim().toLowerCase();
+  if (reporterName.length > 120 || (reporterName.length > 0 && reporterName.length < 2)) {
+    return res.status(400).json({ ok: false, code: 'INVALID_REPORTER_NAME', error: 'Leave the optional name blank or enter 2 to 120 characters.', requestId: req.requestId });
+  }
+  if (reporterEmail.length > 320 || (reporterEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(reporterEmail))) {
+    return res.status(400).json({ ok: false, code: 'INVALID_REPORTER_EMAIL', error: 'Leave the optional email blank or enter a valid email address.', requestId: req.requestId });
+  }
 
   let screenshot = null;
   if (input.screenshot !== undefined && input.screenshot !== null) {
@@ -243,9 +260,9 @@ router.post('/reporting/reports', requireReportOrigin, requireReportingUser, use
   const suppliedContext = input.context && typeof input.context === 'object' ? input.context : {};
   const diagnosticsApproved = input.includeDiagnostics === true;
   const reporter = {
-    actorId: req.authenticatedUser.id,
-    displayName: req.authenticatedUser.displayName,
-    email: req.authenticatedUser.email || '',
+    actorId: req.reportingVisitor.id,
+    displayName: reporterName || (reporterEmail ? 'QBO reporter' : 'Anonymous QBO reporter'),
+    email: reporterEmail,
   };
   const context = {
     pageUrl: safeReportedPageUrl(suppliedContext.pageUrl, req.reportOrigin),
@@ -311,7 +328,7 @@ router.post('/reporting/reports', requireReportOrigin, requireReportingUser, use
         ? {
             handle: sealReceiptToken(
               result.customerReceipt.token,
-              req.authenticatedUser.id,
+              req.reportingVisitor.id,
             ),
             expiresAt: result.customerReceipt.expiresAt,
           }
@@ -333,7 +350,7 @@ const customerFollowUpRateLimit = createRateLimiter({
 
 function privateReceiptToken(req) {
   const handle = cleanText(req.headers['x-qbo-ticket-receipt'], 512);
-  return openReceiptHandle(handle, req.authenticatedUser?.id);
+  return openReceiptHandle(handle, req.reportingVisitor?.id);
 }
 
 function followUpActionId(value) {
@@ -344,7 +361,7 @@ function followUpActionId(value) {
 router.get(
   '/reporting/receipt',
   requireReportOrigin,
-  requireReportingUser,
+  ensureReportingVisitor,
   customerFollowUpRateLimit,
   requireReportToken,
   async (req, res) => {
@@ -369,7 +386,7 @@ router.get(
 router.post(
   '/reporting/receipt/replies',
   requireReportOrigin,
-  requireReportingUser,
+  ensureReportingVisitor,
   customerFollowUpRateLimit,
   requireReportToken,
   async (req, res) => {
@@ -406,7 +423,7 @@ router.post(
 router.post(
   '/reporting/receipt/validation',
   requireReportOrigin,
-  requireReportingUser,
+  ensureReportingVisitor,
   customerFollowUpRateLimit,
   requireReportToken,
   async (req, res) => {

@@ -2,7 +2,6 @@
 
 const { WebSocketServer, WebSocket } = require('ws');
 const { isAllowedOrigin } = require('../lib/origin-policy');
-const { resolveAppAuthContext } = require('../middleware/app-auth');
 const {
   getCaseRealtimeStatus,
   resetCaseRealtimeEvents,
@@ -88,9 +87,6 @@ function getRealtimeStatus() {
 }
 
 async function authorizeSubscription(client, handler, context) {
-  if (handler.requiresAuthenticatedUser === true && !client.authenticatedUser) {
-    throw createProtocolError('REALTIME_AUTH_REQUIRED', 'Sign in before subscribing to this live update channel');
-  }
   if (typeof handler.authorize !== 'function') return;
 
   const decision = await handler.authorize(context);
@@ -160,9 +156,6 @@ async function handleSubscribe(client, payload) {
   client.subscriptions.set(subscriptionId, record);
 
   try {
-    const authContext = resolveAppAuthContext(client.request);
-    client.appAuth = authContext.appAuth;
-    client.authenticatedUser = authContext.authenticatedUser;
     const context = {
       subscriptionId,
       channel,
@@ -170,8 +163,6 @@ async function handleSubscribe(client, payload) {
       params: payload?.params && typeof payload.params === 'object' ? payload.params : {},
       request: client.request,
       clientId: client.id,
-      appAuth: client.appAuth,
-      authenticatedUser: client.authenticatedUser,
     };
     await authorizeSubscription(client, handler, context);
 
@@ -313,13 +304,10 @@ function attachRealtimeServer(httpServer) {
   _attachedServer = httpServer;
 
   _websocketServer.on('connection', (ws, request) => {
-    const authContext = resolveAppAuthContext(request);
     const client = {
       id: createClientId(),
       ws,
       request,
-      appAuth: authContext.appAuth,
-      authenticatedUser: authContext.authenticatedUser,
       subscriptions: new Map(),
       alive: true,
       connectedAt: Date.now(),
@@ -330,7 +318,6 @@ function attachRealtimeServer(httpServer) {
       type: 'hello',
       connectionId: client.id,
       serverTime: new Date().toISOString(),
-      authenticated: Boolean(client.authenticatedUser),
       status: getRealtimeStatus(),
     });
 

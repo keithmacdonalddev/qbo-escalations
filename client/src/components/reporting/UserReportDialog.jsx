@@ -7,7 +7,6 @@ import {
   submitUserReport,
   validateCustomerReceipt,
 } from '../../api/ticketSnitchReporting.js';
-import { useAppAuth } from '../../context/AppAuthContext.jsx';
 import {
   captureScreenFrame,
   screenCaptureSupported,
@@ -26,11 +25,15 @@ const REPORT_CHOICES = [
   { value: 'feedback', label: 'Feedback', description: 'Share an improvement or general observation.' },
 ];
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 function initialDraft() {
   return {
     kind: 'problem',
     title: '',
     explanation: '',
+    reporterName: '',
+    reporterEmail: '',
     includeDiagnostics: false,
     submissionId: createSubmissionId(),
     observedAt: new Date().toISOString(),
@@ -38,9 +41,6 @@ function initialDraft() {
 }
 
 function reportErrorMessage(error) {
-  if (error?.code === 'QBO_AUTH_REQUIRED') {
-    return 'Your QBO session ended. Sign in again to send this saved draft.';
-  }
   if (error?.status === 401 || error?.status === 403) {
     return 'This QBO Escalations installation is not permitted to submit reports. Your draft is still here.';
   }
@@ -52,14 +52,13 @@ function fileSizeLabel(size) {
   return `${Math.ceil(size / 1024)} KB`;
 }
 
-export default function UserReportDialog({ open, onClose, onAuthenticationRequired, errorCode = '' }) {
-  const appAuth = useAppAuth();
+export default function UserReportDialog({ open, onClose, errorCode = '' }) {
   const dialogRef = useRef(null);
   const titleRef = useRef(null);
   const screenshotInputRef = useRef(null);
   const priorFocusRef = useRef(null);
   const [draft, setDraft] = useState(initialDraft);
-  const [bootstrap, setBootstrap] = useState({ state: 'idle', token: '', requestId: '', reason: '', screenshotAvailable: false });
+  const [bootstrap, setBootstrap] = useState({ state: 'idle', token: '', reporterScope: '', requestId: '', reason: '', screenshotAvailable: false });
   const [submitState, setSubmitState] = useState({ state: 'idle', ticket: null, replay: false, message: '', requestId: '' });
   const [errors, setErrors] = useState({});
   const [online, setOnline] = useState(() => navigator.onLine !== false);
@@ -72,31 +71,30 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
   const [receiptState, setReceiptState] = useState({ state: 'idle', data: null, message: '', requestId: '' });
   const [replyDraft, setReplyDraft] = useState({ body: '', actionId: createSubmissionId() });
   const [validationDraft, setValidationDraft] = useState({ outcome: '', note: '', actionId: createSubmissionId() });
-  const [signingOut, setSigningOut] = useState(false);
-  const [accountError, setAccountError] = useState('');
 
   const loadAvailability = useCallback(async () => {
-    setBootstrap({ state: 'loading', token: '', requestId: '', reason: '', screenshotAvailable: false });
+    setBootstrap({ state: 'loading', token: '', reporterScope: '', requestId: '', reason: '', screenshotAvailable: false });
     try {
       const result = await loadReportingBootstrap();
       setBootstrap({
         state: result.available ? 'ready' : 'unavailable',
         token: result.reportToken || '',
+        reporterScope: result.reporterScope || '',
         requestId: result.requestId || '',
         reason: result.unavailableReason || '',
         screenshotAvailable: result.screenshotAvailable !== false,
       });
     } catch (error) {
-      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setBootstrap({
         state: error?.status === 401 || error?.status === 403 ? 'denied' : 'error',
         token: '',
+        reporterScope: '',
         requestId: error?.requestId || '',
         reason: reportErrorMessage(error),
         screenshotAvailable: false,
       });
     }
-  }, [onAuthenticationRequired]);
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -110,12 +108,12 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
   }, [loadAvailability, open]);
 
   useEffect(() => {
-    if (!open || !appAuth.user?.id) return;
-    setSavedReceipts(loadSavedReceipts(appAuth.user.id));
-  }, [appAuth.user?.id, open]);
+    if (!open || !bootstrap.reporterScope) return;
+    setSavedReceipts(loadSavedReceipts(bootstrap.reporterScope));
+  }, [bootstrap.reporterScope, open]);
 
   const rememberReceipt = useCallback((result) => {
-    if (!appAuth.user?.id || !result?.customerReceipt?.handle || !result?.ticket?.key) return null;
+    if (!bootstrap.reporterScope || !result?.customerReceipt?.handle || !result?.ticket?.key) return null;
     const stored = {
       key: result.ticket.key,
       title: draft.title.trim(),
@@ -123,10 +121,10 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
       expiresAt: result.customerReceipt.expiresAt,
       createdAt: new Date().toISOString(),
     };
-    setSavedReceipts(saveReceipt(appAuth.user.id, stored));
+    setSavedReceipts(saveReceipt(bootstrap.reporterScope, stored));
     setSelectedReceipt(stored);
     return stored;
-  }, [appAuth.user?.id, draft.title]);
+  }, [bootstrap.reporterScope, draft.title]);
 
   const openReceipt = useCallback(async (receipt) => {
     setSelectedReceipt(receipt);
@@ -151,7 +149,6 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
       const result = await loadCustomerReceipt({ reportToken, receiptHandle: receipt.handle });
       setReceiptState({ state: 'ready', data: result.data, message: '', requestId: result.requestId || '' });
     } catch (error) {
-      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setReceiptState({
         state: error?.status === 401 || error?.status === 403 ? 'expired' : 'error',
         data: null,
@@ -159,7 +156,7 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
         requestId: error?.requestId || '',
       });
     }
-  }, [bootstrap.token, onAuthenticationRequired, online]);
+  }, [bootstrap.token, online]);
 
   useEffect(() => {
     if (open && bootstrap.state === 'ready') titleRef.current?.focus();
@@ -264,9 +261,17 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
     else if (cleanTitle.length > 240) next.title = 'Use 240 characters or fewer.';
     if (cleanExplanation.length < 10) next.explanation = 'Enter at least 10 characters so the team can understand the report.';
     else if (cleanExplanation.length > 40_000) next.explanation = 'Use 40,000 characters or fewer.';
+    const cleanReporterName = draft.reporterName.trim();
+    const cleanReporterEmail = draft.reporterEmail.trim();
+    if (cleanReporterName && cleanReporterName.length < 2) next.reporterName = 'Enter at least 2 characters, or leave this blank.';
+    else if (cleanReporterName.length > 120) next.reporterName = 'Use 120 characters or fewer.';
+    if (cleanReporterEmail.length > 320) next.reporterEmail = 'Use 320 characters or fewer.';
+    else if (cleanReporterEmail && !EMAIL_PATTERN.test(cleanReporterEmail)) next.reporterEmail = 'Enter a valid email address, or leave this blank.';
     setErrors(next);
     if (next.title) titleRef.current?.focus();
     else if (next.explanation) dialogRef.current?.querySelector('#user-report-explanation')?.focus();
+    else if (next.reporterName) dialogRef.current?.querySelector('#user-report-name')?.focus();
+    else if (next.reporterEmail) dialogRef.current?.querySelector('#user-report-email')?.focus();
     return Object.keys(next).length === 0;
   };
 
@@ -297,6 +302,8 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
         kind: draft.kind,
         title: draft.title.trim(),
         explanation: draft.explanation.trim(),
+        reporterName: draft.reporterName.trim(),
+        reporterEmail: draft.reporterEmail.trim(),
         includeDiagnostics: draft.includeDiagnostics,
         errorCode,
         screenshot,
@@ -323,7 +330,6 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
         receipt: storedReceipt,
       });
     } catch (error) {
-      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setSubmitState((current) => ({
         state: retryEvidence ? 'partial' : 'error',
         ticket: retryEvidence ? current.ticket : null,
@@ -358,7 +364,6 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
       setReplyDraft({ body: '', actionId: createSubmissionId() });
       await openReceipt(selectedReceipt);
     } catch (error) {
-      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setReceiptState((current) => ({
         ...current,
         state: 'ready',
@@ -387,7 +392,6 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
       setValidationDraft({ outcome, note: '', actionId: createSubmissionId() });
       await openReceipt(selectedReceipt);
     } catch (error) {
-      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setReceiptState((current) => ({
         ...current,
         state: 'ready',
@@ -398,8 +402,8 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
   };
 
   const forgetReceipt = () => {
-    if (!selectedReceipt || !appAuth.user?.id) return;
-    setSavedReceipts(removeSavedReceipt(appAuth.user.id, selectedReceipt.key));
+    if (!selectedReceipt || !bootstrap.reporterScope) return;
+    setSavedReceipts(removeSavedReceipt(bootstrap.reporterScope, selectedReceipt.key));
     setSelectedReceipt(null);
     setReceiptState({ state: 'idle', data: null, message: '', requestId: '' });
     setView('receipts');
@@ -416,20 +420,7 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
     requestAnimationFrame(() => titleRef.current?.focus());
   };
 
-  const handleSignOut = async () => {
-    setAccountError('');
-    setSigningOut(true);
-    try {
-      await appAuth.signOut();
-      onClose();
-    } catch (error) {
-      setAccountError(error?.message || 'Sign-out did not finish. Try again.');
-    } finally {
-      setSigningOut(false);
-    }
-  };
-
-  const busy = signingOut || bootstrap.state === 'loading' || submitState.state === 'submitting' || submitState.state === 'retrying' || captureState.state === 'capturing';
+  const busy = bootstrap.state === 'loading' || submitState.state === 'submitting' || submitState.state === 'retrying' || captureState.state === 'capturing';
   const canSubmit = bootstrap.state === 'ready' && online && !busy;
 
   return (
@@ -453,14 +444,8 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
             <h2 id="user-report-title">Send feedback</h2>
             <p id="user-report-intro">Tell us what happened or what would make QBO Escalations better.</p>
           </div>
-          <div className="user-report-account-actions">
-            <span className="user-report-account-name">{appAuth.user?.displayName || 'Ticket Snitch user'}</span>
-            <button type="button" className="user-report-sign-out" onClick={handleSignOut} disabled={busy}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
-            <button type="button" className="user-report-close" onClick={onClose} disabled={busy} aria-label="Close reporting form">×</button>
-          </div>
+          <button type="button" className="user-report-close" onClick={onClose} disabled={busy} aria-label="Close reporting form">×</button>
         </header>
-
-        {accountError && <p className="user-report-account-error" role="alert">{accountError}</p>}
 
         <nav className="user-report-view-tabs" aria-label="Feedback and report status">
           <button
@@ -486,7 +471,7 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
             <div className="user-report-section-heading">
               <div>
                 <h3>My reports</h3>
-                <p>Private receipts saved for this signed-in QBO user on this browser.</p>
+                <p>Private receipts saved for this anonymous browser identity.</p>
               </div>
             </div>
             {savedReceipts.length ? (
@@ -737,6 +722,47 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
               {errors.explanation ? <span id="user-report-explanation-error" className="user-report-field-error" role="alert">{errors.explanation}</span> : null}
             </div>
 
+            <section className="user-report-contact" aria-labelledby="user-report-contact-title">
+              <div className="user-report-section-heading">
+                <div>
+                  <h3 id="user-report-contact-title">Contact details</h3>
+                  <p>Optional. Leave both fields blank to report anonymously.</p>
+                </div>
+                <span>Optional</span>
+              </div>
+              <div className="user-report-contact-grid">
+                <div className="user-report-field">
+                  <label htmlFor="user-report-name">Name</label>
+                  <input
+                    id="user-report-name"
+                    autoComplete="name"
+                    value={draft.reporterName}
+                    onChange={(event) => updateDraft('reporterName', event.target.value)}
+                    maxLength={120}
+                    aria-invalid={Boolean(errors.reporterName)}
+                    aria-describedby={errors.reporterName ? 'user-report-name-error' : 'user-report-contact-help'}
+                  />
+                  {errors.reporterName ? <span id="user-report-name-error" className="user-report-field-error" role="alert">{errors.reporterName}</span> : null}
+                </div>
+                <div className="user-report-field">
+                  <label htmlFor="user-report-email">Email</label>
+                  <input
+                    id="user-report-email"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={draft.reporterEmail}
+                    onChange={(event) => updateDraft('reporterEmail', event.target.value)}
+                    maxLength={320}
+                    aria-invalid={Boolean(errors.reporterEmail)}
+                    aria-describedby={errors.reporterEmail ? 'user-report-email-error' : 'user-report-contact-help'}
+                  />
+                  {errors.reporterEmail ? <span id="user-report-email-error" className="user-report-field-error" role="alert">{errors.reporterEmail}</span> : null}
+                </div>
+              </div>
+              <p id="user-report-contact-help" className="user-report-help">These details are self-reported and are used only to identify this report and support future follow-up. They do not create an account or prove identity.</p>
+            </section>
+
             <section
               className="user-report-screenshot"
               aria-labelledby="user-report-screenshot-title"
@@ -815,7 +841,7 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
 
             <details className="user-report-disclosure">
               <summary>What will be submitted?</summary>
-              <p>Your selected type, title, explanation, current QBO page name, app version, time, and a private request ID. Optional diagnostics are included only when checked. {screenshot ? 'The screenshot shown above will also be attached as private case evidence.' : 'No screenshot will be submitted.'} Ticket Snitch uses this to organize human review and follow-through.</p>
+              <p>Your selected type, title, explanation, current QBO page name, app version, time, and a private request ID. Your name and email are included only when you enter them; otherwise the report is anonymous. Optional diagnostics are included only when checked. {screenshot ? 'The screenshot shown above will also be attached as private case evidence.' : 'No screenshot will be submitted.'} Ticket Snitch uses this to organize human review and follow-through.</p>
             </details>
 
             {!online ? (

@@ -15,32 +15,32 @@ function memoryStorage() {
   };
 }
 
-it('stores only an opaque QBO handle under the signed-in user scope', () => {
+it('stores only an opaque QBO handle under the anonymous reporter scope', () => {
   const storage = memoryStorage();
-  const saved = saveReceipt('user-1', {
+  const saved = saveReceipt('qrv-browser-1', {
     key: 'QBO-71',
     title: 'Private report',
     handle,
     expiresAt: '2027-07-23T03:00:00.000Z',
   }, storage);
   expect(saved).toHaveLength(1);
-  expect(loadSavedReceipts('user-1', storage)[0].handle).toBe(handle);
-  expect(loadSavedReceipts('user-2', storage)).toEqual([]);
+  expect(loadSavedReceipts('qrv-browser-1', storage)[0].handle).toBe(handle);
+  expect(loadSavedReceipts('qrv-browser-2', storage)).toEqual([]);
 });
 
 it('rejects malformed or raw Ticket Snitch tokens and removes saved handles', () => {
   const storage = memoryStorage();
-  expect(saveReceipt('user-1', {
+  expect(saveReceipt('qrv-browser-1', {
     key: 'QBO-72',
     title: 'Unsafe raw token',
     handle: `tsr_11111111-1111-4111-8111-111111111111.${'x'.repeat(43)}`,
     expiresAt: '2027-07-23T03:00:00.000Z',
   }, storage)).toEqual([]);
-  saveReceipt('user-1', {
+  saveReceipt('qrv-browser-1', {
     key: 'QBO-71',
     title: 'Private report',
     handle,
     expiresAt: '2027-07-23T03:00:00.000Z',
   }, storage);
-  expect(removeSavedReceipt('user-1', 'QBO-71', storage)).toEqual([]);
+  expect(removeSavedReceipt('qrv-browser-1', 'QBO-71', storage)).toEqual([]);
 });

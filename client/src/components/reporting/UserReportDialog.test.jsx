@@ -16,17 +16,7 @@ const screenshotMocks = vi.hoisted(() => ({
   screenCaptureSupported: vi.fn(() => true),
   validateScreenshotFile: vi.fn((file) => file),
 }));
-const authMocks = vi.hoisted(() => ({
-  signOut: vi.fn(),
-}));
-
 vi.mock('../../api/ticketSnitchReporting.js', () => reportingMocks);
-vi.mock('../../context/AppAuthContext.jsx', () => ({
-  useAppAuth: () => ({
-    user: { id: 'qbo-test-user', displayName: 'QBO Test User' },
-    signOut: authMocks.signOut,
-  }),
-}));
 vi.mock('./screenshotCapture.js', () => screenshotMocks);
 
 beforeEach(() => {
@@ -40,6 +30,7 @@ beforeEach(() => {
     ok: true,
     available: true,
     reportToken: 'report-token',
+    reporterScope: 'qrv_test-browser-scope',
     requestId: 'bootstrap-request',
     screenshotAvailable: true,
   });
@@ -69,22 +60,9 @@ beforeEach(() => {
   });
   reportingMocks.replyToCustomerReceipt.mockReset().mockResolvedValue({ ok: true });
   reportingMocks.validateCustomerReceipt.mockReset().mockResolvedValue({ ok: true });
-  authMocks.signOut.mockReset().mockResolvedValue({ ok: true });
   screenshotMocks.captureScreenFrame.mockReset().mockResolvedValue(new File(['screen'], 'capture.png', { type: 'image/png' }));
   screenshotMocks.screenCaptureSupported.mockReset().mockReturnValue(true);
   screenshotMocks.validateScreenshotFile.mockReset().mockImplementation((file) => file);
-});
-
-it('keeps the feedback dialog open and explains a failed sign-out', async () => {
-  const user = userEvent.setup();
-  const onClose = vi.fn();
-  authMocks.signOut.mockRejectedValue(new Error('The server could not sign you out.'));
-  render(<UserReportDialog open onClose={onClose} />);
-
-  await user.click(await screen.findByRole('button', { name: 'Sign out' }));
-
-  expect(await screen.findByRole('alert')).toHaveTextContent('The server could not sign you out.');
-  expect(onClose).not.toHaveBeenCalled();
 });
 
 it('offers the three plain-language choices and validates the short form', async () => {
@@ -120,12 +98,37 @@ it('submits consented feedback and shows the returned Ticket Snitch case key', a
     kind: 'feedback',
     title: 'Make filters easier to scan',
     explanation: 'Grouping the filters would make review much faster.',
+    reporterName: '',
+    reporterEmail: '',
     includeDiagnostics: true,
     errorCode: 'SAFE_ERROR',
     screenshot: null,
   }));
   expect(await screen.findByText('QBO-51')).toBeVisible();
   expect(screen.getByText(/ready for human review/i)).toBeVisible();
+});
+
+it('submits optional contact details and rejects a malformed email without losing the draft', async () => {
+  const user = userEvent.setup();
+  render(<UserReportDialog open onClose={() => {}} />);
+  await screen.findByRole('button', { name: 'Send report' });
+  expect(screen.getByText(/Leave both fields blank to report anonymously/i)).toBeVisible();
+  await user.type(screen.getByLabelText('Short title'), 'Contact details test');
+  await user.type(screen.getByLabelText('What should we know?'), 'Please follow up with me about this report in the future.');
+  await user.type(screen.getByLabelText('Name'), 'Ada Lovelace');
+  await user.type(screen.getByLabelText('Email'), 'not-an-email');
+  await user.click(screen.getByRole('button', { name: 'Send report' }));
+  expect(screen.getByText(/Enter a valid email address/i)).toBeVisible();
+  expect(reportingMocks.submitUserReport).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Short title')).toHaveValue('Contact details test');
+
+  await user.clear(screen.getByLabelText('Email'));
+  await user.type(screen.getByLabelText('Email'), 'ADA@Example.TEST');
+  await user.click(screen.getByRole('button', { name: 'Send report' }));
+  await waitFor(() => expect(reportingMocks.submitUserReport).toHaveBeenCalledWith(expect.objectContaining({
+    reporterName: 'Ada Lovelace',
+    reporterEmail: 'ADA@Example.TEST',
+  })));
 });
 
 it('explains duplicate-safe replay without claiming a second case', async () => {
@@ -191,15 +194,15 @@ it('preserves a valid draft while offline and does not attempt submission', asyn
   }
 });
 
-it('hands an expired QBO session back to the sign-in flow without losing the draft', async () => {
-  reportingMocks.loadReportingBootstrap.mockRejectedValue(Object.assign(new Error('Sign in first.'), {
-    status: 401,
-    code: 'QBO_AUTH_REQUIRED',
-    requestId: 'expired-session-request',
+it('shows a configuration error without presenting a user sign-in flow', async () => {
+  reportingMocks.loadReportingBootstrap.mockRejectedValue(Object.assign(new Error('Anonymous reporting continuity is not configured on this server.'), {
+    status: 503,
+    code: 'QBO_REPORTING_SECRET_NOT_CONFIGURED',
+    requestId: 'reporting-config-request',
   }));
-  const onAuthenticationRequired = vi.fn();
-  render(<UserReportDialog open onClose={() => {}} onAuthenticationRequired={onAuthenticationRequired} />);
-  await waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledOnce());
+  render(<UserReportDialog open onClose={() => {}} />);
+  expect(await screen.findByText(/Anonymous reporting continuity is not configured/i)).toBeVisible();
+  expect(screen.queryByText(/sign in/i)).not.toBeInTheDocument();
 });
 
 it('captures only after an explicit action and lets the user preview, replace, and remove the optional image', async () => {
@@ -284,6 +287,7 @@ it('keeps text reporting usable when the separate screenshot credential is unava
     available: true,
     screenshotAvailable: false,
     reportToken: 'report-token',
+    reporterScope: 'qrv_test-browser-scope',
     requestId: 'bootstrap-request',
   });
   render(<UserReportDialog open onClose={() => {}} />);
