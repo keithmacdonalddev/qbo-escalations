@@ -2,6 +2,24 @@
 
 QBO Escalations includes a native **Send feedback** form for problems, feature requests, and feedback. The browser sends the form to the QBO server. Only the QBO server talks to Ticket Snitch, so the Ticket Snitch credential is never placed in browser code.
 
+## Local development setup is complete
+
+The current local checkout was activated and verified on 2026-07-23. The three scoped Ticket Snitch keys are stored only in the ignored QBO server `.env`, the QBO server has been restarted with them, and no key is present in browser code or source control. You do not need to create or copy credentials for this local setup.
+
+To use it, keep one PowerShell terminal for each app and run these commands only when the apps are not already running:
+
+```powershell
+cd C:\Projects\ticket-snitch
+npm run dev
+```
+
+```powershell
+cd C:\Projects\qbo-escalations
+npm run dev
+```
+
+Open QBO Escalations at `http://localhost:5174`, sign in, select **Send feedback**, optionally add a screenshot, and submit. The confirmation shows the Ticket Snitch case key. Open Ticket Snitch at `http://localhost:5176` to review the case, attached evidence, Codex activity, and human verification/closure controls.
+
 ## What works in code
 
 - Problem reports map to Ticket Snitch `problem_report` items for human confirmation.
@@ -32,9 +50,9 @@ This is one first-party identity for the current local single-user deployment. I
 
 Gmail OAuth accounts are connected services, not QBO application identities, and must not be used as a substitute.
 
-## Activation steps requiring a human
+## Activation checklist for another environment
 
-Do not put live values in source control. Use the placeholders in `server/.env.example`.
+The current local checkout already completed this list. For staging, production, or another machine, do not put live values in source control; use the placeholders in `server/.env.example`.
 
 1. Run `npm run auth:hash-password` locally. It prompts without echoing the password and prints a scrypt hash. Copy only the resulting hash into the approved secret environment; do not commit it.
 2. Configure the QBO reporting identity:
@@ -60,7 +78,7 @@ Do not put live values in source control. Use the placeholders in `server/.env.e
 6. Select the QBO account control, sign in, open **Send feedback**, submit a harmless test report, and verify the returned case and reporter in the intended Ticket Snitch project.
 7. Sign out and prove that report bootstrap/submission is refused, then sign in again and preserve the QBO request ID and Ticket Snitch case key as activation evidence.
 
-The connection is not live until this runtime check passes. Credential creation, environment writes, service restarts, database preparation, deployment, and production authentication are intentionally not performed by automated repository tests.
+Another environment is not live until its runtime check passes. The current local development environment has completed its credential creation, private configuration, server restart, scoped connection checks, case/evidence proof, and owner-preview verification. Database preparation was unnecessary because readiness already reported all required indexes present.
 
 ## Submitted data
 
