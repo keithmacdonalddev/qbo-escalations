@@ -10,9 +10,6 @@ const memoryNoteSchema = new mongoose.Schema({
   sourceAgentId: { type: String, default: null },
   sourceSurface: { type: String, default: 'rooms' },
   roomId: { type: String, default: null },
-  reviewStatus: { type: String, enum: ['inferred', 'confirmed', 'corrected'], default: 'inferred' },
-  reviewedAt: { type: Date, default: null },
-  reviewedBy: { type: String, default: '' },
   updatedAt: { type: Date, default: Date.now },
 }, { _id: false });
 

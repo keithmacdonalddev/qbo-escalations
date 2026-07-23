@@ -1005,69 +1005,6 @@ async function updateAgentIdentity(agentId, profileUpdate, { actor = 'user', sum
   return getAgentIdentity(agentId);
 }
 
-async function reviewAgentMemoryNote(agentId, key, review = {}, { actor = 'user' } = {}) {
-  const cleanKey = safeText(key);
-  const action = safeText(review.action).toLowerCase();
-  if (!cleanKey) throw serviceError('INVALID_MEMORY_KEY', 400, 'A memory key is required.');
-  if (!['confirm', 'correct', 'forget'].includes(action)) {
-    throw serviceError('INVALID_MEMORY_ACTION', 400, 'Memory action must be confirm, correct, or forget.');
-  }
-  if (!(await canMutateIdentity(agentId))) return null;
-
-  await updateIdentityWithRetry(agentId, async (identityDoc) => {
-    const notes = Array.isArray(identityDoc.memory?.notes) ? identityDoc.memory.notes : [];
-    const index = notes.findIndex((note) => safeText(note?.key) === cleanKey);
-    if (index < 0) throw serviceError('MEMORY_NOT_FOUND', 404, 'Agent memory note not found.');
-
-    const previous = notes[index]?.toObject ? notes[index].toObject() : { ...notes[index] };
-    let historySummary = '';
-    if (action === 'forget') {
-      identityDoc.memory.notes = notes.filter((_, noteIndex) => noteIndex !== index);
-      historySummary = `Forgot memory: ${compact(previous.content, 140)}`;
-    } else {
-      const nextContent = action === 'correct' ? safeText(review.content) : safeText(previous.content);
-      if (action === 'correct' && !nextContent) {
-        throw serviceError('INVALID_MEMORY_CONTENT', 400, 'Corrected memory content is required.');
-      }
-      notes[index] = {
-        ...previous,
-        content: nextContent,
-        reviewStatus: action === 'confirm' ? 'confirmed' : 'corrected',
-        reviewedAt: new Date(),
-        reviewedBy: actor,
-        updatedAt: new Date(),
-      };
-      identityDoc.memory.notes = notes;
-      historySummary = action === 'confirm'
-        ? `Confirmed memory: ${compact(nextContent, 140)}`
-        : `Corrected memory: ${compact(nextContent, 140)}`;
-    }
-
-    if (action === 'correct') {
-      identityDoc.memory.lastLearnedAt = new Date();
-    }
-    identityDoc.history.entries = pruneHistory([{
-      type: `memory-${action}`,
-      summary: historySummary,
-      actor,
-      metadata: { key: cleanKey, action },
-      createdAt: new Date(),
-    }, ...(identityDoc.history?.entries || [])]);
-    identityDoc.activity = identityDoc.activity || {};
-    identityDoc.activity.entries = pruneActivity([{
-      type: 'memory-review',
-      phase: action,
-      surface: 'agent-profiles',
-      summary: historySummary,
-      status: action === 'forget' ? 'removed' : 'reviewed',
-      metadata: { key: cleanKey, action },
-      createdAt: new Date(),
-    }, ...(identityDoc.activity?.entries || [])]);
-  });
-
-  return getAgentIdentity(agentId);
-}
-
 async function updateAgentRuntime(agentId, runtimeUpdate, { actor = 'user', summary = '' } = {}) {
   if (!(await canMutateIdentity(agentId))) return null;
   const updatedAt = new Date();
@@ -2237,7 +2174,6 @@ module.exports = {
   recordAgentHarnessRun,
   recordAgentReview,
   recordAgentToolUsage,
-  reviewAgentMemoryNote,
   updateAgentEnabled,
   updateAgentIdentity,
   updateAgentRuntime,
