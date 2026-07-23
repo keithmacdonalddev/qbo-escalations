@@ -56,3 +56,24 @@ export function signInToApp(password) {
 export function signOutOfApp() {
   return authFetch('/logout', { method: 'POST', body: JSON.stringify({}) });
 }
+
+export function beginTicketSnitchSignIn(returnTo = '/') {
+  const safeReturnTo = String(returnTo || '/').startsWith('/') ? String(returnTo || '/') : '/';
+  window.location.assign(`${AUTH_BASE}/ticket-snitch/start?returnTo=${encodeURIComponent(safeReturnTo)}`);
+}
+
+export function consumeTicketSnitchAuthReturn() {
+  const url = new URL(window.location.href);
+  const result = url.searchParams.get('qboAuth');
+  if (!result) return null;
+  const value = {
+    result,
+    code: url.searchParams.get('qboAuthCode') || '',
+    requestId: url.searchParams.get('qboAuthRequestId') || '',
+  };
+  url.searchParams.delete('qboAuth');
+  url.searchParams.delete('qboAuthCode');
+  url.searchParams.delete('qboAuthRequestId');
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  return value;
+}

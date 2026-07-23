@@ -5,12 +5,17 @@ const { configuration, getSession } = require('../services/app-auth');
 function resolveAppAuthContext(req) {
   const config = configuration();
   const candidateSession = config.enabled && config.configured ? getSession(req) : null;
-  const session = candidateSession
+  const passwordSessionMatches = config.mode === 'password'
+    && candidateSession?.identityProvider === 'password'
     && candidateSession.user.id === config.user.id
     && candidateSession.user.displayName === config.user.displayName
-    && candidateSession.user.email === config.user.email
-    ? candidateSession
-    : null;
+    && candidateSession.user.email === config.user.email;
+  const ticketSnitchSessionMatches = config.mode === 'ticket-snitch'
+    && candidateSession?.identityProvider === 'ticket-snitch'
+    && candidateSession.projectId === config.ticketSnitchProjectId
+    && Boolean(candidateSession.user.id)
+    && Boolean(candidateSession.user.displayName);
+  const session = passwordSessionMatches || ticketSnitchSessionMatches ? candidateSession : null;
   return {
     appAuth: { config, session },
     authenticatedUser: session ? {

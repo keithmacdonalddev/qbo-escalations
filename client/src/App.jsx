@@ -152,9 +152,26 @@ function AppContent() {
   }, [appAuth.markSignedOut]);
 
   const closeAuthDialog = useCallback(() => {
+    try { sessionStorage.removeItem('qbo-open-report-after-sign-in'); } catch { /* No session storage. */ }
     setAuthDialogOpen(false);
     setReportAfterSignIn(false);
   }, []);
+
+  useEffect(() => {
+    if (appAuth.loading) return;
+    let restoreReport = false;
+    try { restoreReport = sessionStorage.getItem('qbo-open-report-after-sign-in') === '1'; } catch { /* No session storage. */ }
+    if (!restoreReport) return;
+    if (appAuth.authenticated) {
+      try { sessionStorage.removeItem('qbo-open-report-after-sign-in'); } catch { /* No session storage. */ }
+      setAuthDialogOpen(false);
+      setReportAfterSignIn(false);
+      setUserReportOpen(true);
+    } else {
+      setReportAfterSignIn(true);
+      setAuthDialogOpen(true);
+    }
+  }, [appAuth.authenticated, appAuth.loading]);
   const {
     globalDockTab,
     setGlobalDockTab,
@@ -444,7 +461,6 @@ function AppContent() {
         onOpenAgent={openAgentModal}
         onOpenUserReport={openUserReport}
         appAuth={appAuth}
-        onOpenAppAuth={() => setAuthDialogOpen(true)}
         aiManagementAlertCount={aiManagementAlertCount}
         liveWorkControl={<LiveWorkCenter />}
       />

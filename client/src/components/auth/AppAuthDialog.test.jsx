@@ -5,6 +5,8 @@ import { AppAuthProvider } from '../../context/AppAuthContext.jsx';
 import AppAuthDialog from './AppAuthDialog.jsx';
 
 const authMocks = vi.hoisted(() => ({
+  beginTicketSnitchSignIn: vi.fn(),
+  consumeTicketSnitchAuthReturn: vi.fn(),
   loadAppSession: vi.fn(),
   signInToApp: vi.fn(),
   signOutOfApp: vi.fn(),
@@ -13,10 +15,14 @@ const authMocks = vi.hoisted(() => ({
 vi.mock('../../api/appAuth.js', () => authMocks);
 
 beforeEach(() => {
+  sessionStorage.clear();
+  authMocks.beginTicketSnitchSignIn.mockReset();
+  authMocks.consumeTicketSnitchAuthReturn.mockReset().mockReturnValue(null);
   authMocks.loadAppSession.mockReset().mockResolvedValue({
     ok: true,
     enabled: true,
     configured: true,
+    mode: 'password',
     authenticated: false,
     user: null,
   });
@@ -29,6 +35,24 @@ beforeEach(() => {
     expiresAt: Date.now() + 60_000,
   });
   authMocks.signOutOfApp.mockReset().mockResolvedValue({ ok: true, authenticated: false });
+});
+
+it('uses the Ticket Snitch account without collecting its password in QBO', async () => {
+  authMocks.loadAppSession.mockResolvedValue({
+    ok: true,
+    enabled: true,
+    configured: true,
+    mode: 'ticket-snitch',
+    authenticated: false,
+    user: null,
+  });
+  const user = userEvent.setup();
+  renderDialog();
+  expect(await screen.findByRole('button', { name: 'Continue to Ticket Snitch' })).toBeVisible();
+  expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Continue to Ticket Snitch' }));
+  expect(authMocks.beginTicketSnitchSignIn).toHaveBeenCalledOnce();
+  expect(sessionStorage.getItem('qbo-open-report-after-sign-in')).toBe('1');
 });
 
 function renderDialog(props = {}) {
@@ -105,7 +129,7 @@ it('signs out explicitly from the visible account state', async () => {
   });
   const user = userEvent.setup();
   renderDialog();
-  await user.click(await screen.findByRole('button', { name: 'Sign out' }));
+  await user.click(await screen.findByRole('button', { name: 'Sign out of feedback' }));
   await waitFor(() => expect(authMocks.signOutOfApp).toHaveBeenCalledOnce());
 });
 

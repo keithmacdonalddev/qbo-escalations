@@ -72,6 +72,8 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
   const [receiptState, setReceiptState] = useState({ state: 'idle', data: null, message: '', requestId: '' });
   const [replyDraft, setReplyDraft] = useState({ body: '', actionId: createSubmissionId() });
   const [validationDraft, setValidationDraft] = useState({ outcome: '', note: '', actionId: createSubmissionId() });
+  const [signingOut, setSigningOut] = useState(false);
+  const [accountError, setAccountError] = useState('');
 
   const loadAvailability = useCallback(async () => {
     setBootstrap({ state: 'loading', token: '', requestId: '', reason: '', screenshotAvailable: false });
@@ -414,7 +416,20 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
     requestAnimationFrame(() => titleRef.current?.focus());
   };
 
-  const busy = bootstrap.state === 'loading' || submitState.state === 'submitting' || submitState.state === 'retrying' || captureState.state === 'capturing';
+  const handleSignOut = async () => {
+    setAccountError('');
+    setSigningOut(true);
+    try {
+      await appAuth.signOut();
+      onClose();
+    } catch (error) {
+      setAccountError(error?.message || 'Sign-out did not finish. Try again.');
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  const busy = signingOut || bootstrap.state === 'loading' || submitState.state === 'submitting' || submitState.state === 'retrying' || captureState.state === 'capturing';
   const canSubmit = bootstrap.state === 'ready' && online && !busy;
 
   return (
@@ -438,8 +453,14 @@ export default function UserReportDialog({ open, onClose, onAuthenticationRequir
             <h2 id="user-report-title">Send feedback</h2>
             <p id="user-report-intro">Tell us what happened or what would make QBO Escalations better.</p>
           </div>
-          <button type="button" className="user-report-close" onClick={onClose} disabled={busy} aria-label="Close reporting form">×</button>
+          <div className="user-report-account-actions">
+            <span className="user-report-account-name">{appAuth.user?.displayName || 'Ticket Snitch user'}</span>
+            <button type="button" className="user-report-sign-out" onClick={handleSignOut} disabled={busy}>{signingOut ? 'Signing out…' : 'Sign out'}</button>
+            <button type="button" className="user-report-close" onClick={onClose} disabled={busy} aria-label="Close reporting form">×</button>
+          </div>
         </header>
+
+        {accountError && <p className="user-report-account-error" role="alert">{accountError}</p>}
 
         <nav className="user-report-view-tabs" aria-label="Feedback and report status">
           <button

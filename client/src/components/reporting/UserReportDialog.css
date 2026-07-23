@@ -43,6 +43,50 @@
   line-height: 1.5;
 }
 
+.user-report-account-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.user-report-account-name {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--ink-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-report-account-error {
+  margin: 0;
+  padding: 0.6rem 1.25rem;
+  border-block: 1px solid color-mix(in srgb, var(--error, #f87171) 40%, transparent);
+  color: var(--error, #fca5a5);
+  background: color-mix(in srgb, var(--error, #ef4444) 10%, transparent);
+  font-size: 0.85rem;
+}
+
+.user-report-sign-out {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.user-report-sign-out:hover {
+  border-color: var(--line-strong, var(--line));
+  color: var(--ink);
+}
+
 .user-report-view-tabs {
   display: flex;
   gap: 4px;

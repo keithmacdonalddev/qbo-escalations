@@ -1,7 +1,15 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { loadAppSession, signInToApp, signOutOfApp } from './appAuth.js';
+import {
+  consumeTicketSnitchAuthReturn,
+  loadAppSession,
+  signInToApp,
+  signOutOfApp,
+} from './appAuth.js';
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.history.replaceState(null, '', '/');
+});
 
 function response(body, status = 200) {
   return {
@@ -33,4 +41,18 @@ it('signs out without placing session values in the request body', async () => {
   const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({ ok: true, authenticated: false }));
   await signOutOfApp();
   expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({});
+});
+
+it('consumes Ticket Snitch return status and removes it from the browser address', () => {
+  window.history.pushState(null, '', '/chat?requestId=keep-me&qboAuth=error&qboAuthCode=FLOW_FAILED&qboAuthRequestId=req-17#reply');
+
+  expect(consumeTicketSnitchAuthReturn()).toEqual({
+    result: 'error',
+    code: 'FLOW_FAILED',
+    requestId: 'req-17',
+  });
+  expect(window.location.pathname).toBe('/chat');
+  expect(window.location.search).toBe('?requestId=keep-me');
+  expect(window.location.hash).toBe('#reply');
+  expect(consumeTicketSnitchAuthReturn()).toBeNull();
 });

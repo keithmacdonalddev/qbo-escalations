@@ -1,6 +1,6 @@
 # Ticket Snitch reporting for QBO Escalations
 
-QBO Escalations includes a native **Send feedback** form for problems, feature requests, and feedback. The same dialog includes **My reports**, where the signed-in user can read public-safe status, reply, and confirm **Fixed** or **Not fixed** without a Ticket Snitch account. The browser sends every action to the QBO server. Only the QBO server talks to Ticket Snitch, so project credentials and raw Ticket Snitch receipt tokens are never placed in browser code.
+QBO Escalations includes one **Feedback and reports** control for problems, feature requests, feedback, and **My reports**. It reuses the user's Ticket Snitch account: if sign-in is needed, QBO redirects to Ticket Snitch and receives only a one-time, project-bound reporter identity after authentication. QBO never receives the Ticket Snitch password, owner role, session cookie, or project credential. The browser sends report actions to the QBO server, and only that server talks to Ticket Snitch, so project credentials and raw Ticket Snitch receipt tokens are never placed in browser code.
 
 ## Local development status
 
@@ -47,25 +47,21 @@ Ticket Snitch remains responsible for human review, priority, ownership, evidenc
 
 ## Signed-in reporting identity
 
-QBO Escalations now supports an opt-in first-party password session for identity-bound reporting in its current single-user deployment. The password is stored only as a scrypt hash in the server secret environment. A successful login creates a random opaque session cookie that is HttpOnly, SameSite=Strict, time-bounded, Secure by default in production, and stored only as a hash in server memory. Logout or server restart invalidates it.
+Ticket Snitch is the source of truth for reporting identity. QBO starts a short-lived sign-in flow with an opaque state value and a PKCE proof (a one-time cryptographic proof), then Ticket Snitch returns a two-minute, single-use code only to QBO's exact configured callback. QBO's server exchanges it for the signed-in person's stable ID, display name, optional email, and the configured project identity. The code is consumed once, and a restart invalidates any unfinished flow.
 
-The report route reads the user ID, name, and optional email from the verified server session. Browser-supplied identity, role, project, workspace, owner, priority, severity, and status fields are ignored. When authentication is disabled or misconfigured, QBO remains usable under its existing local deployment boundary, but user report submission is unavailable rather than assigning an invented identity.
+QBO creates its own random, HttpOnly, SameSite=Strict, time-bounded reporting session after that exchange. This limited session permits feedback submission and that user's protected report receipts; it does not grant Ticket Snitch owner powers or retrofit authorization onto unrelated QBO routes. Signing out inside **Feedback and reports** ends the QBO reporting session, while the Ticket Snitch account remains signed in until it is separately signed out there.
 
-This is one first-party identity for the current local single-user deployment. It is not a multi-user account platform and does not claim to retrofit authorization onto every unrelated QBO route. A future hosted or multi-user deployment needs registration/invitations or an external identity provider, durable shared sessions, roles, recovery, and route-by-route authorization review.
-
-Gmail OAuth accounts are connected services, not QBO application identities, and must not be used as a substitute.
+The report route reads identity only from the verified QBO server session. Browser-supplied identity, role, project, workspace, owner, priority, severity, and status fields are ignored. When authentication is disabled or misconfigured, QBO remains usable under its existing local deployment boundary, but user report submission is unavailable rather than assigning an invented identity. The older QBO-only password mode remains an explicit standalone fallback; it is not the recommended connected setup. Gmail OAuth accounts are connected services, not application identities.
 
 ## Upgrade and activation checklist
 
 The original intake and screenshot workflow completed its local activation. Run the following checklist for this follow-up phase in local development, or for the complete workflow in another approved environment. Do not put live values in source control; use the placeholders in `server/.env.example`.
 
-1. Run `npm run auth:hash-password` locally. It prompts without echoing the password and prints a scrypt hash. Copy only the resulting hash into the approved secret environment; do not commit it.
+1. In Ticket Snitch, allow the exact QBO callback with `PROJECT_SIGN_IN_REDIRECT_URIS`. Local development uses `http://localhost:4000/api/auth/ticket-snitch/callback`; production requires HTTPS.
 2. Configure the QBO reporting identity:
-   - `QBO_AUTH_MODE=password`
-   - `QBO_AUTH_USER_ID`
-   - `QBO_AUTH_USER_NAME`
-   - optional `QBO_AUTH_USER_EMAIL`
-   - `QBO_AUTH_PASSWORD_HASH`
+   - `QBO_AUTH_MODE=ticket-snitch`
+   - `TICKET_SNITCH_WEB_URL`
+   - `QBO_AUTH_TICKET_SNITCH_CALLBACK_URL`, exactly matching Ticket Snitch's allowlist
    - `QBO_AUTH_ALLOWED_ORIGINS` when the browser origin differs from the API host, such as Vite development
    - leave secure cookies enabled for HTTPS production
 3. In Ticket Snitch, confirm the QBO Escalations project and create three separate credentials:
@@ -81,8 +77,8 @@ The original intake and screenshot workflow completed its local activation. Run 
    - `TICKET_SNITCH_REPORT_ALLOWED_ORIGINS` for development or any separate web origin
 5. In the specifically approved Ticket Snitch environment, run `npm run db:prepare` so the new customer-receipt, validation, handoff, proposal, and accountability indexes are present.
 6. Restart or deploy only the approved Ticket Snitch and QBO environments.
-7. Select the QBO account control, sign in, open **Send feedback**, submit a harmless test report, and verify the returned case and reporter in the intended Ticket Snitch project.
-8. Open **Send feedback → My reports**. Verify public-safe status, an idempotent reporter reply, **Fixed** or **Not fixed** confirmation, exclusion of internal-only details, and receipt revocation from Ticket Snitch.
+7. Select QBO's single **Feedback and reports** control, continue to Ticket Snitch, sign in there if needed, submit a harmless test report, and verify the returned case and reporter in the intended Ticket Snitch project.
+8. Open **Feedback and reports → My reports**. Verify public-safe status, an idempotent reporter reply, **Fixed** or **Not fixed** confirmation, exclusion of internal-only details, and receipt revocation from Ticket Snitch.
 9. In Ticket Snitch, verify the daily/weekly operating brief, waiting/follow-up/stalled queues, acknowledged handoff flow, and owner approval/rejection of a harmless Codex proposal.
 10. Sign out and prove that report bootstrap, submission, and receipt access are refused, then sign in again and preserve the QBO request ID and Ticket Snitch case key as activation evidence.
 

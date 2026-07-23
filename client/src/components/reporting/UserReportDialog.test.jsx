@@ -16,10 +16,16 @@ const screenshotMocks = vi.hoisted(() => ({
   screenCaptureSupported: vi.fn(() => true),
   validateScreenshotFile: vi.fn((file) => file),
 }));
+const authMocks = vi.hoisted(() => ({
+  signOut: vi.fn(),
+}));
 
 vi.mock('../../api/ticketSnitchReporting.js', () => reportingMocks);
 vi.mock('../../context/AppAuthContext.jsx', () => ({
-  useAppAuth: () => ({ user: { id: 'qbo-test-user' } }),
+  useAppAuth: () => ({
+    user: { id: 'qbo-test-user', displayName: 'QBO Test User' },
+    signOut: authMocks.signOut,
+  }),
 }));
 vi.mock('./screenshotCapture.js', () => screenshotMocks);
 
@@ -63,9 +69,22 @@ beforeEach(() => {
   });
   reportingMocks.replyToCustomerReceipt.mockReset().mockResolvedValue({ ok: true });
   reportingMocks.validateCustomerReceipt.mockReset().mockResolvedValue({ ok: true });
+  authMocks.signOut.mockReset().mockResolvedValue({ ok: true });
   screenshotMocks.captureScreenFrame.mockReset().mockResolvedValue(new File(['screen'], 'capture.png', { type: 'image/png' }));
   screenshotMocks.screenCaptureSupported.mockReset().mockReturnValue(true);
   screenshotMocks.validateScreenshotFile.mockReset().mockImplementation((file) => file);
+});
+
+it('keeps the feedback dialog open and explains a failed sign-out', async () => {
+  const user = userEvent.setup();
+  const onClose = vi.fn();
+  authMocks.signOut.mockRejectedValue(new Error('The server could not sign you out.'));
+  render(<UserReportDialog open onClose={onClose} />);
+
+  await user.click(await screen.findByRole('button', { name: 'Sign out' }));
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('The server could not sign you out.');
+  expect(onClose).not.toHaveBeenCalled();
 });
 
 it('offers the three plain-language choices and validates the short form', async () => {

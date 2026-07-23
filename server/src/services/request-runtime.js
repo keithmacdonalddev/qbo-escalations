@@ -2,6 +2,12 @@
 
 const activeRequests = new Map();
 
+function observableRequestPath(req) {
+  const raw = String(req.originalUrl || req.url || '');
+  if (raw.startsWith('/api/auth/ticket-snitch/callback')) return raw.split('?', 1)[0];
+  return raw;
+}
+
 function cloneRequest(entry) {
   const now = Date.now();
   return {
@@ -48,7 +54,7 @@ function registerRequestRuntime(req, res, next) {
     id,
     requestId: req.requestId || null,
     method: req.method,
-    path: req.originalUrl || req.url || '',
+    path: observableRequestPath(req),
     phase: 'running',
     statusCode: null,
     clientConnected: true,

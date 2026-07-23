@@ -23,7 +23,7 @@ export default function AppAuthDialog({ open, onClose, onSignedIn }) {
     priorFocusRef.current = document.activeElement;
     setError(null);
     const frame = requestAnimationFrame(() => {
-      if (auth.authenticated) dialogRef.current?.focus();
+      if (auth.authenticated || auth.mode === 'ticket-snitch') dialogRef.current?.focus();
       else passwordRef.current?.focus();
     });
     const handleKeyDown = (event) => {
@@ -53,7 +53,7 @@ export default function AppAuthDialog({ open, onClose, onSignedIn }) {
       document.removeEventListener('keydown', handleKeyDown);
       priorFocusRef.current?.focus?.();
     };
-  }, [auth.authenticated, onClose, open]);
+  }, [auth.authenticated, auth.loading, auth.mode, onClose, open]);
 
   useEffect(() => {
     submittingRef.current = submitting;
@@ -107,13 +107,18 @@ export default function AppAuthDialog({ open, onClose, onSignedIn }) {
     }
   };
 
+  const handleTicketSnitchSignIn = () => {
+    try { sessionStorage.setItem('qbo-open-report-after-sign-in', '1'); } catch { /* Continue without restoration. */ }
+    auth.beginSignIn(`${window.location.pathname}${window.location.search}${window.location.hash}`);
+  };
+
   return (
     <div className="app-auth-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !submitting) onClose(); }}>
       <section ref={dialogRef} className="app-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="app-auth-title" tabIndex={-1}>
         <header>
           <div>
-            <h2 id="app-auth-title">{auth.authenticated ? 'QBO account' : 'Sign in to QBO Escalations'}</h2>
-            <p>{auth.authenticated ? 'This server session supplies trusted identity for reports.' : 'Sign in before sending problems, feature requests, or feedback.'}</p>
+            <h2 id="app-auth-title">{auth.authenticated ? 'Ticket Snitch account' : 'Sign in for feedback'}</h2>
+            <p>{auth.authenticated ? 'Ticket Snitch supplies your trusted reporting identity.' : 'Use the same Ticket Snitch account you use to manage the work.'}</p>
           </div>
           <button type="button" onClick={onClose} disabled={submitting} aria-label="Close QBO account dialog">×</button>
         </header>
@@ -122,12 +127,12 @@ export default function AppAuthDialog({ open, onClose, onSignedIn }) {
           <div className="app-auth-state" role="status">Checking your QBO session…</div>
         ) : auth.error ? (
           <div className="app-auth-state is-error" role="alert">
-            <strong>The QBO sign-in server could not be reached.</strong>
+            <strong>{auth.mode === 'ticket-snitch' ? 'Ticket Snitch sign-in was not completed.' : 'The QBO sign-in server could not be reached.'}</strong>
             <span>{authErrorMessage(error || auth.error)}</span>
             {(error || auth.error)?.requestId ? <small>Request ID: {(error || auth.error).requestId}</small> : null}
             <div className="app-auth-actions">
               <button type="button" className="app-auth-secondary" onClick={onClose} disabled={submitting}>Close</button>
-              <button type="button" className="app-auth-primary" onClick={handleRetrySession} disabled={submitting}>{submitting ? 'Retrying…' : 'Retry'}</button>
+              <button type="button" className="app-auth-primary" onClick={auth.mode === 'ticket-snitch' ? handleTicketSnitchSignIn : handleRetrySession} disabled={submitting}>{auth.mode === 'ticket-snitch' ? 'Try again' : submitting ? 'Retrying…' : 'Retry'}</button>
             </div>
           </div>
         ) : !auth.enabled ? (
@@ -138,7 +143,17 @@ export default function AppAuthDialog({ open, onClose, onSignedIn }) {
         ) : !auth.configured ? (
           <div className="app-auth-state is-error" role="alert">
             <strong>QBO sign-in needs configuration.</strong>
-            <span>The account profile or password hash is missing or invalid. No password was accepted.</span>
+            <span>The Ticket Snitch connection or local password settings are missing or invalid. No identity was accepted.</span>
+          </div>
+        ) : auth.mode === 'ticket-snitch' && !auth.authenticated ? (
+          <div className="app-auth-state">
+            <strong>Continue to Ticket Snitch</strong>
+            <span>If you are already signed in there, you will return immediately. Otherwise, enter your Ticket Snitch email and password on the Ticket Snitch sign-in page.</span>
+            <small>Your Ticket Snitch password never passes through QBO Escalations.</small>
+            <div className="app-auth-actions">
+              <button type="button" className="app-auth-secondary" onClick={onClose}>Cancel</button>
+              <button type="button" className="app-auth-primary" onClick={handleTicketSnitchSignIn}>Continue to Ticket Snitch</button>
+            </div>
           </div>
         ) : auth.authenticated ? (
           <div className="app-auth-account">
@@ -147,7 +162,7 @@ export default function AppAuthDialog({ open, onClose, onSignedIn }) {
             {error ? <div className="app-auth-error" role="alert">{authErrorMessage(error)}</div> : null}
             <div className="app-auth-actions">
               <button type="button" className="app-auth-secondary" onClick={onClose}>Close</button>
-              <button type="button" className="app-auth-secondary" onClick={handleSignOut} disabled={submitting}>{submitting ? 'Signing out…' : 'Sign out'}</button>
+              <button type="button" className="app-auth-secondary" onClick={handleSignOut} disabled={submitting}>{submitting ? 'Signing out…' : 'Sign out of feedback'}</button>
             </div>
           </div>
         ) : (

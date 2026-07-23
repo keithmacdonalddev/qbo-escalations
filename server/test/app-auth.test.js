@@ -42,6 +42,21 @@ function enabledEnvironment(overrides = {}) {
   };
 }
 
+function ticketSnitchEnvironment(overrides = {}) {
+  return enabledEnvironment({
+    QBO_AUTH_MODE: 'ticket-snitch',
+    QBO_AUTH_USER_ID: '',
+    QBO_AUTH_USER_NAME: '',
+    QBO_AUTH_USER_EMAIL: '',
+    QBO_AUTH_PASSWORD_HASH: '',
+    TICKET_SNITCH_API_URL: 'http://ticket-snitch-api.example.test/api/v1',
+    TICKET_SNITCH_WEB_URL: 'http://ticket-snitch.example.test',
+    TICKET_SNITCH_PROJECT_ID: 'project-qbo-1',
+    QBO_AUTH_TICKET_SNITCH_CALLBACK_URL: 'http://qbo-server.example.test/api/auth/ticket-snitch/callback',
+    ...overrides,
+  });
+}
+
 test.before(async () => {
   passwordHash = await hashPassword(PASSWORD, Buffer.from('deterministic-auth-test-salt'));
 });
@@ -92,6 +107,88 @@ test('unsupported authentication modes stay visibly enabled but cannot accept a 
     .send({ password: PASSWORD });
   assert.equal(response.status, 503);
   assert.equal(response.body.code, 'QBO_AUTH_NOT_CONFIGURED');
+}));
+
+test('Ticket Snitch mode requires exact project sign-in endpoints and ignores the retired local password', async () => withEnvironment(ticketSnitchEnvironment(), async () => {
+  const config = configuration();
+  assert.equal(config.enabled, true);
+  assert.equal(config.supported, true);
+  assert.equal(config.configured, true);
+  assert.equal(config.passwordHash, '');
+  assert.equal(configuration(ticketSnitchEnvironment({ TICKET_SNITCH_WEB_URL: 'javascript:alert(1)' })).configured, false);
+  assert.equal(configuration(ticketSnitchEnvironment({ QBO_AUTH_TICKET_SNITCH_CALLBACK_URL: 'data:text/plain,unsafe' })).configured, false);
+  const state = await request(createApp()).get('/api/auth/session').expect(200);
+  assert.equal(state.body.mode, 'ticket-snitch');
+  assert.equal(state.body.authenticated, false);
+  const legacyLogin = await request(createApp())
+    .post('/api/auth/login')
+    .set('Origin', 'http://qbo.example.test')
+    .send({ password: PASSWORD })
+    .expect(409);
+  assert.equal(legacyLogin.body.code, 'QBO_AUTH_TICKET_SNITCH_REQUIRED');
+}));
+
+test('Ticket Snitch redirect sign-in uses PKCE, binds the browser state, and creates only a QBO reporting session', async () => withEnvironment(ticketSnitchEnvironment(), async () => {
+  const originalFetch = global.fetch;
+  const exchanges = [];
+  global.fetch = async (url, options) => {
+    exchanges.push({ url: String(url), options });
+    return new Response(JSON.stringify({
+      ok: true,
+      data: {
+        identity: { subject: 'ticket-owner-1', displayName: 'Ticket Owner', email: 'owner@example.test' },
+        project: { id: 'project-qbo-1', key: 'QBO', name: 'QBO Escalations' },
+      },
+      requestId: 'ticket-exchange-request',
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const agent = request.agent(createApp());
+    const start = await agent
+      .get('/api/auth/ticket-snitch/start?returnTo=%2F%23%2Fchat')
+      .set('Origin', 'http://qbo.example.test')
+      .expect(302);
+    const authorize = new URL(start.headers.location);
+    assert.equal(authorize.origin, 'http://ticket-snitch.example.test');
+    assert.equal(authorize.pathname, '/api/v1/auth/project-sign-in/authorize');
+    assert.equal(authorize.searchParams.get('projectId'), 'project-qbo-1');
+    assert.equal(authorize.searchParams.get('redirectUri'), 'http://qbo-server.example.test/api/auth/ticket-snitch/callback');
+    assert.match(authorize.searchParams.get('state'), /^[A-Za-z0-9_-]{40,}$/);
+    assert.match(authorize.searchParams.get('codeChallenge'), /^[A-Za-z0-9_-]{43}$/);
+    const callback = await agent
+      .get('/api/auth/ticket-snitch/callback')
+      .query({ code: 'ticket-snitch-code-value-that-is-long-enough-12345', state: authorize.searchParams.get('state') })
+      .expect(302);
+    assert.equal(callback.headers.location, 'http://qbo.example.test/?qboAuth=success#/chat');
+    assert.equal(exchanges.length, 1);
+    const exchangeBody = JSON.parse(exchanges[0].options.body);
+    assert.equal(exchangeBody.projectId, 'project-qbo-1');
+    assert.equal(exchangeBody.redirectUri, 'http://qbo-server.example.test/api/auth/ticket-snitch/callback');
+    assert.match(exchangeBody.codeVerifier, /^[A-Za-z0-9_-]{43,128}$/);
+    assert.equal(JSON.stringify(exchangeBody).includes(PASSWORD), false);
+
+    const session = await agent.get('/api/auth/session').expect(200);
+    assert.equal(session.body.authenticated, true);
+    assert.equal(session.body.identityProvider, 'ticket-snitch');
+    assert.deepEqual(session.body.user, {
+      id: 'ticket-owner-1',
+      displayName: 'Ticket Owner',
+      email: 'owner@example.test',
+    });
+    await agent
+      .get('/api/auth/ticket-snitch/callback')
+      .query({ code: 'ticket-snitch-code-value-that-is-long-enough-12345', state: authorize.searchParams.get('state') })
+      .expect(400);
+  } finally {
+    global.fetch = originalFetch;
+  }
+}));
+
+test('Ticket Snitch redirect sign-in denies unapproved QBO origins', async () => withEnvironment(ticketSnitchEnvironment(), async () => {
+  await request(createApp())
+    .get('/api/auth/ticket-snitch/start')
+    .set('Origin', 'http://evil.example.test')
+    .expect(403);
 }));
 
 test('login requires an exact allowed origin and returns a generic credential failure', async () => withEnvironment(enabledEnvironment(), async () => {
