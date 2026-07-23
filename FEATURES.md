@@ -305,3 +305,10 @@ Model: Claude Opus 4.8
 Is duplicate?: no
 Complexity: high
 Special Feature: Consent Drift Protection - Whenever a human confirms a consequential agent action anywhere in the platform (starting a paid provider run, publishing a knowledge entry, sending an escalation response, changing spending limits), the app fingerprints exactly what the person reviewed — inputs, provider/model/cost basis, affected records, downstream impacts — and binds the confirmation to that fingerprint. If any of it drifts between review and execution (settings changed in another tab, another agent modified the record, prices or models changed), execution is refused and the person is shown precisely what changed before re-approving, with an audit trail of what was consented to versus what would have run. Phase 2 recovery already does this for one flow; this makes it a platform-wide governance primitive. Distinct from Release Evidence Seal (release-decision chain of custody, not per-action runtime consent) and Execution Identity Verification (compares actual vs. configured provider after a run, rather than refusing execution before it when the reviewed basis drifts).
+
+Date: 2026-07-23
+Time: 00:29 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: high
+Special Feature: Agent Team Contract Auditor - Continuously inspect every coordinated workflow for unclear ownership, overlapping authority, missing evidence inputs, orphaned outputs, circular handoffs, and decisions with no named human validator, then produce a reviewable team-contract map before those design flaws reach live work. This is distinct from Workflow Readiness Gate, which checks whether providers and evidence are ready for one run; the auditor checks whether the agent-team design itself has complete, non-conflicting responsibilities and safe handoffs.
