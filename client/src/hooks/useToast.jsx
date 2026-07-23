@@ -7,6 +7,7 @@ const MAX_VISIBLE = 10;
 const DEFAULT_DURATION_MS = 12000;
 const EXIT_ANIMATION_MS = 650;
 const ENTRY_QUEUE_DELAY_MS = 700;
+const GROUP_DEDUPE_MS = 10_000;
 
 const ICONS = {
   error: '!',
@@ -27,7 +28,20 @@ function ToastContainer({ toasts, onDismiss, onDismissAll }) {
       {toasts.map(t => (
         <div key={t.id} className={`toast toast--${t.type}${t.dismissing ? ' toast-exit' : ''}`}>
           <span className="toast-icon">{ICONS[t.type]}</span>
-          <span className="toast-message">{t.message}</span>
+          <span className="toast-content">
+            <span className="toast-message">{t.message}</span>
+            {t.actionLabel && typeof t.onAction === 'function' && (
+              <button
+                className="toast-action"
+                onClick={() => {
+                  try { t.onAction(); } finally { onDismiss(t.id); }
+                }}
+                type="button"
+              >
+                {t.actionLabel}
+              </button>
+            )}
+          </span>
           <button className="toast-dismiss" onClick={() => onDismiss(t.id)} aria-label="Dismiss" type="button">
             &times;
           </button>
@@ -44,6 +58,7 @@ export function ToastProvider({ children }) {
   const queuedToastsRef = useRef([]);
   const queueTimerRef = useRef(null);
   const toastsRef = useRef([]);
+  const recentGroupKeysRef = useRef(new Map());
 
   useEffect(() => {
     toastsRef.current = toasts;
@@ -99,9 +114,37 @@ export function ToastProvider({ children }) {
     }, ENTRY_QUEUE_DELAY_MS);
   }, [showToastNow]);
 
-  const addToast = useCallback(({ type = 'info', message, duration = DEFAULT_DURATION_MS, groupKey = '' }) => {
+  const addToast = useCallback(({
+    type = 'info',
+    message,
+    duration = DEFAULT_DURATION_MS,
+    groupKey = '',
+    actionLabel = '',
+    onAction = null,
+  }) => {
+    const now = Date.now();
+    const normalizedGroupKey = String(groupKey || '').trim();
+    const recentGroup = normalizedGroupKey ? recentGroupKeysRef.current.get(normalizedGroupKey) : null;
+    if (recentGroup && now - recentGroup.createdAt < GROUP_DEDUPE_MS) return recentGroup.id;
+
     const id = _nextId++;
-    const toast = { id, type, message, groupKey, createdAt: Date.now() };
+    const toast = {
+      id,
+      type,
+      message,
+      groupKey: normalizedGroupKey,
+      actionLabel: String(actionLabel || '').trim(),
+      onAction: typeof onAction === 'function' ? onAction : null,
+      createdAt: now,
+    };
+    if (normalizedGroupKey) {
+      recentGroupKeysRef.current.set(normalizedGroupKey, { id, createdAt: now });
+      if (recentGroupKeysRef.current.size > 100) {
+        for (const [key, value] of recentGroupKeysRef.current) {
+          if (now - value.createdAt >= GROUP_DEDUPE_MS) recentGroupKeysRef.current.delete(key);
+        }
+      }
+    }
     const hasActiveQueue = Boolean(queueTimerRef.current) || queuedToastsRef.current.length > 0;
     const canShowImmediately = toastsRef.current.length === 0 && !hasActiveQueue;
     if (canShowImmediately) {
@@ -131,6 +174,7 @@ export function ToastProvider({ children }) {
     exitTimersRef.current.clear();
     queuedToastsRef.current = [];
     queueTimerRef.current = null;
+    recentGroupKeysRef.current.clear();
   }, []);
 
   const toast = {

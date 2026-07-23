@@ -19,6 +19,49 @@
   border-bottom: 1px solid var(--line-subtle);
 }
 
+.esc-detail-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+.esc-live-conflict {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 10px var(--sp-6);
+  flex-shrink: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--warning, #eab308) 30%, var(--line));
+  background: color-mix(in srgb, var(--warning, #eab308) 8%, var(--bg-raised));
+  color: var(--ink-secondary);
+  font-size: var(--text-sm);
+}
+
+.esc-live-conflict > span:nth-child(2) {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.esc-live-conflict strong {
+  color: var(--ink);
+}
+
+.esc-live-conflict-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--warning, #eab308) 18%, transparent);
+  color: color-mix(in srgb, var(--warning, #eab308) 76%, var(--ink));
+  font-weight: 850;
+}
+
 .esc-detail-shell .eyebrow {
   display: block !important;
   width: fit-content !important;
@@ -538,6 +581,80 @@
   flex-wrap: wrap;
   gap: 4px 14px;
   min-width: 0;
+}
+
+.esc-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.realtime-status-pill {
+  --realtime-color: var(--success, #22c55e);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--realtime-color) 24%, var(--line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--realtime-color) 6%, var(--bg-raised));
+  color: var(--ink-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+button.realtime-status-pill {
+  cursor: pointer;
+}
+
+.realtime-status-pill.is-reconnecting {
+  --realtime-color: var(--warning, #eab308);
+}
+
+.realtime-status-pill.is-offline,
+.realtime-status-pill.is-stale {
+  --realtime-color: var(--danger, #ef4444);
+  color: var(--ink);
+}
+
+.realtime-status-pill:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--realtime-color) 24%, transparent);
+}
+
+.realtime-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--realtime-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--realtime-color) 14%, transparent);
+}
+
+.realtime-status-pill.is-syncing .realtime-status-dot,
+.realtime-status-pill.is-reconnecting .realtime-status-dot {
+  animation: realtime-status-pulse 1.4s ease-in-out infinite;
+}
+
+.realtime-status-action {
+  padding-left: 7px;
+  border-left: 1px solid color-mix(in srgb, var(--realtime-color) 28%, transparent);
+  color: var(--realtime-color);
+}
+
+@keyframes realtime-status-pulse {
+  0%, 100% { opacity: 0.5; transform: scale(0.86); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .realtime-status-pill .realtime-status-dot {
+    animation: none !important;
+  }
 }
 
 /* (0,2,1)!important beats console-density + overhaul

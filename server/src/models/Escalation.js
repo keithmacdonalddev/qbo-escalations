@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const {
+  changedFieldsFromUpdate,
+  publishEscalationChange,
+} = require('../services/case-realtime-events');
 
 const escalationSchema = new mongoose.Schema({
   // Parsed from screenshot template
@@ -91,6 +95,47 @@ escalationSchema.index({
   actualOutcome: 'text',
   tsSteps: 'text',
   resolution: 'text',
+});
+
+// Publish only after MongoDB confirms a write. Model middleware keeps realtime
+// synchronization complete even when an escalation is changed by chat,
+// recovery, linking, or another service instead of the main route file.
+escalationSchema.pre('save', function rememberRealtimeEscalationChange() {
+  this.$locals.realtimeEscalationChange = {
+    operation: this.isNew ? 'create' : 'update',
+    changedFields: this.isNew ? [] : this.modifiedPaths(),
+  };
+});
+
+function publishRealtimeSafely(operation, publish) {
+  try {
+    publish();
+  } catch (error) {
+    console.error(`[case-realtime] Escalation ${operation} event was not published:`, error?.message || error);
+  }
+}
+
+escalationSchema.post('save', function publishSavedEscalation(doc) {
+  publishRealtimeSafely('save', () => {
+    publishEscalationChange(doc, doc.$locals.realtimeEscalationChange || { operation: 'update' });
+  });
+});
+
+escalationSchema.post('findOneAndUpdate', function publishUpdatedEscalation(doc) {
+  if (!doc) return;
+  publishRealtimeSafely('update', () => {
+    publishEscalationChange(doc, {
+      operation: 'update',
+      changedFields: changedFieldsFromUpdate(this.getUpdate()),
+    });
+  });
+});
+
+escalationSchema.post('findOneAndDelete', function publishDeletedEscalation(doc) {
+  if (!doc) return;
+  publishRealtimeSafely('delete', () => {
+    publishEscalationChange(doc, { operation: 'delete' });
+  });
 });
 
 module.exports = mongoose.model('Escalation', escalationSchema);

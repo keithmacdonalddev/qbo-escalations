@@ -9,6 +9,7 @@ import {
 } from '../api/escalationsApi.js';
 import { getSummary } from '../api/analyticsApi.js';
 import { useToast } from './useToast.jsx';
+import useCaseRealtime from './useCaseRealtime.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
 import {
   ESCALATION_STATUS_LABELS as LIFECYCLE_ESCALATION_STATUS_LABELS,
@@ -92,14 +93,19 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
   const [attentionUpdatingId, setAttentionUpdatingId] = useState('');
   const [attentionSelectedIds, setAttentionSelectedIds] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const escalationLoadGenerationRef = useRef(0);
+  const knowledgeLoadGenerationRef = useRef(0);
+  const attentionLoadGenerationRef = useRef(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
-  const loadEscalations = useCallback(async (signal) => {
-    setLoading(true);
+  const loadEscalations = useCallback(async (signal, { background = false, throwOnError = false } = {}) => {
+    const generation = ++escalationLoadGenerationRef.current;
+    if (!background) setLoading(true);
+    let failure = null;
     try {
       const [escData, summaryData] = await Promise.all([
         listEscalations({
@@ -109,7 +115,7 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
         }),
         getSummary(),
       ]);
-      if (signal?.aborted) return;
+      if (signal?.aborted || generation !== escalationLoadGenerationRef.current) return;
       setEscalations(escData.escalations);
       setTotal(escData.total);
       setSummary(summaryData);
@@ -119,13 +125,15 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
         tel(TEL.DATA_EMPTY, 'No escalations found', { hasFilters: !!(statusFilter || categoryFilter || debouncedSearch) });
       }
     } catch (err) {
-      if (signal?.aborted) return;
+      if (signal?.aborted || generation !== escalationLoadGenerationRef.current) return;
+      failure = err;
       const message = err?.message || 'Failed to load escalations';
       setLoadError(message);
       tel(TEL.DATA_ERROR, message, { statusFilter, categoryFilter, search: debouncedSearch, status: err?.status || 0 });
     }
-    if (signal?.aborted) return;
+    if (signal?.aborted || generation !== escalationLoadGenerationRef.current) return;
     setLoading(false);
+    if (failure && throwOnError) throw failure;
   }, [statusFilter, categoryFilter, debouncedSearch]);
 
   useEffect(() => {
@@ -134,29 +142,42 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     return () => ac.abort();
   }, [loadEscalations]);
 
-  const loadKnowledgeQueue = useCallback(async () => {
-    setKqLoading(true);
+  const loadKnowledgeQueue = useCallback(async ({ background = false, throwOnError = false } = {}) => {
+    const generation = ++knowledgeLoadGenerationRef.current;
+    if (!background) setKqLoading(true);
+    let failure = null;
     try {
       const data = await listKnowledgeCandidates({
         reviewStatus: kqStatusFilter || undefined,
         category: kqCategoryFilter || undefined,
       });
+      if (generation !== knowledgeLoadGenerationRef.current) return;
       setKqCandidates(data.candidates);
       setKqTotal(data.total);
       setKqCounts(data.counts);
       setKqError(null);
     } catch (err) {
+      if (generation !== knowledgeLoadGenerationRef.current) return;
+      failure = err;
       setKqError(err?.message || 'Failed to load knowledge candidates');
     }
+    if (generation !== knowledgeLoadGenerationRef.current) return;
     setKqLoading(false);
+    if (failure && throwOnError) throw failure;
   }, [kqStatusFilter, kqCategoryFilter]);
 
   useEffect(() => {
     if (activeTab === 'knowledge') loadKnowledgeQueue();
   }, [activeTab, loadKnowledgeQueue]);
 
-  const loadAttentionQueue = useCallback(async ({ refreshQueue = false } = {}) => {
-    setAttentionLoading(true);
+  const loadAttentionQueue = useCallback(async ({
+    refreshQueue = false,
+    background = false,
+    throwOnError = false,
+  } = {}) => {
+    const generation = ++attentionLoadGenerationRef.current;
+    if (!background) setAttentionLoading(true);
+    let failure = null;
     try {
       const data = await listAttentionItems({
         status: attentionStatusFilter || 'open',
@@ -164,6 +185,7 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
         sort: attentionSort,
         refresh: refreshQueue,
       });
+      if (generation !== attentionLoadGenerationRef.current) return;
       setAttentionItems(data.items);
       setAttentionTotal(data.total);
       setAttentionCounts(data.counts);
@@ -172,9 +194,13 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
       setAttentionRefreshMeta(data.refresh || null);
       setAttentionError(null);
     } catch (err) {
+      if (generation !== attentionLoadGenerationRef.current) return;
+      failure = err;
       setAttentionError(err?.message || 'Failed to load attention items');
     }
+    if (generation !== attentionLoadGenerationRef.current) return;
     setAttentionLoading(false);
+    if (failure && throwOnError) throw failure;
   }, [attentionKindFilter, attentionSort, attentionStatusFilter]);
 
   useEffect(() => {
@@ -265,6 +291,60 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     loadKnowledgeQueue();
   }, [activeTab, loadAttentionQueue, loadEscalations, loadKnowledgeQueue]);
 
+  const syncLiveCaseData = useCallback(async ({ event } = {}) => {
+    const tasks = [];
+    if (!event?.entityType || event.entityType === 'escalation') {
+      tasks.push(loadEscalations(undefined, { background: true, throwOnError: true }));
+      if (event?.action === 'deleted') {
+        tasks.push(loadKnowledgeQueue({ background: true, throwOnError: true }));
+      }
+    }
+    if (!event?.entityType || event.entityType === 'knowledge') {
+      tasks.push(loadKnowledgeQueue({ background: true, throwOnError: true }));
+    }
+    if (activeTab === 'attention') {
+      tasks.push(loadAttentionQueue({ background: true, throwOnError: true }));
+    }
+    await Promise.all(tasks);
+  }, [activeTab, loadAttentionQueue, loadEscalations, loadKnowledgeQueue]);
+
+  const handleLiveCaseEvent = useCallback((eventType, event) => {
+    if (!event?.eventId || !event?.escalationId) return;
+    const caseLabel = event.summary?.caseNumber
+      ? `case ${event.summary.caseNumber}`
+      : event.summary?.title
+        ? `“${event.summary.title}”`
+        : 'a QBO escalation';
+    const openCase = () => { window.location.hash = `#/escalations/${event.escalationId}`; };
+    const options = {
+      groupKey: `${event.entityType}:${event.entityId}:${event.action}`,
+      actionLabel: 'Open case',
+      onAction: openCase,
+    };
+
+    if (eventType === 'escalation.created') {
+      toastRef.current.info(`New ${caseLabel} is ready.`, options);
+    } else if (eventType === 'escalation.status-changed') {
+      const status = ESCALATION_STATUS_LABELS[event.summary?.status] || event.summary?.status || 'updated';
+      toastRef.current.info(`${caseLabel[0].toUpperCase()}${caseLabel.slice(1)} is now ${status}.`, options);
+    } else if (eventType === 'knowledge.created' || eventType === 'knowledge.generated') {
+      toastRef.current.success(`Knowledge draft ready for ${caseLabel}.`, options);
+    } else if (eventType === 'knowledge.approved') {
+      toastRef.current.success(`Knowledge review approved for ${caseLabel}.`, options);
+    } else if (eventType === 'knowledge.published') {
+      toastRef.current.success(`Knowledge published for agents from ${caseLabel}.`, options);
+    } else if (eventType === 'knowledge.unpublished') {
+      toastRef.current.info(`Knowledge from ${caseLabel} returned to review.`, options);
+    } else if (eventType === 'knowledge.failed') {
+      toastRef.current.warning(`Knowledge drafting could not finish for ${caseLabel}.`, options);
+    }
+  }, []);
+
+  const realtime = useCaseRealtime({
+    onSync: syncLiveCaseData,
+    onCaseEvent: handleLiveCaseEvent,
+  });
+
   const kqTotalAll = kqCounts.draft + kqCounts.approved + kqCounts.published + kqCounts.rejected;
   const attentionTotalAll = attentionCounts.open + attentionCounts.resolved + attentionCounts.dismissed + attentionCounts.split;
 
@@ -319,5 +399,6 @@ export default function useEscalations({ initialTab = 'escalations' } = {}) {
     confirmDelete,
     cancelDelete,
     refresh,
+    realtime,
   };
 }

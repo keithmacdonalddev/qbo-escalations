@@ -1,4 +1,8 @@
 const mongoose = require('mongoose');
+const {
+  changedFieldsFromUpdate,
+  publishKnowledgeChange,
+} = require('../services/case-realtime-events');
 
 const REVIEW_STATUSES = ['draft', 'approved', 'published', 'rejected'];
 const PUBLISH_TARGETS = ['category', 'edge-case', 'case-history-only'];
@@ -293,5 +297,46 @@ const knowledgeCandidateSchema = new mongoose.Schema({
 
 knowledgeCandidateSchema.index({ reviewStatus: 1, updatedAt: -1 });
 knowledgeCandidateSchema.index({ category: 1, reusableOutcome: 1 });
+
+// Knowledge can change through reviewer routes, background drafting, recovery,
+// and management tools. Post-write model hooks keep every successful path on
+// the same realtime contract without publishing failed writes.
+knowledgeCandidateSchema.pre('save', function rememberRealtimeKnowledgeChange() {
+  this.$locals.realtimeKnowledgeChange = {
+    operation: this.isNew ? 'create' : 'update',
+    changedFields: this.isNew ? [] : this.modifiedPaths(),
+  };
+});
+
+function publishRealtimeSafely(operation, publish) {
+  try {
+    publish();
+  } catch (error) {
+    console.error(`[case-realtime] Knowledge ${operation} event was not published:`, error?.message || error);
+  }
+}
+
+knowledgeCandidateSchema.post('save', function publishSavedKnowledge(doc) {
+  publishRealtimeSafely('save', () => {
+    publishKnowledgeChange(doc, doc.$locals.realtimeKnowledgeChange || { operation: 'update' });
+  });
+});
+
+knowledgeCandidateSchema.post('findOneAndUpdate', function publishUpdatedKnowledge(doc) {
+  if (!doc) return;
+  publishRealtimeSafely('update', () => {
+    publishKnowledgeChange(doc, {
+      operation: 'update',
+      changedFields: changedFieldsFromUpdate(this.getUpdate()),
+    });
+  });
+});
+
+knowledgeCandidateSchema.post('findOneAndDelete', function publishDeletedKnowledge(doc) {
+  if (!doc) return;
+  publishRealtimeSafely('delete', () => {
+    publishKnowledgeChange(doc, { operation: 'delete' });
+  });
+});
 
 module.exports = mongoose.model('KnowledgeCandidate', knowledgeCandidateSchema);

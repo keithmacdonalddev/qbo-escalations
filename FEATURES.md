@@ -333,3 +333,10 @@ Model: Claude Fable 5
 Is duplicate?: no
 Complexity: high
 Special Feature: Recovery Fire Drills - On a schedule, create a sandboxed copy of real workflow data, inject simulated evidence-loss scenarios such as a lost triage save, expired source record, provider outage mid-rerun, or interrupted operation, and run the actual recovery machinery without ever touching live records. Score readiness for each failure class with evidence links proving that recovery, markers, provenance, and locks behaved correctly, and alert the operator when a code or configuration change silently breaks a path that ordinary tests missed.
+
+Date: 2026-07-23
+Time: 05:05 AST
+Model: Codex GPT-5.6 Sol (high)
+Is duplicate?: no
+Complexity: medium
+Special Feature: Attention-Aware Live Update Inbox - Route realtime changes according to what the operator is currently viewing: update the active case quietly in place, group useful background changes into one reviewable inbox, and interrupt only when a failure or decision genuinely needs attention. Each grouped item would retain its case link, reason, and read state across tabs, turning WebSocket volume into a calm priority system rather than a stream of transient toast messages.

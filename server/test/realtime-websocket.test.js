@@ -17,6 +17,12 @@ const {
   appendAgentSessionEvent,
   getAgentSession,
 } = require('../src/services/agent-session-runtime');
+const {
+  EVENT_LIMIT,
+  getCaseRealtimeStatus,
+  publishCaseEvent,
+  resetCaseRealtimeEvents,
+} = require('../src/services/case-realtime-events');
 
 function openSocket(port, options = {}) {
   return new Promise((resolve, reject) => {
@@ -83,6 +89,7 @@ function createMessageFeed(ws) {
   });
 
   return {
+    messages,
     waitFor(predicate, timeoutMs = 5_000) {
       const existing = messages.find(predicate);
       if (existing) return Promise.resolve(existing);
@@ -181,6 +188,27 @@ test('realtime websocket channels', async (t) => {
     assert.equal(statusCode, 403);
   });
 
+  await t.test('invalid case subscriptions are rejected without affecting the shared connection', async () => {
+    const ws = await openSocket(port);
+    const feed = createMessageFeed(ws);
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      subscriptionId: 'case-invalid',
+      channel: 'case-workflow',
+      key: 'not-an-object-id',
+    }));
+    const denied = await feed.waitFor((message) => (
+      message.type === 'error' && message.subscriptionId === 'case-invalid'
+    ));
+    assert.equal(denied.code, 'INVALID_ESCALATION_ID');
+
+    ws.send(JSON.stringify({ type: 'ping' }));
+    const pong = await feed.waitFor((message) => message.type === 'pong');
+    assert.ok(pong.timestamp);
+    ws.close();
+    await waitForClose(ws);
+  });
+
   await t.test('agent-session channel replays buffered events and streams live updates', async () => {
     const session = createAgentSession({
       agentType: 'workspace',
@@ -263,6 +291,119 @@ test('realtime websocket channels', async (t) => {
 
     assert.equal(getAgentSession(session.id).attachedClients, 0);
 
+    ws.close();
+    await waitForClose(ws);
+  });
+
+  await t.test('case-workflow channel snapshots, filters, streams, replays, and cleans up', async () => {
+    resetCaseRealtimeEvents();
+    const escalationId = '507f1f77bcf86cd799439011';
+    const otherEscalationId = '507f1f77bcf86cd799439012';
+    const ws = await openSocket(port);
+    const feed = createMessageFeed(ws);
+
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      subscriptionId: 'case-1',
+      channel: 'case-workflow',
+      key: escalationId,
+    }));
+
+    const snapshot = await feed.waitFor((message) => (
+      message.type === 'event'
+      && message.subscriptionId === 'case-1'
+      && message.event === 'snapshot'
+    ));
+    assert.equal(snapshot.data.escalationId, escalationId);
+    assert.equal(snapshot.data.authoritativeRefreshRequired, true);
+    assert.equal(snapshot.meta.authoritative, true);
+    assert.equal(getCaseRealtimeStatus().listenerCount, 1);
+
+    publishCaseEvent({
+      entityType: 'escalation',
+      entityId: otherEscalationId,
+      escalationId: otherEscalationId,
+      action: 'updated',
+    });
+    const expected = publishCaseEvent({
+      entityType: 'escalation',
+      entityId: escalationId,
+      escalationId,
+      action: 'status-changed',
+      summary: { status: 'resolved' },
+    });
+
+    const live = await feed.waitFor((message) => (
+      message.type === 'event'
+      && message.subscriptionId === 'case-1'
+      && message.event === 'escalation.status-changed'
+    ));
+    assert.equal(live.data.eventId, expected.eventId);
+    assert.equal(live.meta.seq, expected.seq);
+    assert.equal(live.data.summary.status, 'resolved');
+    assert.equal(feed.messages.some((message) => message.data?.escalationId === otherEscalationId), false);
+
+    ws.send(JSON.stringify({ type: 'unsubscribe', subscriptionId: 'case-1' }));
+    await feed.waitFor((message) => message.type === 'unsubscribed' && message.subscriptionId === 'case-1');
+    assert.equal(getCaseRealtimeStatus().listenerCount, 0);
+    ws.close();
+    await waitForClose(ws);
+
+    const missed = publishCaseEvent({
+      entityType: 'knowledge',
+      entityId: '507f1f77bcf86cd799439021',
+      escalationId,
+      action: 'created',
+    });
+    const replaySocket = await openSocket(port);
+    const replayFeed = createMessageFeed(replaySocket);
+    replaySocket.send(JSON.stringify({
+      type: 'subscribe',
+      subscriptionId: 'case-replay',
+      channel: 'case-workflow',
+      key: escalationId,
+      params: { since: expected.seq },
+    }));
+    const replayed = await replayFeed.waitFor((message) => (
+      message.type === 'event'
+      && message.subscriptionId === 'case-replay'
+      && message.data?.eventId === missed.eventId
+    ));
+    assert.equal(replayed.event, 'knowledge.created');
+    replaySocket.close();
+    await waitForClose(replaySocket);
+  });
+
+  await t.test('case-workflow requires an authoritative refresh when replay retention is exceeded', async () => {
+    resetCaseRealtimeEvents();
+    const escalationId = '507f1f77bcf86cd799439031';
+    for (let index = 0; index < EVENT_LIMIT + 2; index += 1) {
+      publishCaseEvent({
+        entityType: 'escalation',
+        entityId: escalationId,
+        escalationId,
+        action: 'updated',
+      });
+    }
+    assert.equal(getCaseRealtimeStatus().retainedEventCount, EVENT_LIMIT);
+
+    const ws = await openSocket(port);
+    const feed = createMessageFeed(ws);
+    ws.send(JSON.stringify({
+      type: 'subscribe',
+      subscriptionId: 'case-gap',
+      channel: 'case-workflow',
+      key: escalationId,
+      params: { since: 1 },
+    }));
+    const snapshot = await feed.waitFor((message) => (
+      message.type === 'event'
+      && message.subscriptionId === 'case-gap'
+      && message.event === 'snapshot'
+    ));
+    assert.equal(snapshot.data.reason, 'replay-gap');
+    assert.equal(snapshot.meta.resyncRequired, true);
+    assert.equal(snapshot.data.authoritativeRefreshRequired, true);
     ws.close();
     await waitForClose(ws);
   });

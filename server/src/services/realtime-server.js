@@ -2,9 +2,15 @@
 
 const { WebSocketServer, WebSocket } = require('ws');
 const { isAllowedOrigin } = require('../lib/origin-policy');
+const { resolveAppAuthContext } = require('../middleware/app-auth');
+const {
+  getCaseRealtimeStatus,
+  resetCaseRealtimeEvents,
+} = require('./case-realtime-events');
 const workspaceMonitorChannel = require('./realtime-channels/workspace-monitor');
 const agentSessionChannel = require('./realtime-channels/agent-session');
 const roomChannel = require('./realtime-channels/room');
+const caseWorkflowChannel = require('./realtime-channels/case-workflow');
 
 const REALTIME_PATH = '/api/realtime';
 const HEARTBEAT_INTERVAL_MS = 25_000;
@@ -13,6 +19,7 @@ const channelHandlers = new Map([
   ['workspace-monitor', workspaceMonitorChannel],
   ['agent-session', agentSessionChannel],
   ['room', roomChannel],
+  ['case-workflow', caseWorkflowChannel],
 ]);
 
 let _websocketServer = null;
@@ -69,7 +76,23 @@ function getRealtimeStatus() {
     clientCount: _clients.size,
     subscriptionCount: subscriptions.length,
     channels,
+    caseWorkflow: getCaseRealtimeStatus(),
   };
+}
+
+async function authorizeSubscription(client, handler, context) {
+  if (handler.requiresAuthenticatedUser === true && !client.authenticatedUser) {
+    throw createProtocolError('REALTIME_AUTH_REQUIRED', 'Sign in before subscribing to this live update channel');
+  }
+  if (typeof handler.authorize !== 'function') return;
+
+  const decision = await handler.authorize(context);
+  if (decision === false || decision?.allowed === false) {
+    throw createProtocolError(
+      decision?.code || 'REALTIME_SUBSCRIPTION_DENIED',
+      decision?.error || 'This live update subscription is not allowed'
+    );
+  }
 }
 
 function cleanupSubscription(client, subscriptionId, { notify = true, reason = 'unsubscribed' } = {}) {
@@ -130,13 +153,23 @@ async function handleSubscribe(client, payload) {
   client.subscriptions.set(subscriptionId, record);
 
   try {
-    const cleanup = await handler.subscribe({
+    const authContext = resolveAppAuthContext(client.request);
+    client.appAuth = authContext.appAuth;
+    client.authenticatedUser = authContext.authenticatedUser;
+    const context = {
       subscriptionId,
       channel,
       key: payload?.key ?? null,
       params: payload?.params && typeof payload.params === 'object' ? payload.params : {},
       request: client.request,
       clientId: client.id,
+      appAuth: client.appAuth,
+      authenticatedUser: client.authenticatedUser,
+    };
+    await authorizeSubscription(client, handler, context);
+
+    const cleanup = await handler.subscribe({
+      ...context,
       sendEvent(event, data, meta = undefined) {
         safeSend(client.ws, {
           type: 'event',
@@ -252,6 +285,7 @@ function stopRealtimeServer() {
   _upgradeHandler = null;
   _attachedServer = null;
   _clients.clear();
+  resetCaseRealtimeEvents();
 }
 
 function attachRealtimeServer(httpServer) {
@@ -271,10 +305,13 @@ function attachRealtimeServer(httpServer) {
   _attachedServer = httpServer;
 
   _websocketServer.on('connection', (ws, request) => {
+    const authContext = resolveAppAuthContext(request);
     const client = {
       id: createClientId(),
       ws,
       request,
+      appAuth: authContext.appAuth,
+      authenticatedUser: authContext.authenticatedUser,
       subscriptions: new Map(),
       alive: true,
       connectedAt: Date.now(),
@@ -285,6 +322,7 @@ function attachRealtimeServer(httpServer) {
       type: 'hello',
       connectionId: client.id,
       serverTime: new Date().toISOString(),
+      authenticated: Boolean(client.authenticatedUser),
       status: getRealtimeStatus(),
     });
 

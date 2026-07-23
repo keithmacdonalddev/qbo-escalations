@@ -12,11 +12,13 @@ import {
 } from '../api/escalationsApi.js';
 import { getConversation } from '../api/chatApi.js';
 import { useToast } from '../hooks/useToast.jsx';
+import useCaseRealtime from '../hooks/useCaseRealtime.js';
 import EscalationForm from './EscalationForm.jsx';
 import EscalationKnowledgePanel from './EscalationKnowledgePanel.jsx';
 import ChatMessage from './ChatMessage.jsx';
 import CopilotPanel from './CopilotPanel.jsx';
 import Tooltip from './Tooltip.jsx';
+import RealtimeStatusPill from './RealtimeStatusPill.jsx';
 import WorkflowLogPanel from './chat-v5/WorkflowLogPanel.jsx';
 import './EscalationDashboard.css';
 import {
@@ -68,42 +70,79 @@ export default function EscalationDetail({ escalationId }) {
   const [knowledgeBusy, setKnowledgeBusy] = useState(false);
   const [knowledgeNotice, setKnowledgeNotice] = useState('');
   const [autoGenBanner, setAutoGenBanner] = useState(null);
+  const [externalKnowledgeUpdate, setExternalKnowledgeUpdate] = useState(null);
   const knowledgeSectionRef = useRef(null);
+  const loadGenerationRef = useRef(0);
+  const knowledgeDirtyRef = useRef(false);
+  const knowledgeNoticeTimerRef = useRef(0);
+
+  const loadCase = useCallback(async ({
+    background = false,
+    preserveDirtyKnowledge = false,
+    event = null,
+  } = {}) => {
+    const generation = ++loadGenerationRef.current;
+    if (!background) setLoading(true);
+    const [esc, draft] = await Promise.all([
+      getEscalation(escalationId),
+      getEscalationKnowledge(escalationId).catch((error) => {
+        if (error?.status === 404) return null;
+        throw error;
+      }),
+    ]);
+    const conv = esc.conversationId
+      ? await getConversation(esc.conversationId).catch(() => undefined)
+      : null;
+    if (generation !== loadGenerationRef.current) return;
+
+    setEscalation(esc);
+    if (conv !== undefined) setConversation(conv);
+    if (preserveDirtyKnowledge && knowledgeDirtyRef.current) {
+      if (!event?.entityType || event.entityType === 'knowledge') {
+        setExternalKnowledgeUpdate({ draft: draft || null, event, receivedAt: Date.now() });
+      }
+    } else {
+      setKnowledge(draft || null);
+      setExternalKnowledgeUpdate(null);
+    }
+    setLoading(false);
+  }, [escalationId]);
 
   // Load escalation and linked conversation
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     setKnowledge(null);
-    (async () => {
-      try {
-        const [esc, draft] = await Promise.all([
-          getEscalation(escalationId),
-          getEscalationKnowledge(escalationId).catch(() => null),
-        ]);
-        if (cancelled) return;
-        setEscalation(esc);
-        setKnowledge(draft || null);
-
-        if (esc.conversationId) {
-          const conv = await getConversation(esc.conversationId);
-          if (!cancelled) setConversation(conv);
-        }
-      } catch { /* ignore */ }
-      if (!cancelled) setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [escalationId]);
+    setExternalKnowledgeUpdate(null);
+    knowledgeDirtyRef.current = false;
+    loadCase().catch(() => {
+      if (!cancelled) {
+        setEscalation(null);
+        setLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+      loadGenerationRef.current += 1;
+      if (knowledgeNoticeTimerRef.current) window.clearTimeout(knowledgeNoticeTimerRef.current);
+      knowledgeNoticeTimerRef.current = 0;
+    };
+  }, [escalationId, loadCase]);
 
   const showKnowledgeNotice = useCallback((message) => {
+    if (knowledgeNoticeTimerRef.current) window.clearTimeout(knowledgeNoticeTimerRef.current);
     setKnowledgeNotice(message);
-    window.setTimeout(() => setKnowledgeNotice(''), 2500);
+    knowledgeNoticeTimerRef.current = window.setTimeout(() => {
+      setKnowledgeNotice('');
+      knowledgeNoticeTimerRef.current = 0;
+    }, 2500);
   }, []);
 
   const handleStatusTransitionComplete = useCallback((result = {}) => {
     const draft = result.knowledgeDraft?.knowledge || null;
     if (draft) {
       setKnowledge(draft);
+      knowledgeDirtyRef.current = false;
+      setExternalKnowledgeUpdate(null);
       setAutoGenBanner('done');
       showKnowledgeNotice('KB draft created from the finished escalation');
       return;
@@ -117,6 +156,8 @@ export default function EscalationDetail({ escalationId }) {
     try {
       const draft = await generateEscalationKnowledge(escalation._id, { force });
       setKnowledge(draft);
+      knowledgeDirtyRef.current = false;
+      setExternalKnowledgeUpdate(null);
       showKnowledgeNotice(force ? 'Review draft refreshed' : 'Review draft created');
     } catch {
       toastRef.current.error('Failed to create KB draft');
@@ -125,6 +166,7 @@ export default function EscalationDetail({ escalationId }) {
   }, [escalation, knowledgeBusy, showKnowledgeNotice]);
 
   const handleKnowledgeFieldChange = useCallback((field, value) => {
+    knowledgeDirtyRef.current = true;
     setKnowledge((prev) => (prev ? { ...prev, [field]: value } : prev));
   }, []);
 
@@ -160,6 +202,8 @@ export default function EscalationDetail({ escalationId }) {
         reviewNotes: knowledge.reviewNotes,
       });
       setKnowledge(updated);
+      knowledgeDirtyRef.current = false;
+      setExternalKnowledgeUpdate(null);
       showKnowledgeNotice('Review draft saved');
     } catch {
       toastRef.current.error('Failed to save KB draft');
@@ -173,6 +217,8 @@ export default function EscalationDetail({ escalationId }) {
     try {
       const result = await publishEscalationKnowledge(escalation._id);
       setKnowledge(result.knowledge);
+      knowledgeDirtyRef.current = false;
+      setExternalKnowledgeUpdate(null);
       showKnowledgeNotice(result.publish?.inserted === false ? 'Already published for agents' : 'Published for agents');
     } catch {
       toastRef.current.error('Failed to publish for agents');
@@ -187,6 +233,8 @@ export default function EscalationDetail({ escalationId }) {
     try {
       const result = await unpublishEscalationKnowledge(escalation._id);
       setKnowledge(result.knowledge);
+      knowledgeDirtyRef.current = false;
+      setExternalKnowledgeUpdate(null);
       showKnowledgeNotice('Unpublished from playbook');
     } catch {
       toastRef.current.error('Failed to unpublish knowledge');
@@ -221,6 +269,53 @@ export default function EscalationDetail({ escalationId }) {
     } catch { toastRef.current.error('Failed to delete screenshot'); }
   }, [escalation]);
 
+  const syncLiveCase = useCallback(async ({ event } = {}) => {
+    if (event?.entityType === 'knowledge' && event?.action === 'failed') return;
+    const hadDirtyKnowledge = knowledgeDirtyRef.current;
+    try {
+      await loadCase({
+        background: true,
+        preserveDirtyKnowledge: true,
+        event,
+      });
+    } catch (error) {
+      if (event?.entityType === 'escalation' && event?.action === 'deleted') {
+        setEscalation(null);
+        setKnowledge(null);
+        setConversation(null);
+        return;
+      }
+      throw error;
+    }
+    if (event?.entityType === 'knowledge' && !hadDirtyKnowledge) {
+      showKnowledgeNotice(event.action === 'failed'
+        ? 'Knowledge drafting needs attention'
+        : 'Knowledge updated from live case activity');
+    }
+  }, [loadCase, showKnowledgeNotice]);
+
+  const handleLiveCaseEvent = useCallback((eventType, event) => {
+    if (eventType === 'knowledge.failed') {
+      toastRef.current.warning('Knowledge drafting could not finish for this case.', {
+        groupKey: `knowledge:${event?.entityId || escalationId}:failed`,
+      });
+    }
+  }, [escalationId]);
+
+  const realtime = useCaseRealtime({
+    escalationId,
+    onSync: syncLiveCase,
+    onCaseEvent: handleLiveCaseEvent,
+  });
+
+  const acceptExternalKnowledgeUpdate = useCallback(() => {
+    if (!externalKnowledgeUpdate) return;
+    setKnowledge(externalKnowledgeUpdate.draft || null);
+    knowledgeDirtyRef.current = false;
+    setExternalKnowledgeUpdate(null);
+    showKnowledgeNotice('Loaded the latest knowledge changes');
+  }, [externalKnowledgeUpdate, showKnowledgeNotice]);
+
   useEffect(() => {
     if (!escalation?._id) {
       setSimilarEscalations([]);
@@ -238,7 +333,7 @@ export default function EscalationDetail({ escalationId }) {
       if (!cancelled) setSimilarLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [escalation?._id]);
+  }, [escalation?._id, escalation?.category, escalation?.status]);
 
   // Every case is eligible for a KB draft now — drafts auto-create from the
   // pipeline regardless of status, and the reviewer can refresh/edit at any
@@ -290,7 +385,8 @@ export default function EscalationDetail({ escalationId }) {
             Escalation Case
           </h1>
         </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-2)' }}>
+        <div className="esc-detail-header-actions">
+          <RealtimeStatusPill realtime={realtime} />
           {escalation.conversationId && (
             <button
               className="btn btn-secondary btn-sm"
@@ -302,6 +398,19 @@ export default function EscalationDetail({ escalationId }) {
           )}
         </div>
       </div>
+
+      {externalKnowledgeUpdate && (
+        <div className="esc-live-conflict" role="status">
+          <span className="esc-live-conflict-icon" aria-hidden="true">↻</span>
+          <span>
+            <strong>Newer knowledge changes are available.</strong>
+            Your unsaved review text has been kept in place.
+          </span>
+          <button className="btn btn-secondary btn-sm" type="button" onClick={acceptExternalKnowledgeUpdate}>
+            Replace with latest
+          </button>
+        </div>
+      )}
 
       {/* Two-column layout: escalation info (scrollable) + chat transcript (fixed) */}
       <div className="esc-detail-columns">

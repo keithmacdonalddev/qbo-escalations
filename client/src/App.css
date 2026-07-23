@@ -1800,8 +1800,37 @@ textarea {
 }
 
 .toast-message {
+  display: block;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.toast-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.toast-action {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: inherit;
+  padding: 0.32rem 0.7rem;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.toast-action:hover,
+.toast-action:focus-visible {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.72);
 }
 
 .toast-success,

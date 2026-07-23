@@ -2,7 +2,7 @@
 
 const { configuration, getSession } = require('../services/app-auth');
 
-function attachAppAuth(req, _res, next) {
+function resolveAppAuthContext(req) {
   const config = configuration();
   const candidateSession = config.enabled && config.configured ? getSession(req) : null;
   const session = candidateSession
@@ -11,12 +11,20 @@ function attachAppAuth(req, _res, next) {
     && candidateSession.user.email === config.user.email
     ? candidateSession
     : null;
-  req.appAuth = { config, session };
-  req.authenticatedUser = session ? {
-    ...session.user,
-    sessionKey: session.sessionKey,
-    sessionExpiresAt: session.expiresAt,
-  } : null;
+  return {
+    appAuth: { config, session },
+    authenticatedUser: session ? {
+      ...session.user,
+      sessionKey: session.sessionKey,
+      sessionExpiresAt: session.expiresAt,
+    } : null,
+  };
+}
+
+function attachAppAuth(req, _res, next) {
+  const context = resolveAppAuthContext(req);
+  req.appAuth = context.appAuth;
+  req.authenticatedUser = context.authenticatedUser;
   next();
 }
 
@@ -49,4 +57,4 @@ function requireReportingUser(req, res, next) {
   return next();
 }
 
-module.exports = { attachAppAuth, requireReportingUser };
+module.exports = { attachAppAuth, requireReportingUser, resolveAppAuthContext };

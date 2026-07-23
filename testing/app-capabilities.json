@@ -289,6 +289,35 @@
       "lastHumanReviewDate": "2026-07-22"
     },
     {
+      "id": "qbo-case-realtime-continuity",
+      "label": "Live case and knowledge continuity",
+      "userOutcome": "Open QBO case and knowledge screens stay current across tabs, and the app clearly warns when live updates are reconnecting, stale, or unable to replace unsaved review text safely.",
+      "risk": "high",
+      "owner": "Escalations realtime",
+      "sourcePaths": [
+        "server/src/services/case-realtime-events.js",
+        "server/src/services/realtime-channels/case-workflow.js",
+        "server/src/services/realtime-server.js",
+        "client/src/api/realtime.js",
+        "client/src/hooks/useCaseRealtime.js",
+        "client/src/hooks/useEscalations.js",
+        "client/src/components/RealtimeStatusPill.jsx",
+        "client/src/components/EscalationDashboard.jsx",
+        "client/src/components/EscalationDetail.jsx"
+      ],
+      "requiredCheckTypes": ["unit", "component", "server", "browser"],
+      "evidence": [
+        { "type": "unit", "groupId": "client-components", "paths": ["client/src/api/realtime.test.js", "client/src/hooks/useCaseRealtime.test.jsx", "client/src/hooks/useToast.test.jsx"] },
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/EscalationDashboard.test.jsx", "client/src/components/EscalationDetail.test.jsx"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/case-realtime-events.test.js", "server/test/realtime-websocket.test.js"] }
+      ],
+      "knownGaps": [
+        "No trusted real-browser multi-tab run yet proves create, transition, knowledge publication, disconnect, reconnect, and replay on an already-running app.",
+        "Presence, soft edit locks, evidence-recovery push progress, and agent/provider health push conversion remain deliberate later roadmap work."
+      ],
+      "lastHumanReviewDate": "2026-07-23"
+    },
+    {
       "id": "ticket-snitch-user-reporting",
       "label": "Ticket Snitch user reporting",
       "userOutcome": "A QBO Escalations user can safely report a problem, request a feature, or share feedback with an optional approved screenshot and receive one duplicate-safe Ticket Snitch case key.",

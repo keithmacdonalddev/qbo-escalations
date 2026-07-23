@@ -1,6 +1,7 @@
 import ConfirmModal from './ConfirmModal.jsx';
 import Tooltip from './Tooltip.jsx';
 import EscalationCard from './EscalationCard.jsx';
+import RealtimeStatusPill from './RealtimeStatusPill.jsx';
 import useEscalations, {
   ATTENTION_KIND_LABELS,
   ATTENTION_SORT_LABELS,
@@ -90,6 +91,7 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
     confirmDelete,
     cancelDelete,
     refresh,
+    realtime,
   } = useEscalations({ initialTab });
 
   const attentionMission = buildAttentionMissionStats({
@@ -121,11 +123,14 @@ export default function EscalationDashboard({ initialTab = 'escalations' }) {
             </div>
           )}
         </div>
-        <Tooltip text={activeTab === 'escalations' ? 'Reload case data' : activeTab === 'attention' ? 'Reload attention queue' : 'Reload knowledge review'} level="medium">
-          <button className="btn btn-secondary" onClick={refresh} type="button">
-            Refresh
-          </button>
-        </Tooltip>
+        <div className="esc-header-actions">
+          <RealtimeStatusPill realtime={realtime} />
+          <Tooltip text={activeTab === 'escalations' ? 'Reload case data' : activeTab === 'attention' ? 'Reload attention queue' : 'Reload knowledge review'} level="medium">
+            <button className="btn btn-secondary" onClick={refresh} type="button">
+              Refresh
+            </button>
+          </Tooltip>
+        </div>
       </div>
 
       <div className="esc-toolbar">

@@ -1,5 +1,7 @@
 'use strict';
 
+const { publishKnowledgeFailure } = require('./case-realtime-events');
+
 // ---------------------------------------------------------------------------
 // Knowledge Base draft trigger (pipeline on-ramp)
 //
@@ -70,6 +72,11 @@ function triggerKnowledgeDraftForEscalation(escalation, options = {}) {
         escalation && escalation._id,
         err && err.message
       );
+      publishKnowledgeFailure({
+        escalationId: escalation && escalation._id,
+        title: escalation && escalation.caseNumber,
+        source: trigger,
+      });
     });
 }
 
