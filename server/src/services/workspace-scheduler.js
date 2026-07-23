@@ -1,5 +1,7 @@
 'use strict';
 
+const { getWorkspaceAuthority } = require('./workspace-action-policy');
+
 const GmailAuth = require('../models/GmailAuth');
 const gmail = require('./gmail');
 const calendar = require('./calendar');
@@ -102,7 +104,7 @@ function buildRecentWorkStartBaseline(events) {
 // Context pipeline — mirrors workspace.js auto-context
 // ---------------------------------------------------------------------------
 
-async function gatherBriefingContext() {
+async function gatherBriefingContext(policy = {}) {
   const now = new Date();
   const nowIso = now.toISOString();
   const in48hIso = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
@@ -112,12 +114,17 @@ async function gatherBriefingContext() {
 
   // 0. Check if Gmail/Calendar are connected
   const allConnectedAccounts = await GmailAuth.getAll().catch(() => []);
-  const gmailConnected = (allConnectedAccounts || []).length > 0;
+  const gmailConnected = policy.emailMonitoring !== false && (allConnectedAccounts || []).length > 0;
   meta.gmailConnected = gmailConnected;
 
   // 1. Calendar events (next 48h)
   let todayEvents = [];
   try {
+    if (policy.calendarMonitoring === false) {
+      meta.calendarConnected = false;
+      parts.push('GOOGLE CALENDAR: MONITORING DISABLED BY WORKSPACE AGENT POLICY.');
+      throw new Error('Calendar monitoring disabled by Workspace Agent policy');
+    }
     const eventsRes = await calendar.listEvents({
       calendarId: 'primary',
       timeMin: nowIso,
@@ -148,6 +155,7 @@ async function gatherBriefingContext() {
 
   // 1b. Recent work schedule baseline (past 30 days)
   try {
+    if (policy.calendarMonitoring === false) throw new Error('Calendar monitoring disabled by Workspace Agent policy');
     const lookbackStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const historyRes = await calendar.listEvents({
       calendarId: 'primary',
@@ -242,7 +250,10 @@ async function gatherBriefingContext() {
   const alertTexts = [];
   try {
     const workspaceAlerts = require('./workspace-alerts');
-    const detected = await workspaceAlerts.detectAlerts();
+    const detected = await workspaceAlerts.detectAlerts({
+      email: policy.emailMonitoring !== false,
+      calendar: policy.calendarMonitoring !== false,
+    });
     if (detected.length > 0) {
       parts.push('');
       parts.push('ACTIVE ALERTS:');
@@ -318,7 +329,7 @@ async function gatherBriefingContext() {
 // Briefing generation — calls the LLM and saves to DB
 // ---------------------------------------------------------------------------
 
-async function generateBriefing() {
+async function generateBriefing(policy = {}) {
   const startMs = Date.now();
   const now = new Date();
   const dateStr = localDateStr(now);
@@ -341,7 +352,7 @@ async function generateBriefing() {
   console.log(`[workspace-scheduler] Generating morning briefing for ${dateStr}...`);
 
   // Gather context
-  const { contextText, alertTexts, entityCount, meta } = await gatherBriefingContext();
+  const { contextText, alertTexts, entityCount, meta } = await gatherBriefingContext(policy);
 
   // Guard: if both Gmail and Calendar are disconnected, save a minimal briefing
   // instead of burning LLM tokens on fabricated data.
@@ -580,13 +591,17 @@ function shouldRunNow() {
   return false;
 }
 
-function tick() {
+async function tick() {
   if (!shouldRunNow()) return;
+
+  const authority = await getWorkspaceAuthority();
+  if (!authority.enabled || !authority.policy.proactiveEnabled) return;
+  if (!authority.policy.emailMonitoring && !authority.policy.calendarMonitoring) return;
 
   const todayStr = localDateStr();
   lastRunDate = todayStr; // Mark immediately to prevent double-runs
 
-  generateBriefing().catch((err) => {
+  generateBriefing(authority.policy).catch((err) => {
     console.error('[workspace-scheduler] Briefing generation failed:', err.message);
     // Reset lastRunDate on failure so it retries next tick
     if (lastRunDate === todayStr) {
@@ -600,9 +615,11 @@ function startScheduler() {
   console.log(`[workspace-scheduler] Started — briefing at ${config.briefingHour}:${String(config.briefingMinute).padStart(2, '0')} daily`);
 
   // Run first check immediately
-  tick();
+  tick().catch((err) => console.error('[workspace-scheduler] Tick failed:', err.message));
 
-  intervalId = setInterval(tick, CHECK_INTERVAL_MS);
+  intervalId = setInterval(() => {
+    tick().catch((err) => console.error('[workspace-scheduler] Tick failed:', err.message));
+  }, CHECK_INTERVAL_MS);
 }
 
 function stopScheduler() {
@@ -618,4 +635,11 @@ module.exports = {
   stopScheduler,
   generateBriefing,
   config,
+  getStatus: () => ({
+    running: Boolean(intervalId),
+    enabled: config.enabled,
+    briefingHour: config.briefingHour,
+    briefingMinute: config.briefingMinute,
+    lastRunDate,
+  }),
 };

@@ -138,6 +138,7 @@ const AGENT_IDENTITY_PROFILE_PROJECTION = Object.freeze({
   enabledUpdatedBy: 1,
   profile: 1,
   runtime: 1,
+  workspacePolicy: 1,
   custom: 1,
   'memory.notes': { $slice: PROFILE_PAYLOAD_MEMORY_NOTES },
   'memory.lastLearnedAt': 1,
@@ -833,6 +834,7 @@ function buildMergedIdentity(agentId, doc = null, docsById = null) {
       lastRunAt: doc?.harness?.lastRunAt || null,
     },
     runtime: doc?.runtime?.configured ? clone(doc.runtime) : null,
+    workspacePolicy: agentId === 'workspace' ? clone(doc?.workspacePolicy || {}) : null,
     history: {
       entries: clone(doc?.history?.entries || []),
     },

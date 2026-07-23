@@ -2195,6 +2195,36 @@
   display: flex;
 }
 
+.workspace-agent-action-confirmation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 14px;
+  width: min(100%, 560px);
+  padding: 11px 12px;
+  border: 1px solid rgba(245, 183, 77, 0.34);
+  border-radius: 9px;
+  background: rgba(245, 183, 77, 0.08);
+}
+
+.workspace-agent-action-confirmation strong,
+.workspace-agent-action-confirmation small {
+  display: block;
+}
+
+.workspace-agent-action-confirmation strong { color: #f0d094; font-size: 12px; }
+.workspace-agent-action-confirmation small { margin-top: 3px; color: var(--ink-tertiary, #8c969f); font-size: 10px; }
+.workspace-agent-action-confirmation button {
+  align-self: center;
+  padding: 7px 10px;
+  border: 1px solid rgba(245, 183, 77, 0.42);
+  border-radius: 7px;
+  background: rgba(245, 183, 77, 0.13);
+  color: #f3ce86;
+  cursor: pointer;
+}
+.workspace-agent-action-confirmation button:disabled { cursor: wait; opacity: 0.55; }
+.workspace-agent-action-confirmation em { grid-column: 1 / -1; color: var(--danger, #ef4444); font-size: 10px; font-style: normal; }
+
 /* ----- Command Dock chrome polish ----- */
 .agent-dock {
   background:

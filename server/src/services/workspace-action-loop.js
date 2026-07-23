@@ -611,13 +611,29 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
       const iterResults = await executeWorkspaceActions(iterationActions, executionState, {
         shouldAbort: isAbortRequested,
         abortMessage: actionFlowAbortReason || 'Workspace action loop aborted',
+        source: 'workspace-agent',
+        surface: opts.surface || 'workspace-panel',
+        sessionId,
       });
       recordWorkspaceActions(sessionId, iterationActions, iterResults);
       allActionResults.push(...iterResults);
 
-      patternLearner.logBehaviorBatch(iterationActions, iterResults).catch((patternErr) => {
-        console.error('[workspace] pattern learning failed:', patternErr.message);
+      const learnableActions = [];
+      const learnableResults = [];
+      const unmatchedActions = [...iterationActions];
+      iterResults.forEach((result) => {
+        const matchingIndex = unmatchedActions.findIndex((action) => action?.tool === result?.tool);
+        const matchingAction = matchingIndex >= 0 ? unmatchedActions.splice(matchingIndex, 1)[0] : null;
+        if (result?.confirmationRequired || result?.blocked) return;
+        if (!matchingAction) return;
+        learnableActions.push(matchingAction);
+        learnableResults.push(result);
       });
+      if (learnableActions.length > 0) {
+        patternLearner.logBehaviorBatch(learnableActions, learnableResults).catch((patternErr) => {
+          console.error('[workspace] pattern learning failed:', patternErr.message);
+        });
+      }
 
       throwIfAborted();
 
@@ -626,14 +642,19 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         iteration,
       });
 
-      const isLastIteration = iteration >= MAX_ACTION_ITERATIONS;
+      const waitingForConfirmation = iterResults.some((result) => result?.confirmationRequired);
+      const isLastIteration = iteration >= MAX_ACTION_ITERATIONS || waitingForConfirmation;
       const resultsLines = [
         `Action results (round ${iteration}/${MAX_ACTION_ITERATIONS}):`,
         '',
         JSON.stringify(iterResults.map((result) => {
           if (!result || typeof result !== 'object') return result;
           const compact = { tool: result.tool };
-          if (result.error) {
+          if (result.confirmationRequired) {
+            compact.status = 'confirmation_required';
+            compact.approvalId = result.approval?.id || '';
+            compact.preview = result.approval?.preview || '';
+          } else if (result.error) {
             compact.status = 'error';
             compact.error = result.error;
             if (result.failFast) compact.failFast = true;
@@ -662,7 +683,9 @@ async function runWorkspaceActionLoop(opts, callbacks, hooks = {}) {
         resultsLines.push(
           '',
           'INSTRUCTIONS:',
-          'This is the FINAL round. You MUST now provide your complete summary to the user.',
+          waitingForConfirmation
+            ? 'A server-enforced confirmation is waiting. Tell the user to review and use the confirmation control shown in the conversation. Do not emit the action again.'
+            : 'This is the FINAL round. You MUST now provide your complete summary to the user.',
           'Do NOT include any ACTION commands.',
           'NEVER repeat your previous response. You already said it \u2014 the user already saw it.',
           'Your response here should ONLY be the concise receipt of actions taken.',

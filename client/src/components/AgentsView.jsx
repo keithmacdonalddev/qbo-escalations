@@ -64,6 +64,7 @@ import { useAgentRegistry } from '../context/AgentRegistryContext.jsx';
 import { useAgentTestModal } from './agent-tests/AgentTestModalProvider.jsx';
 import { isAgentTestSupported } from './agent-tests/agentTestHarnesses.js';
 import ConfirmModal from './ConfirmModal.jsx';
+import WorkspaceAgentOperationsTab from './WorkspaceAgentOperationsTab.jsx';
 // healthStatusToOperationalToken converts the registry's health.status tokens
 // (online/offline/disabled/unknown) into the legacy operational tokens
 // (active/degraded/disabled/idle) that drive the status-dot-* CSS classes
@@ -130,6 +131,11 @@ const TRIAGE_AGENT_PROFILE_TABS = [
   ...PROFILE_TABS.slice(0, 5),
   { id: 'triage-test-results', label: 'Test Results' },
   ...PROFILE_TABS.slice(5),
+];
+
+const WORKSPACE_AGENT_PROFILE_TABS = [
+  { id: 'operations', label: 'Operations' },
+  ...PROFILE_TABS,
 ];
 
 const emptyProfile = PROFILE_FIELDS.reduce((acc, field) => {
@@ -281,7 +287,9 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
   // messages from earlier saves don't pile up in the panel.
   const [runtimeRecheckResult, setRuntimeRecheckResult] = useState(null);
   const runtimeRecheckTimeoutRef = useRef(null);
-  const [activeProfileTab, setActiveProfileTab] = useState(profileTabFromRoute || 'overview');
+  const [activeProfileTab, setActiveProfileTab] = useState(
+    profileTabFromRoute || (agentIdFromRoute === 'workspace' ? 'operations' : 'overview')
+  );
   const [registryModalMode, setRegistryModalMode] = useState(null);
   const [registrySaving, setRegistrySaving] = useState(false);
   const [registryMessage, setRegistryMessage] = useState('');
@@ -569,7 +577,7 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
       clearTimeout(runtimeRecheckTimeoutRef.current);
       runtimeRecheckTimeoutRef.current = null;
     }
-    setActiveProfileTab(profileTabFromRoute || 'overview');
+    setActiveProfileTab(profileTabFromRoute || (selectedAgentId === 'workspace' ? 'operations' : 'overview'));
   }, [profileTabFromRoute, selectedAgentId]);
 
   useEffect(() => {
@@ -2125,6 +2133,7 @@ function AgentProfileDetailPage({
             tabs={(() => {
               if (selectedAgent.agentId === 'escalation-template-parser') return IMAGE_PARSER_PROFILE_TABS;
               if (selectedAgent.agentId === 'triage-agent') return TRIAGE_AGENT_PROFILE_TABS;
+              if (selectedAgent.agentId === 'workspace') return WORKSPACE_AGENT_PROFILE_TABS;
               return PROFILE_TABS;
             })()}
             activeTab={activeProfileTab}
@@ -2298,6 +2307,10 @@ function AgentProfileTabs({ tabs, activeTab, onChange }) {
 
 function AgentProfileWorkspace(props) {
   const { activeTab } = props;
+
+  if (activeTab === 'operations') {
+    return <WorkspaceAgentOperationsTab agent={props.agent} onRunAgentTest={props.onRunAgentTest} />;
+  }
 
   if (activeTab === 'configuration') {
     return <AgentConfigurationTab {...props} />;
@@ -6341,22 +6354,25 @@ function buildHarnessCases(agent, status, promptReady, toolCount, latestHarnessR
       id: 'contract-shape',
       name: `${base} contract shape`,
       expected: promptReady ? 'Prompt loads and exposes reviewable sections.' : 'Runtime-only contract remains explicit.',
-      status: promptReady || agent?.agentId?.includes('parser') ? 'pass' : 'warn',
-      lastRun: '2m ago',
+      actual: 'No persisted harness case has run yet.',
+      status: 'warn',
+      lastRun: 'Not run',
     },
     {
       id: 'tool-safety',
       name: 'Tool safety gate',
       expected: toolCount ? 'Tool use is auditable with confirmation guidance.' : 'No tool calls are attempted.',
-      status: toolCount ? 'pass' : 'warn',
-      lastRun: '5m ago',
+      actual: 'No persisted harness case has run yet.',
+      status: 'warn',
+      lastRun: 'Not run',
     },
     {
       id: 'status-regression',
       name: 'Operational status regression',
       expected: status === 'active' ? 'Agent is available for workflow assignment.' : 'Agent is flagged before workflow use.',
-      status: status === 'active' ? 'pass' : 'warn',
-      lastRun: '12m ago',
+      actual: 'No persisted harness case has run yet.',
+      status: 'warn',
+      lastRun: 'Not run',
     },
   ];
 }

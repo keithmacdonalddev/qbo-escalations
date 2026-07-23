@@ -2,9 +2,9 @@
   "slice": "workspace-assistant",
   "checks": [
     {
-      "label": "Workspace runner now reports four scenarios",
+      "label": "Workspace runner reports session, validation, policy, replay, and provider-failure scenarios",
       "path": "fixtures",
-      "lengthMin": 4
+      "lengthMin": 5
     },
     {
       "label": "Workspace session finishes",
@@ -32,18 +32,28 @@
       "equals": "MISSING_PROMPT"
     },
     {
+      "label": "Workspace permission harness passes without external actions",
+      "path": "fixtures[2].assertions.harnessStatus",
+      "equals": "pass"
+    },
+    {
+      "label": "Workspace permission harness executes no external action",
+      "path": "fixtures[2].assertions.externalActionsExecuted",
+      "equals": false
+    },
+    {
       "label": "Replay omits the created event when since=1",
-      "path": "fixtures[2].assertions.replayOmittedCreated",
+      "path": "fixtures[3].assertions.replayOmittedCreated",
       "equals": true
     },
     {
       "label": "Invalid provider session ends in error",
-      "path": "fixtures[3].assertions.finalStatus",
+      "path": "fixtures[4].assertions.finalStatus",
       "equals": "error"
     },
     {
       "label": "Invalid provider replay surfaces INVALID_PROVIDER",
-      "path": "fixtures[3].assertions.errorCode",
+      "path": "fixtures[4].assertions.errorCode",
       "equals": "INVALID_PROVIDER"
     }
   ]

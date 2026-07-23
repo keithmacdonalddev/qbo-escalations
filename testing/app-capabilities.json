@@ -122,6 +122,7 @@
           "server/test/usage-routes.test.js",
           "server/test/usage-writer-integration.test.js",
           "server/test/usage-writer.test.js",
+          "server/test/workspace-agent-policy.test.js",
           "server/test/work-center-events.test.js",
           "server/test/work-center-websocket.test.js"
         ]
@@ -375,6 +376,37 @@
         { "type": "server", "groupId": "server-suite", "paths": ["server/test/app-auth.test.js", "server/test/ticket-snitch-client.test.js", "server/test/ticket-snitch-screenshot.test.js", "server/test/ticket-snitch-user-reporting.test.js", "server/test/rate-limit.test.js"] }
       ],
       "knownGaps": ["The sibling Ticket Snitch repository owns isolated real-HTTP QBO-sign-in-to-case and Chromium production-build acceptance checks; QBO Escalations' app-check profiles do not invoke those cross-repository checks. The original local intake/screenshot runtime was verified on 2026-07-23. Customer receipts and accountability remain runtime-pending until the approved Ticket Snitch index preparation, service restart, and authenticated receipt/reply/validation proof are completed for that environment."],
+      "lastHumanReviewDate": "2026-07-23"
+    },
+    {
+      "id": "workspace-primary-operations-agent",
+      "label": "Workspace Agent email and calendar operations",
+      "userOutcome": "The primary Workspace Agent proactively monitors and organizes email and calendar work, pauses consequential actions for exact user confirmation, honors its enabled state everywhere, and exposes durable evidence in a complete profile.",
+      "risk": "critical",
+      "owner": "Workspace Agent",
+      "sourcePaths": [
+        "server/src/services/workspace-action-policy.js",
+        "server/src/services/workspace-request-helpers.js",
+        "server/src/services/workspace-monitor.js",
+        "server/src/services/workspace-scheduler.js",
+        "server/src/routes/workspace/profile.js",
+        "server/src/models/WorkspaceActionApproval.js",
+        "server/src/models/WorkspaceActionRecord.js",
+        "client/src/components/WorkspaceAgentOperationsTab.jsx",
+        "client/src/components/workspace/WorkspaceConversationThread.jsx",
+        "prompts/agents/workspace-action.md"
+      ],
+      "requiredCheckTypes": ["component", "server", "stress", "browser"],
+      "evidence": [
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/WorkspaceAgentOperationsTab.test.jsx"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/workspace-agent-policy.test.js"] },
+        { "type": "stress", "groupId": "all-stress-slices", "paths": ["stress-testing/slices/workspace-assistant/harness/run.js"] }
+      ],
+      "knownGaps": [
+        "The deterministic permission harness intentionally performs no external Gmail or Calendar mutation.",
+        "A trusted real-browser run still needs to prove a confirmation preview, exact user approval, external execution receipt, and durable profile evidence against a controlled connected-service account.",
+        "Background-monitor and daily-briefing timing still need clock-controlled stress fixtures."
+      ],
       "lastHumanReviewDate": "2026-07-23"
     },
     {

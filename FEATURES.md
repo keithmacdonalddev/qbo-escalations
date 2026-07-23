@@ -227,7 +227,7 @@ Time: 23:56 AST
 Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: high
-Special Feature: Agent Action Permissions - **Deferred pending the Workspace keep/remove decision; do not implement against the current inactive Workspace.** If a first-principles Workspace redesign introduces real write actions, the app should show and enforce exactly what an agent may change, which account or items it may touch, how long permission lasts, and whether it must ask first. Every attempted action would then be recorded as allowed, blocked, or waiting for confirmation.
+Special Feature: Agent Action Permissions - **Implemented for the retained primary Workspace Agent on 2026-07-23.** The server now classifies every model-requested action as allowed, blocked, or confirmation-required; exact confirmations are bound to the tool, parameters, account context, and short expiry; safe email organization, drafts, and private calendar holds can run proactively; consequential email/calendar/rule/delete actions pause; and durable evidence is visible from the Workspace-specific agent profile. Remaining acceptance work is a controlled connected-account browser run proving preview through execution receipt.
 
 Date: 2026-07-09
 Time: Unknown AST
@@ -340,3 +340,10 @@ Model: Codex GPT-5.6 Sol (high)
 Is duplicate?: no
 Complexity: medium
 Special Feature: Attention-Aware Live Update Inbox - Route realtime changes according to what the operator is currently viewing: update the active case quietly in place, group useful background changes into one reviewable inbox, and interrupt only when a failure or decision genuinely needs attention. Each grouped item would retain its case link, reason, and read state across tabs, turning WebSocket volume into a calm priority system rather than a stream of transient toast messages.
+
+Date: 2026-07-23
+Time: 07:52 ADT
+Model: Codex GPT-5
+Is duplicate?: no
+Complexity: high
+Special Feature: Agent Profile Authority Seal - Give every high-autonomy agent a signed, versioned operational contract that binds its enabled state, effective model, tool catalog, action permissions, memory sources, background jobs, and harness version. Refuse live runs and show a profile-drift warning when deployed code or configuration no longer matches the reviewed seal. This is distinct from Agent Action Permissions because it detects cross-layer drift between the profile UI, prompt, runtime, and server enforcement.

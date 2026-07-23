@@ -143,6 +143,7 @@ async function runWorkspaceRequest({
       workspaceRole,
       workspaceChatOnlyRole,
       useActionFlow,
+      surface: 'workspace-panel',
       connectedAccountsPromise,
       runtime,
       isClientDisconnected: () => requestState.isClientDisconnected(),

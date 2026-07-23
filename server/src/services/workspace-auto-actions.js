@@ -326,6 +326,7 @@ async function executeSilentActions(messages) {
   for (const msg of messages) {
     for (const rule of allRules) {
       if (rule.tier !== 'silent') continue;
+      if (rule._dbRule?.actionType === 'trash') continue;
       try {
         if (rule.condition(msg)) {
           const result = await rule.action(msg);
@@ -508,6 +509,7 @@ async function executeNotifyActions(messages) {
   for (const msg of messages) {
     for (const rule of allRules) {
       if (rule.tier !== 'notify') continue;
+      if (rule._dbRule?.actionType === 'trash') continue;
       try {
         if (rule.condition(msg)) {
           const result = await rule.action(msg);

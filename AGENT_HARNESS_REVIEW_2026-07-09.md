@@ -6,12 +6,28 @@
 **Scope:** Claude Code and Codex instructions, settings, hooks, skills, custom agents, memory, research documents, runtime provider harnesses, product-agent prompts, model policy, evidence capture, and action safety
 **Purpose:** Provide a reusable review framework for this project and other agentic projects
 
+## Workspace implementation closure — 2026-07-23
+
+The user retained Workspace and designated the Workspace Agent as the application's primary operations agent. That product decision activated the conditional recommendations in this review.
+
+Current implementation now provides:
+
+- a dedicated Workspace operations profile showing proactive controls, Google connections, background services, permission tiers, readiness, real counts, and durable action evidence;
+- a server-enforced action policy used by the direct action loop, room adapter, background monitor, and daily briefing lifecycle;
+- automatic safe work for scoped reads, reversible email organization, drafts, memory saves, and private calendar holds;
+- exact, short-lived, single-use confirmation records for sending or trashing email, lasting Gmail rules, calendar invitations/changes/deletes, large batches, and other consequential writes;
+- durable 90-day action records and a visible inline confirmation receipt instead of relying on the restart-sensitive in-memory action log;
+- a compact role and decision contract with tool descriptions supplied from canonical server metadata; and
+- a deterministic Workspace permission harness that performs no external Gmail or Calendar mutations and persists its results on the agent profile.
+
+The remaining acceptance gate is a controlled connected-account browser run that proves one confirmation from preview through external execution, verification, UI receipt, and durable profile evidence. Background timing also still needs clock-controlled stress fixtures.
+
 ## Plain-English guide to the key findings
 
 This section translates the review's shorthand. The detailed evidence and recommendations remain below it.
 
 1. **P0, P1, and P2 are priority labels, not model names.** `P0` means an urgent safety or trust problem. `P1` means an important reliability problem. `P2` means useful cleanup or maintenance. The number says how soon to address the finding; it does not assign blame.
-2. **Workspace action permissions are conditional future work, not a current build priority.** Workspace is inactive, has no connected Google account, and is being reconsidered. If Workspace is removed, delete the action surface. If it is rebuilt, design permissions from first principles when real write actions are introduced.
+2. **Workspace action permissions are implemented because Workspace was retained.** The server, not the model prompt, now decides whether each action is allowed, blocked, or waiting for exact confirmation. A controlled connected-account browser acceptance run remains open.
 3. **`bypassPermissions` means “do not pause to ask before using tools.”** The user confirmed on 2026-07-10 that this is intentional for the current local-development workflow. It remains a known, accepted risk—not an accidental misconfiguration—and this review no longer recommends changing it now.
 4. **“Runtime” means what happens while software is running.** A coding-agent environment is Claude Code or Codex working on the repository. An in-app agent environment is the AI inside this application helping with QBO, email, or calendar. Keeping those environments more separate is a future hardening idea, not a current priority.
 5. **The repeated PM rules are the text printed by `.claude/hooks/pm-rules.sh` and `.codex/hooks/pm-rules.ps1` after every user prompt.** They cover product framing, delegation, verification, service control, tests, commit/push, feature ideas, and communication. The user reports that this repetition fixed serious non-compliance, so the hooks should stay. Cleanup should remove contradictions and stale wording without weakening the repeated enforcement.
@@ -20,13 +36,13 @@ This section translates the review's shorthand. The detailed evidence and recomm
 8. **Use the newest appropriate model release and let the deterministic harness expose regressions.** Do not retain Kimi K2.5 as a selectable fallback. Kimi K3 is the current general-purpose line, and K2.7 Code and K2.7 Code Highspeed are the current coding-focused line. Historical K2.6 and K2.5 test records remain evidence, not current model choices.
 9. **Claude Code and Codex are current, and the app's Claude Agent SDK has now been upgraded.** Fresh checks on 2026-07-10 found Claude Code `2.1.206`, Codex `0.144.1`, and Claude Agent SDK `0.3.206`, matching their published package versions at the time of the check.
 10. **The deterministic escalation-image harness—not a schema—is the quality authority.** The app saves provider/model/prompt identity, real-image results, operator grades, exact approved baselines, pass rates, latency, and provider evidence. A schema can only reject a wrongly shaped response; it cannot prove transcription accuracy. Add or change schemas only for a demonstrated formatting failure, and treat that change as another harness change that must preserve the required accuracy and speed.
-11. **“Agent Action Permissions” is deferred with Workspace.** Do not build it for the inactive current implementation. It becomes relevant only if the Workspace redesign introduces real write actions such as sending email or changing calendar records.
+11. **“Agent Action Permissions” now governs the Workspace Agent.** Its profile exposes the proactive controls and permission tiers, sensitive actions use exact expiring approvals, and deterministic cases are saved as harness evidence.
 
 ## Executive judgment
 
 This repository has a stronger agent foundation than most hobby projects. It has explicit product framing, concurrent-work protections, path-scoped Claude rules, custom agents and skills, provider evidence capture, redaction code, prompt versioning, and focused harness tests.
 
-The main problem is not a lack of agent machinery. It is keeping overlapping control layers consistent as the project evolves. The PM-hook repetition and broad local Claude permissions are intentional current choices; stale memory has been corrected. Workspace action authority remains a conditional design concern only if that inactive feature survives its upcoming keep/remove review.
+The main problem is not a lack of agent machinery. It is keeping overlapping control layers consistent as the project evolves. The PM-hook repetition and broad local Claude permissions are intentional current choices; stale memory has been corrected. Workspace action authority is now a concrete server-enforced contract because the feature survived its keep/remove review and became the primary operations surface.
 
 The most important conclusion is:
 
@@ -144,9 +160,9 @@ The provider-call package layer records source, call site, requested/effective m
 
 Severity means implementation priority, not blame. `P0` is a safety or trust boundary that should be addressed before increasing autonomy. `P1` materially affects reliability or maintainability. `P2` is important hardening.
 
-### Deferred conditional finding: Workspace action authorization is prompt-led
+### Closed 2026-07-23: Workspace action authorization was prompt-led
 
-**Decision update, 2026-07-11:** Do not invest in Agent Action Permissions against the current Workspace implementation. Workspace is inactive, has no connected Google account, and may be removed or rebuilt from first principles.
+**Decision update, 2026-07-23:** Workspace was retained and promoted to the primary operations agent, so the conditional work below was implemented. The original evidence is preserved here to explain why the control exists.
 
 Evidence:
 
@@ -159,14 +175,13 @@ Why it matters:
 
 The model is being asked to interpret ambiguous human language and also decide how much authority that language grants. Prompt injection, mistaken scope, broad searches, or an over-eager newer model can turn a minor preference into bulk external changes.
 
-Recommendation if Workspace is retained and rebuilt:
+Implemented controls:
 
-1. Begin the new design read-only and introduce a server-side action-policy service only when real write actions are added.
-2. Classify actions by consequence, reversibility, scope, and audience.
-3. Require an explicit preview and confirmation token for destructive, bulk, external-message, permanent-rule, and calendar-delete actions.
-4. Allow pre-approved low-risk actions only through stored, inspectable policy records—not through a prompt saying “act immediately.”
-5. Bind approval to the exact action, target set, account, and expiry so it cannot be replayed for broader scope.
-6. Preserve the existing post-action verification, but treat it as proof of execution, not authorization.
+1. `workspace-action-policy.js` classifies actions by consequence, reversibility, scope, audience, account, enabled state, and saved proactive settings.
+2. Consequential actions create an explicit preview and exact confirmation record with a ten-minute expiry and single-use claim.
+3. Low-risk automatic work is defined by the saved server policy and surfaced on the profile, not granted by prompt wording.
+4. Approval is hashed against the exact tool and parameters; a modified or replayed action returns to confirmation-required.
+5. Post-action verification remains separate evidence of execution, while durable action records show the earlier authorization decision.
 
 Suggested tiers:
 
@@ -339,11 +354,11 @@ Ongoing recommendation:
 - Keep focused contract tests around the SDK image-parser path when upgrading.
 - Verify every documented hook field against the minimum supported CLI version.
 
-### Deferred with Workspace P1-6: The current Workspace prompt is too large and too negative
+### Closed 2026-07-23: The Workspace prompt was too large and too negative
 
-Do not refactor this prompt while Workspace may be removed. Use this finding only as an input if a first-principles replacement is approved.
+Workspace was retained, so the prompt was replaced with a compact role/decision contract. Canonical tool descriptions are now appended from server metadata, and safety authority lives in server policy rather than prompt repetition.
 
-`workspace-action.md` contains about 41 all-caps steering words and roughly 58 negative “do not/never” rules. It repeats tool descriptions, authorization behavior, memory policy, operational examples, and safety guidance. The active prompt is about 33 KB.
+Before the closure, `workspace-action.md` contained about 41 all-caps steering words and roughly 58 negative “do not/never” rules. It repeated tool descriptions, authorization behavior, memory policy, operational examples, and safety guidance, and was about 33 KB. The replacement is a small positive contract; its tool catalog is supplied dynamically from canonical metadata.
 
 Newer models generally need fewer behavioral reminders, not more. Large negative prompts can make literal compliance brittle, encourage extra exploration, and bury the true contract.
 

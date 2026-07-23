@@ -15,6 +15,12 @@ const {
   trackWorkspaceExecutionState,
 } = require('./workspace-tools/execution-state');
 const { WORKSPACE_TOOL_HANDLERS: TOOL_HANDLERS } = require('./workspace-tools/handler-registry');
+const {
+  createWorkspaceApproval,
+  evaluateWorkspaceAction,
+  getWorkspaceAuthority,
+  recordWorkspaceAction,
+} = require('./workspace-action-policy');
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -205,6 +211,12 @@ function createWorkspaceAbortError(message = 'Workspace action loop aborted') {
 async function executeWorkspaceActions(actions, executionState, opts = {}) {
   const ordered = orderWorkspaceActionsByDependency(actions);
   const results = [];
+  const authority = opts.authority || await getWorkspaceAuthority();
+  const evidenceContext = {
+    source: opts.source || 'workspace-agent',
+    surface: opts.surface || 'workspace-panel',
+    sessionId: opts.sessionId || '',
+  };
   const shouldAbort = typeof opts.shouldAbort === 'function' ? opts.shouldAbort : () => false;
   const abortMessage = typeof opts.abortMessage === 'string' && opts.abortMessage.trim()
     ? opts.abortMessage
@@ -223,7 +235,71 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         status: 'error',
         durationMs: 0,
       });
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: action.tool,
+        params: action.params,
+        policyDecision: 'blocked',
+        status: 'blocked',
+        error: `Unknown tool: ${action.tool}`,
+      });
       results.push({ tool: action.tool, error: `Unknown tool: ${action.tool}` });
+      continue;
+    }
+
+    const policyResult = evaluateWorkspaceAction(action, authority, {
+      approvedHash: opts.approvedHash || '',
+    });
+    if (policyResult.decision === 'blocked') {
+      actionLog.logAction({
+        action: action.tool,
+        params: action.params,
+        result: policyResult.reason,
+        status: 'blocked',
+        durationMs: 0,
+      });
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: action.tool,
+        params: action.params,
+        policyDecision: 'blocked',
+        status: 'blocked',
+        error: policyResult.reason,
+      });
+      results.push({
+        tool: action.tool,
+        error: policyResult.reason,
+        blocked: true,
+        status: 'blocked',
+        policyDecision: 'blocked',
+      });
+      continue;
+    }
+    if (policyResult.decision === 'confirmation-required') {
+      const approval = await createWorkspaceApproval(action, evidenceContext);
+      actionLog.logAction({
+        action: action.tool,
+        params: action.params,
+        result: approval.preview,
+        status: 'confirmation-required',
+        durationMs: 0,
+      });
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: action.tool,
+        params: action.params,
+        approvalId: approval.id,
+        policyDecision: 'confirmation-required',
+        status: 'pending',
+        resultSummary: approval.preview,
+      });
+      results.push({
+        tool: action.tool,
+        confirmationRequired: true,
+        status: 'pending',
+        policyDecision: 'confirmation-required',
+        approval,
+      });
       continue;
     }
 
@@ -239,6 +315,14 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         status: 'error',
         durationMs: 0,
       });
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: action.tool,
+        params: action.params,
+        policyDecision: 'allowed',
+        status: 'error',
+        error: errMsg,
+      });
       results.push({ tool: action.tool, error: errMsg, preparationFailed: true });
       continue;
     }
@@ -253,6 +337,14 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         result: failFastMsg,
         status: 'error',
         durationMs: 0,
+      });
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: preparedAction.tool,
+        params: preparedAction.params,
+        policyDecision: 'allowed',
+        status: 'error',
+        error: failFastMsg,
       });
       results.push({ tool: preparedAction.tool, error: failFastMsg, failFast: true });
       continue;
@@ -306,6 +398,21 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         ...(verified !== undefined ? { verified, warnings } : {}),
       });
 
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: preparedAction.tool,
+        params: preparedAction.params,
+        approvalId: opts.approvalId || '',
+        policyDecision: 'allowed',
+        status: 'ok',
+        resultSummary: result && typeof result === 'object'
+          ? Object.keys(result).slice(0, 8).join(', ')
+          : String(result || 'Completed'),
+        verified,
+        warnings,
+        durationMs: Date.now() - startMs,
+      });
+
       trackWorkspaceExecutionState(executionState, preparedAction, result);
 
       const entry = { tool: preparedAction.tool, result };
@@ -330,6 +437,16 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         params: preparedAction.params,
         result: errMsg,
         status: 'error',
+        durationMs: Date.now() - startMs,
+      });
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: preparedAction.tool,
+        params: preparedAction.params,
+        approvalId: opts.approvalId || '',
+        policyDecision: 'allowed',
+        status: 'error',
+        error: errMsg,
         durationMs: Date.now() - startMs,
       });
       results.push({ tool: preparedAction.tool, error: errMsg });

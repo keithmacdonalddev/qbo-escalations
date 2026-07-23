@@ -106,6 +106,19 @@ const runtimeSettingsSchema = new mongoose.Schema({
   updatedAt: { type: Date, default: null },
 }, { _id: false });
 
+const workspacePolicySchema = new mongoose.Schema({
+  proactiveEnabled: { type: Boolean, default: true },
+  emailMonitoring: { type: Boolean, default: true },
+  calendarMonitoring: { type: Boolean, default: true },
+  emailOrganization: { type: Boolean, default: true },
+  draftReplies: { type: Boolean, default: true },
+  personalCalendarHolds: { type: Boolean, default: true },
+  maxAutomaticBatchSize: { type: Number, default: 25, min: 1, max: 100 },
+  allowedAccounts: { type: [String], default: [] },
+  updatedBy: { type: String, default: '' },
+  updatedAt: { type: Date, default: null },
+}, { _id: false });
+
 const agentIdentitySchema = new mongoose.Schema({
   agentId: { type: String, required: true, unique: true },
   enabled: { type: Boolean, default: true },
@@ -153,6 +166,7 @@ const agentIdentitySchema = new mongoose.Schema({
     lastRunAt: { type: Date, default: null },
   },
   runtime: { type: runtimeSettingsSchema, default: () => ({}) },
+  workspacePolicy: { type: workspacePolicySchema, default: () => ({}) },
   custom: {
     isCustom: { type: Boolean, default: false },
     source: { type: String, default: '' },

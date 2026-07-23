@@ -153,6 +153,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
     handleAlertAction,
     handleBriefingCardAction,
     handleFeedback,
+    handleConfirmAction,
   } = useWorkspaceAgentPanelActions({
     sessionKey,
     patchSession,
@@ -379,6 +380,7 @@ export default function WorkspaceAgentPanel({ open, onToggle, viewContext, embed
           feedbackMap={feedbackMap}
           onFeedback={handleFeedback}
           onSuggestedAction={handleQuickAction}
+          onConfirmAction={handleConfirmAction}
           renderText={renderMarkdown}
           messagesEndRef={messagesEndRef}
         />

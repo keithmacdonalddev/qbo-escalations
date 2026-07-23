@@ -6,6 +6,7 @@ import useProviderKeyStatus from './useProviderKeyStatus.js';
 import { buildAlertActionPrompt } from '../lib/workspaceAlertBriefing.js';
 import {
   dispatchGmailMutations,
+  gmailMutationsFromWorkspaceResults,
 } from '../lib/gmailUiEvents.js';
 
 function getAssistantStreamMessage(prev) {
@@ -352,18 +353,27 @@ export default function useWorkspaceAgentPanelActions({
         if (!messageId) {
           throw new Error('This email action is missing its message id.');
         }
-        const query = typeof action?.account === 'string' && action.account.trim()
-          ? `?account=${encodeURIComponent(action.account.trim())}`
-          : '';
-        const data = await apiFetchJson(`/api/gmail/messages/${encodeURIComponent(messageId)}${query}`, {
-          method: 'DELETE',
+        const params = {
+          messageId,
+          ...(typeof action?.account === 'string' && action.account.trim() ? { account: action.account.trim() } : {}),
+        };
+        const prepared = await apiFetchJson('/api/workspace/action-approvals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tool: 'gmail.trash', params, surface: 'workspace-briefing' }),
+        }, 'Could not prepare email confirmation');
+        if (!window.confirm(`Confirm Workspace Agent action?\n\n${prepared.approval.preview}\n\nThis approval applies only to this exact email.`)) return;
+        const data = await apiFetchJson(`/api/workspace/action-approvals/${encodeURIComponent(prepared.approval.id)}/execute`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
         }, 'Email action failed');
         dispatchGmailMutations({
           messageId,
-          account: typeof action?.account === 'string' && action.account.trim() ? action.account.trim() : '',
+          account: params.account || '',
           deleted: true,
         }, { source: 'workspace-briefing-card' });
-        toast.success('Email moved to trash.');
+        if (!data?.action?.error) toast.success('Email moved to trash.');
         return;
       }
 
@@ -397,6 +407,52 @@ export default function useWorkspaceAgentPanelActions({
       }),
     }).catch(() => { /* best effort */ });
   }, [feedbackMap, messages, sessionKey]);
+
+  const handleConfirmAction = useCallback(async (messageIndex, actionIndex, action) => {
+    const approvalId = action?.approval?.id;
+    const preview = action?.approval?.preview || `Run ${action?.tool || 'this action'}`;
+    if (!approvalId) return;
+    if (!window.confirm(`Confirm Workspace Agent action?\n\n${preview}\n\nThis approval applies only to this exact action and expires shortly.`)) return;
+
+    const patchAction = (updates) => {
+      patchSession((previous) => ({
+        ...previous,
+        messages: previous.messages.map((message, index) => {
+          if (index !== messageIndex) return message;
+          return {
+            ...message,
+            actions: (message.actions || []).map((item, itemIndex) => (
+              itemIndex === actionIndex ? { ...item, ...updates } : item
+            )),
+          };
+        }),
+      }));
+    };
+
+    patchAction({ confirmationExecuting: true, confirmationError: '' });
+    try {
+      const data = await apiFetchJson(`/api/workspace/action-approvals/${encodeURIComponent(approvalId)}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }, 'Workspace action confirmation failed');
+      const completedAction = data?.action || { tool: action.tool, error: 'No action result returned.' };
+      patchAction({
+        ...completedAction,
+        confirmationRequired: false,
+        confirmationExecuting: false,
+        confirmationCompleted: !completedAction.error,
+        confirmationError: completedAction.error || '',
+      });
+      const mutations = gmailMutationsFromWorkspaceResults([completedAction]);
+      if (mutations.length > 0) dispatchGmailMutations(mutations, { source: 'workspace-confirmed-action' });
+      if (completedAction.error) toast.error(completedAction.error);
+      else toast.success(`${action.tool} completed.`);
+    } catch (err) {
+      patchAction({ confirmationExecuting: false, confirmationError: err.message || 'Confirmation failed.' });
+      toast.error(err.message || 'Workspace action confirmation failed.');
+    }
+  }, [patchSession, toast]);
 
   const quickActions = useMemo(() => {
     const currentView = viewContext?.view;
@@ -461,6 +517,7 @@ export default function useWorkspaceAgentPanelActions({
     handleAlertAction,
     handleBriefingCardAction,
     handleFeedback,
+    handleConfirmAction,
     addSystemMessage,
     handleSlashCommand,
   };

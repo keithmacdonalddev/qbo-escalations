@@ -17,6 +17,7 @@ const workspaceFeedbackRouter = require('./feedback');
 const workspaceMemoryRouter = require('./memory');
 const workspaceMonitorRouter = require('./monitor');
 const workspacePatternsRouter = require('./patterns');
+const workspaceProfileRouter = require('./profile');
 const workspaceShipmentsRouter = require('./shipments');
 
 const router = express.Router();
@@ -33,6 +34,7 @@ router.use(workspaceFeedbackRouter);
 router.use(workspaceMemoryRouter);
 router.use(workspaceMonitorRouter);
 router.use(workspacePatternsRouter);
+router.use(workspaceProfileRouter);
 router.use(workspaceShipmentsRouter);
 
 router.get('/status', (req, res) => {

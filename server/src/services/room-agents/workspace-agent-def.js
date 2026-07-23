@@ -12,6 +12,8 @@ const { runWorkspaceActionLoop } = require('../workspace-action-loop');
 const { normalizeRoomActionGroups } = require('../room-action-groups');
 const { buildRoomImageContextSection } = require('./image-context-section');
 const runtime = require('../workspace-runtime');
+const { getWorkspaceAuthority } = require('../workspace-action-policy');
+const { WORKSPACE_AVAILABLE_TOOL_LINES } = require('../workspace-tools/metadata');
 
 // ---------------------------------------------------------------------------
 // Context-building timeouts — match workspace/ai.js values
@@ -41,7 +43,10 @@ function withTimeout(promise, ms, fallback = null) {
  * and benefits from any admin edits to the stored prompt.
  */
 function getWorkspaceRolePrompt() {
-  return getRenderedAgentPrompt('workspace-action');
+  return [
+    getRenderedAgentPrompt('workspace-action'),
+    WORKSPACE_AVAILABLE_TOOL_LINES.join('\n'),
+  ].filter(Boolean).join('\n\n');
 }
 
 module.exports = {
@@ -150,6 +155,15 @@ module.exports = {
     const { systemPrompt, messagesForModel } = context;
     const actionGroups = [];
 
+    const workspaceAuthority = await getWorkspaceAuthority();
+    if (!workspaceAuthority.enabled) {
+      callbacks.onError?.({
+        code: 'WORKSPACE_AGENT_DISABLED',
+        error: 'The Workspace Agent is disabled. Enable it from the Agents profile before using it in a room.',
+      });
+      return;
+    }
+
     // --- Chat lock: prevent concurrent workspace requests ---------------
     if (runtime.isChatAgentActive()) {
       callbacks.onError?.({
@@ -212,6 +226,7 @@ module.exports = {
           workspaceRole: systemPrompt,
           workspaceChatOnlyRole: systemPrompt,
           useActionFlow: true,
+          surface: 'rooms',
           connectedAccountsPromise,
           runtime: {
             updateWorkspaceSession: runtime.updateWorkspaceSession,

@@ -8,7 +8,7 @@
       "cwd": ".",
       "timeoutMs": 120000,
       "why": "Protects visible client behavior without live services.",
-      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "qbo-orchestration", "conversation-persistence", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting", "provider-controls", "request-diagnostics"]
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "qbo-orchestration", "conversation-persistence", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting", "workspace-primary-operations-agent", "provider-controls", "request-diagnostics"]
     },
     "server-suite": {
       "label": "Server behavior tests",
@@ -18,7 +18,7 @@
       "cwd": ".",
       "timeoutMs": 1800000,
       "why": "Checks persistence, permissions, evidence, and route contracts.",
-      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting"]
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting", "workspace-primary-operations-agent"]
     },
     "stress-harness-tests": {
       "label": "Stress harness infrastructure tests",
@@ -77,7 +77,7 @@
       "timeoutMs": 3600000,
       "why": "Runs every registered isolated slice, including real-browser canaries.",
       "requirements": ["agent-browser"],
-      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle"]
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle", "workspace-primary-operations-agent"]
     },
     "testing-map": {
       "label": "Testing capability map validation",

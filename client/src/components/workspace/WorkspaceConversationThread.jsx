@@ -20,6 +20,7 @@ export default function WorkspaceConversationThread({
   feedbackMap,
   onFeedback,
   onSuggestedAction,
+  onConfirmAction,
   renderText,
   messagesEndRef,
 }) {
@@ -74,10 +75,25 @@ export default function WorkspaceConversationThread({
               )}
               {msg.actions && msg.actions.length > 0 && (
                 <div className="workspace-agent-action-chips">
-                  {msg.actions.map((a, j) => (
-                    <span key={j} className={`workspace-agent-action-chip ${a.error ? 'is-error' : 'is-success'}`}>
+                  {msg.actions.map((a, j) => a.confirmationRequired ? (
+                    <div key={j} className="workspace-agent-action-confirmation">
+                      <span>
+                        <strong>{a.approval?.preview || a.tool}</strong>
+                        <small>Waiting for your exact confirmation. Nothing has run yet.</small>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onConfirmAction?.(i, j, a)}
+                        disabled={streaming || a.confirmationExecuting}
+                      >
+                        {a.confirmationExecuting ? 'Confirming…' : 'Review and confirm'}
+                      </button>
+                      {a.confirmationError && <em>{a.confirmationError}</em>}
+                    </div>
+                  ) : (
+                    <span key={j} className={`workspace-agent-action-chip ${a.error || a.confirmationError ? 'is-error' : 'is-success'}`}>
                       {a.tool}
-                      {a.error ? ' (failed)' : ' (done)'}
+                      {a.error || a.confirmationError ? ' (failed)' : ' (done)'}
                     </span>
                   ))}
                 </div>

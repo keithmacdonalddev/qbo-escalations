@@ -24,7 +24,7 @@ const gmail = require('./gmail');
  *
  * @returns {Promise<Array<{type: string, severity: string, title: string, detail: string, sourceId: string, detectedAt: string}>>}
  */
-async function detectAlerts() {
+async function detectAlerts(options = {}) {
   const alerts = [];
   const now = new Date();
 
@@ -34,7 +34,7 @@ async function detectAlerts() {
   const time48h = new Date(now.getTime() + 48 * 60 * 60 * 1000).toISOString();
 
   const [eventsRes, importantRes] = await Promise.all([
-    calendar.listEvents({
+    options.calendar === false ? Promise.resolve(null) : calendar.listEvents({
       calendarId: 'primary',
       timeMin,
       timeMax: time48h,
@@ -43,7 +43,7 @@ async function detectAlerts() {
       console.warn('[workspace-alerts] calendar.listEvents failed:', err.message);
       return null;
     }),
-    gmail.listMessages({
+    options.email === false ? Promise.resolve(null) : gmail.listMessages({
       q: 'is:starred is:unread',
       maxResults: 20,
     }).catch(err => {

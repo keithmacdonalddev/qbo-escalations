@@ -313,6 +313,38 @@ export default function useWorkspaceAgentRuntime({ viewContext, sendBackground, 
     supportsThinking: true,
     lastThinkingAt: 0,
   });
+  const profileRuntimeHydratedRef = useRef(false);
+
+  useEffect(() => {
+    if (profileRuntimeHydratedRef.current) return;
+    profileRuntimeHydratedRef.current = true;
+    apiFetchJson('/api/agent-identities/workspace', {}, 'Failed to load Workspace Agent runtime')
+      .then((data) => {
+        const runtime = data?.agent?.runtime;
+        if (!runtime?.configured || !runtime.provider) return;
+        const primary = resolveProviderSelection(runtime.provider, runtime.model);
+        const fallback = resolveProviderSelection(
+          runtime.fallbackProvider || getAlternateProvider(primary.provider),
+          runtime.fallbackModel
+        );
+        patchSession((previous) => ({
+          ...previous,
+          provider: primary.provider,
+          mode: runtime.mode === 'single' ? 'single' : 'fallback',
+          fallbackProvider: fallback.provider === primary.provider
+            ? getAlternateProvider(primary.provider)
+            : fallback.provider,
+          model: normalizeSurfaceModel(primary.model),
+          fallbackModel: normalizeSurfaceModel(fallback.model),
+          reasoningEffort: normalizeReasoningEffort(runtime.reasoningEffort || DEFAULT_REASONING_EFFORT),
+          currentProvider: primary.provider,
+          currentModel: normalizeSurfaceModel(primary.model) || null,
+        }));
+      })
+      .catch(() => {
+        // The panel remains usable with its local fallback when profile loading fails.
+      });
+  }, [patchSession]);
 
   const clearStallWatch = useCallback(() => {
     if (stallTimerRef.current) {

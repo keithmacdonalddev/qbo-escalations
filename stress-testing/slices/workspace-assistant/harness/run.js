@@ -91,6 +91,20 @@ async function runSlice(context = {}) {
     });
     assert.equal(missingPromptRes.data.code, 'MISSING_PROMPT');
 
+    const policyHarnessRes = await requestJson(harness.baseUrl, '/api/workspace/harness/run', {
+      method: 'POST',
+      json: {},
+    });
+    assert.equal(policyHarnessRes.data.ok, true);
+    assert.equal(policyHarnessRes.data.run.status, 'pass');
+    assert.equal(policyHarnessRes.data.run.metadata.externalActionsExecuted, false);
+    assert.ok(policyHarnessRes.data.run.cases.length >= 10, 'expected the Workspace permission matrix to have deterministic cases');
+
+    const profileRes = await requestJson(harness.baseUrl, '/api/workspace/profile');
+    assert.equal(profileRes.data.ok, true);
+    assert.equal(profileRes.data.profile.importance, 'primary-operations-agent');
+    assert.ok(Array.isArray(profileRes.data.profile.permissions.confirmation));
+
     const replayRes = await requestSse(harness.baseUrl, `/api/agents/sessions/${sessionId}/stream`, {
       query: { since: 1 },
       timeoutMs: 30_000,
@@ -166,6 +180,18 @@ async function runSlice(context = {}) {
           assertions: {
             unsupportedAgentTypeCode: unsupportedTypeRes.data.code,
             missingPromptCode: missingPromptRes.data.code,
+          },
+        },
+        {
+          id: 'workspace-agent-policy-and-profile',
+          kind: 'policy',
+          description: 'Run the deterministic permission harness and verify the Workspace-specific operating profile without external Gmail or Calendar writes.',
+          ok: true,
+          assertions: {
+            harnessStatus: policyHarnessRes.data.run.status,
+            caseCount: policyHarnessRes.data.run.cases.length,
+            externalActionsExecuted: policyHarnessRes.data.run.metadata.externalActionsExecuted,
+            importance: profileRes.data.profile.importance,
           },
         },
         {

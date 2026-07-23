@@ -351,6 +351,35 @@ async function runKnowledgebaseAgentDraftTest({ signal, onStageEvent, request } 
   return data;
 }
 
+async function runWorkspacePolicyHarness({ signal, onStageEvent } = {}) {
+  if (signal?.aborted) {
+    throw new DOMException('Agent test was cancelled.', 'AbortError');
+  }
+  emitClientEvent(onStageEvent, 'workspace_policy.client_request_started', {
+    testRun: true,
+    status: 'sent',
+    surfaceToUser: true,
+    displayMessage: 'Workspace Agent permission harness started without external Gmail or Calendar actions',
+  });
+  const data = await apiFetchJson('/api/workspace/harness/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+    signal,
+  });
+  if (!data || data.ok === false) {
+    throw normalizeHarnessError(data || { message: 'Workspace Agent policy harness failed.' });
+  }
+  emitClientEvent(onStageEvent, 'workspace_policy.client_result_received', {
+    status: data.run?.status || '',
+    caseCount: data.run?.cases?.length || 0,
+    persisted: Boolean(data.persisted),
+    testRun: true,
+    displayMessage: 'Workspace Agent permission harness completed and saved to its profile',
+  });
+  return data;
+}
+
 async function recordKnowledgebaseAgentDraftTest(result, status) {
   return recordAgentHarnessRun('knowledgebase-agent', {
     status,
@@ -535,6 +564,25 @@ function knowledgebaseResultLayout(result) {
   return { meta, blocks, status: [{ tone: result?.ok ? 'pass' : 'fail', text: result?.ok ? 'Draft contract passed' : 'Draft contract failed' }] };
 }
 
+function workspacePolicyResultLayout(result) {
+  const run = result?.run || {};
+  const cases = Array.isArray(run.cases) ? run.cases : [];
+  return {
+    meta: [
+      { key: 'status', label: 'Status', value: cleanText(run.status), tone: run.status === 'pass' ? 'pass' : 'fail' },
+      { key: 'cases', label: 'Cases', value: String(cases.length) },
+      { key: 'persistence', label: 'Profile evidence', value: result?.persisted ? 'Saved' : 'Not saved', tone: result?.persisted ? 'pass' : 'warn' },
+      { key: 'external', label: 'External actions', value: run.metadata?.externalActionsExecuted ? 'Executed' : 'None', tone: run.metadata?.externalActionsExecuted ? 'warn' : 'pass' },
+    ],
+    blocks: cases.map((testCase) => ({
+      key: testCase.caseId,
+      label: `${testCase.status === 'pass' ? 'PASS' : 'FAIL'} — ${testCase.name}`,
+      value: `${testCase.actual}\nExpected: ${testCase.expected}`,
+    })),
+    status: [{ tone: run.status === 'pass' ? 'pass' : 'fail', text: run.summary || 'Workspace policy harness completed' }],
+  };
+}
+
 export const AGENT_TEST_HARNESSES = Object.freeze({
   'escalation-template-parser': {
     id: 'image-parser-fixture',
@@ -613,6 +661,32 @@ export const AGENT_TEST_HARNESSES = Object.freeze({
     primaryTextOutput: false,
     emptyResultLabel: 'No KB draft returned.',
     passNote: 'Record whether this KB draft harness output is acceptable.',
+    stageEventMessage,
+  },
+  workspace: {
+    id: 'workspace-action-policy',
+    agentId: 'workspace',
+    agentLabel: 'Workspace Agent',
+    stageKey: 'workspace-policy',
+    title: 'Workspace Agent Permission Harness',
+    description: 'Deterministic checks prove which email and calendar actions run automatically, require confirmation, or are blocked. No external action is executed.',
+    runLabel: 'Checking Workspace Agent permissions',
+    resultLabel: 'Permission Harness Results',
+    run: runWorkspacePolicyHarness,
+    canRecordResult: () => false,
+    savedResultId: (result) => cleanText(result?.run?.runId),
+    getFixture: () => null,
+    getValidationPills: (result) => [{
+      tone: result?.run?.status === 'pass' ? 'pass' : 'fail',
+      text: result?.run?.summary || 'Workspace policy harness completed',
+    }],
+    getResultRows: () => [],
+    getResultLayout: workspacePolicyResultLayout,
+    getOutputText: (result) => JSON.stringify(result?.run || {}, null, 2),
+    outputTextLabel: 'Harness evidence JSON',
+    primaryTextOutput: false,
+    emptyResultLabel: 'No Workspace policy result returned.',
+    passNote: 'This deterministic run is saved automatically to the Workspace Agent profile.',
     stageEventMessage,
   },
 });

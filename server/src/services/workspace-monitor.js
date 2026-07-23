@@ -13,6 +13,7 @@ const GmailAuth = require('../models/GmailAuth');
 const labelCache = require('../lib/label-cache');
 const WorkspaceActivity = require('../models/WorkspaceActivity');
 const { observeBestEffort } = require('../lib/best-effort');
+const { getWorkspaceAuthority, recordWorkspaceAction } = require('./workspace-action-policy');
 
 // ---------------------------------------------------------------------------
 // Workspace Background Monitor
@@ -50,6 +51,7 @@ let _lastWorkSummary = null;      // last work-completed summary (for snapshot o
 let _lastProactiveMessage = null; // last proactive AI message (for snapshot on connect)
 let _running = false;
 let _tickInProgress = false;
+let _lastPolicySkipReason = null;
 
 // Gmail account resolution — cached primary account email for background work
 let _monitorAccountEmail = null;
@@ -62,6 +64,25 @@ function persistActivity(entry, context) {
     action: `Persist workspace activity for ${context}`,
     detail: 'Background monitor work completed, but the activity history record could not be saved. Live behavior may still succeed while offline history becomes incomplete.',
   });
+}
+
+async function recordBackgroundEvidence(actions = [], source = 'workspace-monitor') {
+  const toolByAction = {
+    archived: 'gmail.archive',
+    'marked-read': 'gmail.markRead',
+    labeled: 'gmail.label',
+  };
+  await Promise.all(actions
+    .filter((item) => item && item.action !== 'failed')
+    .map((item) => recordWorkspaceAction({
+      tool: toolByAction[item.action] || 'gmail.batchModify',
+      params: { messageId: item.messageId || '', label: item.label || '' },
+      policyDecision: 'allowed',
+      status: 'ok',
+      source,
+      surface: 'workspace-monitor',
+      resultSummary: item.subject || item.action || 'Background email organization completed.',
+    })));
 }
 
 /**
@@ -112,10 +133,21 @@ async function tick() {
   _tickInProgress = true;
 
   try {
+    const authority = await getWorkspaceAuthority();
+    if (!authority.enabled || !authority.policy.proactiveEnabled) {
+      _lastPolicySkipReason = !authority.enabled
+        ? 'Workspace Agent is disabled.'
+        : 'Proactive work is turned off.';
+      return;
+    }
+    _lastPolicySkipReason = null;
     // 1. Detect alerts from calendar + email sources
     let currentAlerts = [];
     try {
-      currentAlerts = await detectAlerts();
+      currentAlerts = await detectAlerts({
+        email: authority.policy.emailMonitoring,
+        calendar: authority.policy.calendarMonitoring,
+      });
     } catch (err) {
       console.error('[workspace-monitor] detectAlerts error:', err.message);
       // Don't crash — try again next tick
@@ -203,7 +235,7 @@ async function tick() {
     const now = Date.now();
     if (now - _lastEmailCheckAt >= EMAIL_CHECK_INTERVAL_MS) {
       _lastEmailCheckAt = now;
-      await executeBackgroundWork();
+      await executeBackgroundWork(authority.policy);
     }
 
     // 8. Pattern mining — detect repeated user behaviors and propose auto-rules
@@ -241,7 +273,7 @@ async function tick() {
 // Background work execution — the monitor does real work here
 // ---------------------------------------------------------------------------
 
-async function executeBackgroundWork() {
+async function executeBackgroundWork(policy = {}) {
   // --- Chat agent coordination: skip if the chat agent is actively processing ---
   if (isChatAgentActive()) {
     console.log('[workspace-monitor] Skipping cycle — chat agent is active');
@@ -257,7 +289,7 @@ async function executeBackgroundWork() {
   };
 
   // Resolve the monitor's Gmail account — skip all email work if not connected
-  const accountEmail = await getMonitorAccount();
+  const accountEmail = policy.emailMonitoring === false ? null : await getMonitorAccount();
   if (!accountEmail) {
     // Still try entity detection with calendar-only data below
   }
@@ -277,7 +309,7 @@ async function executeBackgroundWork() {
   }
 
   // Filter out messages the chat agent already handled recently
-  if (inboxMessages.length > 0) {
+  if (policy.emailOrganization !== false && inboxMessages.length > 0) {
     const beforeCount = inboxMessages.length;
     inboxMessages = inboxMessages.filter(msg => !isMessageRecentlyProcessed(msg.id));
     const skipped = beforeCount - inboxMessages.length;
@@ -287,7 +319,7 @@ async function executeBackgroundWork() {
   }
 
   // --- Step A: Auto-label categorizable emails ---
-  if (inboxMessages.length > 0) {
+  if (policy.emailOrganization !== false && inboxMessages.length > 0) {
     try {
       const labelIdMap = await labelCache.getLabelMap(gmail).catch(() => null);
       const categorizableGroups = findCategorizableEmails(inboxMessages, labelIdMap);
@@ -296,6 +328,7 @@ async function executeBackgroundWork() {
         if (catResult.executed > 0) {
           workSummary.labelsApplied = catResult.executed;
           workSummary._labeledActions = catResult.actions || [];
+          await recordBackgroundEvidence(catResult.actions, 'workspace-auto-categorization');
           console.log(`[workspace-monitor] auto-labeled ${catResult.executed} emails`);
           // Persist for offline clients
           persistActivity({
@@ -317,7 +350,7 @@ async function executeBackgroundWork() {
   }
 
   // --- Step B: Execute silent-tier auto-actions ---
-  if (inboxMessages.length > 0) {
+  if (policy.emailOrganization !== false && inboxMessages.length > 0) {
     const msgsWithLabels = inboxMessages.filter(m => m.labels);
     if (msgsWithLabels.length > 0) {
       // Silent actions — execute and forget
@@ -325,6 +358,7 @@ async function executeBackgroundWork() {
         const silentResult = await autoActions.executeSilentActions(msgsWithLabels);
         if (silentResult.executed > 0) {
           workSummary.silentActionsRun = silentResult.executed;
+          await recordBackgroundEvidence(silentResult.actions, 'workspace-silent-rule');
           console.log(`[workspace-monitor] executed ${silentResult.executed} silent auto-actions`);
           // Persist for offline clients
           persistActivity({
@@ -348,6 +382,7 @@ async function executeBackgroundWork() {
         const notifyResult = await autoActions.executeNotifyActions(msgsWithLabels);
         if (notifyResult.executed > 0) {
           workSummary.notifyActionsRun = notifyResult.executed;
+          await recordBackgroundEvidence(notifyResult.actions, 'workspace-notify-rule');
           console.log(`[workspace-monitor] executed ${notifyResult.executed} notify auto-actions`);
           // Persist for offline clients
           persistActivity({
@@ -397,6 +432,7 @@ async function executeBackgroundWork() {
     // Get calendar events for entity linking (next 48 hours)
     let todayEvents = [];
     try {
+      if (policy.calendarMonitoring === false) throw new Error('Calendar monitoring disabled by Workspace Agent policy');
       const acNow = new Date();
       const todayEventsRes = await calendar.listEvents({
         calendarId: 'primary',
@@ -550,6 +586,7 @@ function getSnapshot() {
     nudges: _lastNudges,
     lastWorkSummary: _lastWorkSummary,
     lastProactiveMessage: _lastProactiveMessage,
+    policySkipReason: _lastPolicySkipReason,
     subscriberCount: _subscribers.size,
     lastTickAt: _lastEmailCheckAt > 0 ? new Date(_lastEmailCheckAt).toISOString() : null,
   };
