@@ -46,22 +46,27 @@ afterEach(() => {
 });
 
 describe('WorkspaceAgentOperationsTab', () => {
-  it('shows a Workspace-specific proactive profile with explicit action boundaries and durable evidence', async () => {
+  it('places proactive controls and action boundaries inside Configuration', async () => {
     apiFetchJson.mockResolvedValueOnce({ ok: true, profile });
-    const onRunAgentTest = vi.fn();
-    const user = userEvent.setup();
 
-    render(<WorkspaceAgentOperationsTab agent={{ agentId: 'workspace' }} onRunAgentTest={onRunAgentTest} />);
+    render(<WorkspaceAgentOperationsTab section="configuration" />);
 
-    expect(await screen.findByRole('heading', { name: 'Your email and calendar operator' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: 'Email and calendar authority' })).toBeVisible();
     expect(screen.getByText('Runs automatically')).toBeVisible();
     expect(screen.getByText('Requires your confirmation')).toBeVisible();
     expect(screen.getByText('Send an email')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Your email and calendar operator' })).not.toBeInTheDocument();
+  });
+
+  it('places connections, readiness, and action evidence inside Monitoring', async () => {
+    apiFetchJson.mockResolvedValueOnce({ ok: true, profile });
+
+    render(<WorkspaceAgentOperationsTab section="monitoring" />);
+
+    expect(await screen.findByRole('heading', { name: 'Email and calendar operating state' })).toBeVisible();
+    expect(screen.getByText('primary@example.com')).toBeVisible();
     expect(screen.getByText('gmail.archive')).toBeVisible();
     expect(screen.getByText('12')).toBeVisible();
-
-    await user.click(screen.getByRole('button', { name: 'Run test' }));
-    expect(onRunAgentTest).toHaveBeenCalledWith({ agentId: 'workspace' });
   });
 
   it('saves proactive controls through the server policy instead of a browser-only preference', async () => {
@@ -74,7 +79,7 @@ describe('WorkspaceAgentOperationsTab', () => {
         permissions: profile.permissions,
       });
 
-    render(<WorkspaceAgentOperationsTab agent={{ agentId: 'workspace' }} />);
+    render(<WorkspaceAgentOperationsTab section="configuration" />);
     const emailToggle = await screen.findByRole('checkbox', { name: /Monitor email/i });
     expect(emailToggle).toBeChecked();
     await user.click(emailToggle);
@@ -83,5 +88,18 @@ describe('WorkspaceAgentOperationsTab', () => {
     expect(apiFetchJson.mock.calls[1][0]).toBe('/api/workspace/profile/policy');
     expect(JSON.parse(apiFetchJson.mock.calls[1][1].body)).toEqual({ policy: { emailMonitoring: false } });
     await waitFor(() => expect(emailToggle).not.toBeChecked());
+  });
+
+  it('keeps the surrounding standard profile usable when Workspace details fail', async () => {
+    apiFetchJson.mockRejectedValueOnce(new Error('Route not found'));
+
+    render(<WorkspaceAgentOperationsTab section="configuration" />);
+
+    expect(await screen.findByText('Workspace operating details could not be loaded.')).toBeVisible();
+    expect(screen.getByText(/Workspace permission data is not available from the active server/)).toBeVisible();
+    expect(screen.getByText(/The rest of this profile remains available/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Retry Workspace details' })).toBeVisible();
+    expect(screen.queryByText('Route not found')).not.toBeInTheDocument();
+    expect(screen.queryByText('Workspace Agent operations are unavailable.')).not.toBeInTheDocument();
   });
 });

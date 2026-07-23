@@ -12,7 +12,7 @@ The user retained Workspace and designated the Workspace Agent as the applicatio
 
 Current implementation now provides:
 
-- a dedicated Workspace operations profile showing proactive controls, Google connections, background services, permission tiers, readiness, real counts, and durable action evidence;
+- the same top-level profile tabs as the other agents, with proactive controls and permission tiers inside Configuration and Google connections, background services, readiness, real counts, and durable action evidence inside Monitoring;
 - a server-enforced action policy used by the direct action loop, room adapter, background monitor, and daily briefing lifecycle;
 - automatic safe work for scoped reads, reversible email organization, drafts, memory saves, and private calendar holds;
 - exact, short-lived, single-use confirmation records for sending or trashing email, lasting Gmail rules, calendar invitations/changes/deletes, large batches, and other consequential writes;

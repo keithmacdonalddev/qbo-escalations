@@ -65,6 +65,7 @@ import { useAgentTestModal } from './agent-tests/AgentTestModalProvider.jsx';
 import { isAgentTestSupported } from './agent-tests/agentTestHarnesses.js';
 import ConfirmModal from './ConfirmModal.jsx';
 import WorkspaceAgentOperationsTab from './WorkspaceAgentOperationsTab.jsx';
+import { getAgentProfileTabs, resolveAgentProfileTab } from './agentProfileTabs.js';
 // healthStatusToOperationalToken converts the registry's health.status tokens
 // (online/offline/disabled/unknown) into the legacy operational tokens
 // (active/degraded/disabled/idle) that drive the status-dot-* CSS classes
@@ -101,41 +102,6 @@ const PROFILE_FIELDS = [
   { key: 'routingBias', label: 'Routing bias', type: 'textarea' },
   { key: 'avatarEmoji', label: 'Avatar emoji', type: 'text' },
   { key: 'avatarPrompt', label: 'Avatar prompt', type: 'textarea' },
-];
-
-const PROFILE_TABS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'configuration', label: 'Configuration' },
-  { id: 'prompt', label: 'Prompt' },
-  { id: 'harness', label: 'Harness' },
-  { id: 'test-assets', label: 'Test Assets' },
-  { id: 'memory', label: 'Memory' },
-  { id: 'monitoring', label: 'Monitoring' },
-  { id: 'workflows', label: 'Workflows' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'versions', label: 'Versions' },
-];
-
-const IMAGE_PARSER_PROFILE_TABS = [
-  ...PROFILE_TABS.slice(0, 5),
-  { id: 'test-results', label: 'Test Results' },
-  { id: 'event-streams', label: 'Event Streams' },
-  { id: 'chat-sessions', label: 'Chat Sessions' },
-  ...PROFILE_TABS.slice(5),
-];
-
-// Stage 4 Triage Agent gets its own Test Results tab now that there is a
-// dedicated /api/triage-tests/run endpoint persisting each test run for
-// operator review. Same slot position as the parser's test-results tab.
-const TRIAGE_AGENT_PROFILE_TABS = [
-  ...PROFILE_TABS.slice(0, 5),
-  { id: 'triage-test-results', label: 'Test Results' },
-  ...PROFILE_TABS.slice(5),
-];
-
-const WORKSPACE_AGENT_PROFILE_TABS = [
-  { id: 'operations', label: 'Operations' },
-  ...PROFILE_TABS,
 ];
 
 const emptyProfile = PROFILE_FIELDS.reduce((acc, field) => {
@@ -288,7 +254,7 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
   const [runtimeRecheckResult, setRuntimeRecheckResult] = useState(null);
   const runtimeRecheckTimeoutRef = useRef(null);
   const [activeProfileTab, setActiveProfileTab] = useState(
-    profileTabFromRoute || (agentIdFromRoute === 'workspace' ? 'operations' : 'overview')
+    resolveAgentProfileTab(agentIdFromRoute, profileTabFromRoute)
   );
   const [registryModalMode, setRegistryModalMode] = useState(null);
   const [registrySaving, setRegistrySaving] = useState(false);
@@ -577,7 +543,7 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
       clearTimeout(runtimeRecheckTimeoutRef.current);
       runtimeRecheckTimeoutRef.current = null;
     }
-    setActiveProfileTab(profileTabFromRoute || (selectedAgentId === 'workspace' ? 'operations' : 'overview'));
+    setActiveProfileTab(resolveAgentProfileTab(selectedAgentId, profileTabFromRoute));
   }, [profileTabFromRoute, selectedAgentId]);
 
   useEffect(() => {
@@ -2130,12 +2096,7 @@ function AgentProfileDetailPage({
       {selectedAgent ? (
         <main className="profile-detail-shell">
           <AgentProfileTabs
-            tabs={(() => {
-              if (selectedAgent.agentId === 'escalation-template-parser') return IMAGE_PARSER_PROFILE_TABS;
-              if (selectedAgent.agentId === 'triage-agent') return TRIAGE_AGENT_PROFILE_TABS;
-              if (selectedAgent.agentId === 'workspace') return WORKSPACE_AGENT_PROFILE_TABS;
-              return PROFILE_TABS;
-            })()}
+            tabs={getAgentProfileTabs(selectedAgent.agentId)}
             activeTab={activeProfileTab}
             onChange={onTabChange}
           />
@@ -2307,13 +2268,15 @@ function AgentProfileTabs({ tabs, activeTab, onChange }) {
 
 function AgentProfileWorkspace(props) {
   const { activeTab } = props;
-
-  if (activeTab === 'operations') {
-    return <WorkspaceAgentOperationsTab agent={props.agent} onRunAgentTest={props.onRunAgentTest} />;
-  }
+  const isWorkspace = props.agent?.agentId === 'workspace';
 
   if (activeTab === 'configuration') {
-    return <AgentConfigurationTab {...props} />;
+    return (
+      <>
+        {isWorkspace && <WorkspaceAgentOperationsTab section="configuration" />}
+        <AgentConfigurationTab {...props} />
+      </>
+    );
   }
   if (activeTab === 'prompt') {
     return <AgentPromptTab {...props} />;
@@ -2340,7 +2303,12 @@ function AgentProfileWorkspace(props) {
     return <AgentMemoryTab {...props} />;
   }
   if (activeTab === 'monitoring') {
-    return <AgentMonitoringTab {...props} />;
+    return (
+      <>
+        {isWorkspace && <WorkspaceAgentOperationsTab section="monitoring" />}
+        <AgentMonitoringTab {...props} />
+      </>
+    );
   }
   if (activeTab === 'workflows') {
     return <AgentWorkflowsTab {...props} />;

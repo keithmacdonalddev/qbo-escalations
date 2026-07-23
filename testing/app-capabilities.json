@@ -392,18 +392,21 @@
         "server/src/routes/workspace/profile.js",
         "server/src/models/WorkspaceActionApproval.js",
         "server/src/models/WorkspaceActionRecord.js",
+        "client/src/components/AgentsView.jsx",
+        "client/src/components/agentProfileTabs.js",
         "client/src/components/WorkspaceAgentOperationsTab.jsx",
         "client/src/components/workspace/WorkspaceConversationThread.jsx",
         "prompts/agents/workspace-action.md"
       ],
       "requiredCheckTypes": ["component", "server", "stress", "browser"],
       "evidence": [
-        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/WorkspaceAgentOperationsTab.test.jsx"] },
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/agentProfileTabs.test.js", "client/src/components/WorkspaceAgentOperationsTab.test.jsx"] },
         { "type": "server", "groupId": "server-suite", "paths": ["server/test/workspace-agent-policy.test.js"] },
         { "type": "stress", "groupId": "all-stress-slices", "paths": ["stress-testing/slices/workspace-assistant/harness/run.js"] }
       ],
       "knownGaps": [
         "The deterministic permission harness intentionally performs no external Gmail or Calendar mutation.",
+        "The standard Workspace profile tabs and non-blocking unavailable-server state were browser-verified on 2026-07-23; live proactive controls still require the current Workspace profile route to be the process serving the app.",
         "A trusted real-browser run still needs to prove a confirmation preview, exact user approval, external execution receipt, and durable profile evidence against a controlled connected-service account.",
         "Background-monitor and daily-briefing timing still need clock-controlled stress fixtures."
       ],
