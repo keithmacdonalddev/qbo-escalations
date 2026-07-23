@@ -1920,6 +1920,8 @@ function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) 
   const dotTooltip = registryHealth
     ? buildDotTooltip(registryHealth.status, registryHealth.checkedAt)
     : (STATUS_LABELS[operation?.status] || 'Idle');
+  const name = getAgentDisplayName(agent);
+  const role = getAgentRoleLabel(agent);
   return (
     <a
       href={`#/agents/${encodeURIComponent(agent.agentId)}`}
@@ -1937,7 +1939,8 @@ function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) 
       {/* "name" (not "title") keeps this class clear of overhaul.css's
           `header [class*="title"]` gradient-text trap by construction. */}
       <div className="agent-mission-card-name">
-        <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
+        <strong>{name}</strong>
+        {role ? <span>{role}</span> : null}
       </div>
       <p>{agent.profile?.headline || operation?.promptSummary?.goals}</p>
       {/* Real data only: provider/model summary (runtime config) and tool
@@ -1973,8 +1976,8 @@ function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) 
 //     PATCH /enabled flow; disabled while enabledSaving),
 //   - the "Refreshing profile..." loading hint.
 //
-// HONESTY: every value is real — name = profile.roleTitle/displayName; purpose
-// = profile.headline; enabled = agent.enabled; health = the SAME registry
+// HONESTY: every value is real — name = profile.displayName; role =
+// profile.roleTitle; purpose = profile.headline; enabled = agent.enabled; health = the SAME registry
 // `selectedHealth` ({status, checkedAt}) the status dots use. No fabrication.
 //
 // CSS DEFENSE: scoped under `.agent-profile-header` (NO class contains the
@@ -1994,11 +1997,10 @@ function UnifiedAgentHeader({
     return null;
   }
 
-  const name =
-    selectedAgent.profile?.roleTitle
-    || selectedAgent.profile?.displayName
-    || labelAgent(selectedAgent.agentId);
-  const purpose = selectedAgent.profile?.headline || 'No purpose described yet.';
+  const name = getAgentDisplayName(selectedAgent);
+  const role = getAgentRoleLabel(selectedAgent);
+  const purpose = [role, selectedAgent.profile?.headline].filter(Boolean).join(' · ')
+    || 'No purpose described yet.';
   const enabled = selectedAgent.enabled !== false;
   const supportsAgentTest = isAgentTestSupported(selectedAgent.agentId);
 
@@ -2167,8 +2169,8 @@ function MissionControlHeader({
             <div className="selected-agent-chip">
               <AgentAvatar agent={selectedAgent} size="small" />
               <span>
-                <strong>{selectedAgent?.profile?.roleTitle || selectedAgent?.agentId || 'Select agent'}</strong>
-                <small>{selectedOperation?.department || 'Agent profile'}</small>
+                <strong>{getAgentDisplayName(selectedAgent)}</strong>
+                <small>{getAgentRoleLabel(selectedAgent) || selectedOperation?.department || 'Agent profile'}</small>
               </span>
             </div>
             <button type="button" className="secondary-action" onClick={onOpenConfig}>
@@ -6588,12 +6590,24 @@ function timelineEntryKey(entry) {
 }
 
 function formatAgentProfileTitle(agent) {
-  const agentName = agent?.profile?.roleTitle || agent?.profile?.displayName || labelAgent(agent?.agentId);
+  const agentName = getAgentDisplayName(agent);
   if (!agentName) {
     return 'Agent Profile';
   }
 
   return `${agentName}'s Profile`;
+}
+
+function getAgentDisplayName(agent) {
+  return agent?.profile?.displayName
+    || agent?.profile?.roleTitle
+    || labelAgent(agent?.agentId);
+}
+
+function getAgentRoleLabel(agent) {
+  const role = String(agent?.profile?.roleTitle || '').trim();
+  const name = String(getAgentDisplayName(agent) || '').trim();
+  return role && role.toLocaleLowerCase() !== name.toLocaleLowerCase() ? role : '';
 }
 
 function labelAgent(agentId = '') {
