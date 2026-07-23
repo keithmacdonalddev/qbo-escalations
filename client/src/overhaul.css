@@ -7352,8 +7352,8 @@ body,
 }
 
 .app-header {
-  height: 40px !important;
-  min-height: 40px !important;
+  height: 44px !important;
+  min-height: 44px !important;
   padding: 0 10px !important;
 }
 
@@ -7362,18 +7362,76 @@ body,
   display: none !important;
 }
 
-.app-header-left,
-.app-header-right {
+.app-header-left {
   gap: 3px !important;
+}
+
+.app-header-right {
+  gap: 8px !important;
 }
 
 .app-header-icon-btn,
 .app-header .sidebar-toggle-header {
-  width: 28px !important;
-  height: 28px !important;
-  min-width: 28px !important;
-  min-height: 28px !important;
-  border-radius: 6px !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  border-radius: 8px !important;
+}
+
+.app-header-utility-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 1px;
+  border: 1px solid rgba(84, 84, 88, 0.3);
+  border-radius: 10px;
+  background: rgba(12, 12, 14, 0.2);
+}
+
+.app-header .live-work-trigger {
+  height: 36px !important;
+  min-height: 36px !important;
+  gap: 7px;
+  padding: 4px 8px 4px 6px !important;
+  border-radius: 9px;
+}
+
+.app-header .live-work-trigger__icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+}
+
+.app-header .app-header-mail-badge,
+.app-header .app-header-settings-badge {
+  top: -1px;
+  right: -1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  font-size: 8px;
+  line-height: 14px;
+}
+
+@media (max-width: 600px) {
+  .app-header-agent-strip {
+    display: none;
+  }
+
+  .app-header-right {
+    gap: 4px !important;
+  }
+
+  .app-header .live-work-trigger {
+    width: 34px;
+    padding: 4px !important;
+  }
+
+  .app-header .live-work-trigger__copy,
+  .app-header .live-work-trigger__badge {
+    display: none;
+  }
 }
 
 .app-header-icon-btn > svg {

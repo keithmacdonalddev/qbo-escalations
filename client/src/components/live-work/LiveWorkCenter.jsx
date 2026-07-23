@@ -208,7 +208,11 @@ export default function LiveWorkCenter() {
           <strong>Live work</strong>
           <small>{triggerDetail}</small>
         </span>
-        {attentionCount > 0 && <span className="live-work-trigger__badge">{countLabel(attentionCount)}</span>}
+        {activeWork.length > 0 && attentionCount > 0 && (
+          <span className="live-work-trigger__badge" title={`${attentionCount} items need you`}>
+            {countLabel(attentionCount)}
+          </span>
+        )}
       </button>
 
       {open && typeof document !== 'undefined' && createPortal(

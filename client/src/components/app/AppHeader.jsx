@@ -941,108 +941,110 @@ export default function AppHeader({
           </motion.button>
         </div>
         {liveWorkControl}
-        {/* Mail inbox */}
-        <motion.button
-          className="app-header-icon-btn app-header-mail-btn"
-          onClick={() => { window.location.hash = '#/gmail'; }}
-          type="button"
-          aria-label={unreadCount > 0 ? `${unreadCount} unread emails` : 'Inbox'}
-          title={unreadCount > 0 ? `${unreadCount} unread` : 'Inbox'}
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-        >
-          <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <path d="M22 4l-10 8L2 4" />
-          </svg>
-          {unreadCount > 0 && (
-            <span className="app-header-mail-badge">{badgeLabel}</span>
-          )}
-        </motion.button>
-        {/* User problem, feature, and feedback reporting */}
-        <motion.button
-          className="app-header-icon-btn"
-          onClick={onOpenUserReport}
-          type="button"
-          aria-label="Send feedback"
-          title="Send feedback"
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-        >
-          <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
-            <path d="M8 9h8" />
-            <path d="M8 13h5" />
-          </svg>
-        </motion.button>
-        {appAuth?.enabled ? (
+        <div className="app-header-utility-strip" role="group" aria-label="App tools">
+          {/* Mail inbox */}
           <motion.button
-            className={`app-header-icon-btn app-header-auth-btn${appAuth.authenticated ? ' is-authenticated' : ''}`}
-            onClick={onOpenAppAuth}
+            className="app-header-icon-btn app-header-mail-btn"
+            onClick={() => { window.location.hash = '#/gmail'; }}
             type="button"
-            aria-label={appAuth.authenticated ? `QBO account, signed in as ${appAuth.user?.displayName || 'user'}` : 'Sign in to QBO Escalations'}
-            title={appAuth.authenticated ? `Signed in as ${appAuth.user?.displayName || 'QBO user'}` : 'Sign in to QBO Escalations'}
+            aria-label={unreadCount > 0 ? `${unreadCount} unread emails` : 'Inbox'}
+            title={unreadCount > 0 ? `${unreadCount} unread` : 'Inbox'}
             whileHover={{ scale: 1.08 }}
             whileTap={{ scale: 0.92 }}
           >
-            {appAuth.authenticated ? (
-              <span className="app-header-auth-initial" aria-hidden="true">{appAuth.user?.displayName?.trim()?.charAt(0)?.toUpperCase() || 'Q'}</span>
-            ) : (
-              <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="8" r="4" />
-                <path d="M4 21a8 8 0 0 1 16 0" />
-              </svg>
+            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <path d="M22 4l-10 8L2 4" />
+            </svg>
+            {unreadCount > 0 && (
+              <span className="app-header-mail-badge">{badgeLabel}</span>
             )}
-            <span className={`app-header-auth-status${appAuth.authenticated ? ' is-online' : ''}`} aria-hidden="true" />
           </motion.button>
-        ) : null}
-        {/* Test suite */}
-        <motion.button
-          className="app-header-icon-btn"
-          onClick={() => window.open('/prototypes/test-dashboard/index.html', '_blank')}
-          type="button"
-          aria-label="Test suite"
-          title="Test Suite"
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-        >
-          <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 3h6v5l4 9H5l4-9V3z" />
-            <line x1="9" y1="3" x2="15" y2="3" />
-            <path d="M10 17a2 2 0 104 0" />
-          </svg>
-        </motion.button>
-        {/* Settings gear */}
-        <motion.button
-          className={`app-header-icon-btn${settingsOpen ? ' is-active' : ''}`}
-          onClick={toggleSettings}
-          type="button"
-          aria-label={settingsOpen ? 'Close settings' : aiManagementAlertCount > 0 ? `Open settings, ${aiManagementAlertCount} AI alerts to review` : 'Open settings'}
-          title={settingsOpen ? 'Close settings' : aiManagementAlertCount > 0 ? `Settings · ${aiManagementAlertCount} AI alert${aiManagementAlertCount === 1 ? '' : 's'} to review` : 'Settings'}
-          whileHover={{ scale: 1.08 }}
-          whileTap={{ scale: 0.92 }}
-        >
-          <motion.svg
-            aria-hidden="true"
-            focusable="false"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            animate={{ rotate: settingsOpen ? 135 : 0 }}
-            transition={transitions.springSnappy}
+          {/* User problem, feature, and feedback reporting */}
+          <motion.button
+            className="app-header-icon-btn"
+            onClick={onOpenUserReport}
+            type="button"
+            aria-label="Send feedback"
+            title="Send feedback"
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
           >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
-          </motion.svg>
-          {aiManagementAlertCount > 0 && (
-            <span className="app-header-settings-badge">{aiManagementAlertCount > 9 ? '9+' : aiManagementAlertCount}</span>
-          )}
-        </motion.button>
+            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+              <path d="M8 9h8" />
+              <path d="M8 13h5" />
+            </svg>
+          </motion.button>
+          {appAuth?.enabled ? (
+            <motion.button
+              className={`app-header-icon-btn app-header-auth-btn${appAuth.authenticated ? ' is-authenticated' : ''}`}
+              onClick={onOpenAppAuth}
+              type="button"
+              aria-label={appAuth.authenticated ? `QBO account, signed in as ${appAuth.user?.displayName || 'user'}` : 'Sign in to QBO Escalations'}
+              title={appAuth.authenticated ? `Signed in as ${appAuth.user?.displayName || 'QBO user'}` : 'Sign in to QBO Escalations'}
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.92 }}
+            >
+              {appAuth.authenticated ? (
+                <span className="app-header-auth-initial" aria-hidden="true">{appAuth.user?.displayName?.trim()?.charAt(0)?.toUpperCase() || 'Q'}</span>
+              ) : (
+                <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="8" r="4" />
+                  <path d="M4 21a8 8 0 0 1 16 0" />
+                </svg>
+              )}
+              <span className={`app-header-auth-status${appAuth.authenticated ? ' is-online' : ''}`} aria-hidden="true" />
+            </motion.button>
+          ) : null}
+          {/* Test suite */}
+          <motion.button
+            className="app-header-icon-btn"
+            onClick={() => window.open('/prototypes/test-dashboard/index.html', '_blank')}
+            type="button"
+            aria-label="Test suite"
+            title="Test Suite"
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
+          >
+            <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 3h6v5l4 9H5l4-9V3z" />
+              <line x1="9" y1="3" x2="15" y2="3" />
+              <path d="M10 17a2 2 0 104 0" />
+            </svg>
+          </motion.button>
+          {/* Settings gear */}
+          <motion.button
+            className={`app-header-icon-btn${settingsOpen ? ' is-active' : ''}`}
+            onClick={toggleSettings}
+            type="button"
+            aria-label={settingsOpen ? 'Close settings' : aiManagementAlertCount > 0 ? `Open settings, ${aiManagementAlertCount} AI alerts to review` : 'Open settings'}
+            title={settingsOpen ? 'Close settings' : aiManagementAlertCount > 0 ? `Settings · ${aiManagementAlertCount} AI alert${aiManagementAlertCount === 1 ? '' : 's'} to review` : 'Settings'}
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
+          >
+            <motion.svg
+              aria-hidden="true"
+              focusable="false"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              animate={{ rotate: settingsOpen ? 135 : 0 }}
+              transition={transitions.springSnappy}
+            >
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.32 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z" />
+            </motion.svg>
+            {aiManagementAlertCount > 0 && (
+              <span className="app-header-settings-badge">{aiManagementAlertCount > 9 ? '9+' : aiManagementAlertCount}</span>
+            )}
+          </motion.button>
+        </div>
       </div>
     </header>
   );
