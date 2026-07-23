@@ -3,260 +3,220 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#0d0f12">
-  <title>AI Mission Control — First-principles prototype</title>
+  <title>AI Team — First-principles prototype</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="app-shell">
-    <aside class="side-nav" aria-label="Primary navigation">
-      <a class="brand" href="#overview" aria-label="QBO Intelligence home">
-        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span><strong>QBO Intelligence</strong><small>Operations workspace</small></span>
-      </a>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Operational Intelligence home">
+      <span class="brand-mark">Q</span>
+      <span>Operational Intelligence</span>
+    </a>
+    <button class="quiet-button" id="advancedButton" type="button">
+      <span aria-hidden="true">⚙</span> Advanced
+    </button>
+  </header>
 
-      <nav class="main-nav">
-        <button class="nav-item" type="button" data-app-route="workspace">
-          <span class="nav-icon" aria-hidden="true">⌂</span><span>Workspace</span>
-        </button>
-        <button class="nav-item" type="button" data-app-route="escalations">
-          <span class="nav-icon" aria-hidden="true">◇</span><span>Escalations</span><span class="nav-count">6</span>
-        </button>
-        <button class="nav-item" type="button" data-app-route="knowledge">
-          <span class="nav-icon" aria-hidden="true">▤</span><span>Knowledge</span><span class="nav-count amber">3</span>
-        </button>
-        <button class="nav-item active" type="button" aria-current="page">
-          <span class="nav-icon spark" aria-hidden="true">✦</span><span>AI Mission Control</span>
-        </button>
-      </nav>
-
-      <div class="nav-divider"></div>
-      <p class="nav-label">Mission control</p>
-      <nav class="mission-nav" aria-label="AI Mission Control sections">
-        <button class="mission-link active" type="button" data-view="overview"><span>Overview</span></button>
-        <button class="mission-link" type="button" data-view="agents"><span>Agent team</span><span class="nav-count">5</span></button>
-        <button class="mission-link" type="button" data-view="providers"><span>Providers & models</span></button>
-        <button class="mission-link" type="button" data-view="releases"><span>Evaluations & releases</span><span class="nav-dot" aria-label="One item needs attention"></span></button>
-        <button class="mission-link" type="button" data-view="activity"><span>Activity & evidence</span></button>
-      </nav>
-
-      <div class="sidebar-foot">
-        <div class="privacy-mini">
-          <span class="privacy-icon" aria-hidden="true">◈</span>
-          <span><strong>Privacy routing</strong><small>Standard · cloud allowed</small></span>
-        </div>
-        <button class="user-button" type="button" aria-label="Open user menu">
-          <span class="avatar">JB</span><span><strong>Jamie</strong><small>Owner</small></span><span aria-hidden="true">•••</span>
-        </button>
+  <main class="shell">
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">AI TEAM</p>
+        <h1>Know who is helping, and when you need to step in.</h1>
       </div>
-    </aside>
-
-    <div class="content-shell">
-      <header class="topbar">
-        <button class="mobile-menu" type="button" aria-label="Open navigation" aria-expanded="false">☰</button>
-        <div class="crumb"><span>AI Mission Control</span><span aria-hidden="true">/</span><strong id="currentCrumb">Overview</strong></div>
-        <div class="top-actions">
-          <button class="quiet-button" type="button" id="searchButton" aria-label="Search mission control"><span aria-hidden="true">⌕</span><span class="desktop-only">Search</span><kbd>⌘ K</kbd></button>
-          <button class="icon-button" type="button" aria-label="Notifications"><span aria-hidden="true">◔</span><i></i></button>
-          <button class="button secondary" type="button" id="readinessButton"><span aria-hidden="true">↻</span> Run readiness check</button>
-        </div>
-      </header>
-
-      <main>
-        <section class="view active" id="view-overview" data-title="Overview">
-          <div class="page-heading">
-            <div>
-              <p class="eyebrow">AI Mission Control</p>
-              <h1>Your AI team is ready for QBO work</h1>
-              <p class="lede">One place to understand who does what, what they can use, and whether their work can be trusted.</p>
-            </div>
-            <button class="button primary" type="button" data-open-change><span aria-hidden="true">◫</span> Review proposed change <span class="button-count">1</span></button>
-          </div>
-
-          <section class="readiness-hero" aria-labelledby="readiness-title">
-            <div class="readiness-score" aria-label="Readiness score 92 out of 100">
-              <svg viewBox="0 0 120 120" role="img" aria-hidden="true">
-                <circle class="score-track" cx="60" cy="60" r="50"></circle>
-                <circle class="score-progress" cx="60" cy="60" r="50"></circle>
-              </svg>
-              <div><strong id="readinessScore">92</strong><span>Ready</span></div>
-            </div>
-            <div class="readiness-copy">
-              <div class="section-kicker"><span class="status-dot success"></span><span id="readiness-title">QBO escalation team</span></div>
-              <h2>Safe to start a case</h2>
-              <p>All required agents can run. Evidence capture is healthy. One proposed model change is waiting for your review and will not affect live work.</p>
-              <div class="readiness-meta">
-                <span><i class="check">✓</i> 5 agents available</span>
-                <span><i class="check">✓</i> Backups ready</span>
-                <span><i class="check">✓</i> Evidence complete</span>
-              </div>
-            </div>
-            <div class="readiness-side">
-              <span>Last checked</span>
-              <strong id="checkedTime">2 minutes ago</strong>
-              <button class="text-button" type="button" data-view-target="activity">View evidence <span aria-hidden="true">→</span></button>
-            </div>
-          </section>
-
-          <div class="overview-grid">
-            <section class="panel team-panel">
-              <div class="panel-head">
-                <div><p class="eyebrow">QBO escalation workflow</p><h2>Agent team</h2></div>
-                <button class="text-button" type="button" data-view-target="agents">Manage team <span aria-hidden="true">→</span></button>
-              </div>
-              <p class="panel-intro">Each specialist owns one clear part of the case. Select an agent to see its responsibility and safeguards.</p>
-              <div class="workflow" aria-label="QBO escalation agent workflow">
-                <button class="agent-node selected" type="button" data-agent="parser">
-                  <span class="agent-glyph blue">⌗</span>
-                  <span class="agent-node-copy"><small>1 · Extract</small><strong>Image Parser</strong><em>Reads visible case facts</em></span>
-                  <span class="health-pill good"><i></i>Ready</span>
-                </button>
-                <span class="workflow-arrow" aria-hidden="true">→</span>
-                <div class="parallel-agents">
-                  <button class="agent-node compact" type="button" data-agent="inv">
-                    <span class="agent-glyph violet">⌕</span><span class="agent-node-copy"><small>2A · Investigate</small><strong>INV Search</strong><em>Checks known issues</em></span><span class="health-dot good" title="Ready"></span>
-                  </button>
-                  <button class="agent-node compact" type="button" data-agent="triage">
-                    <span class="agent-glyph amber">◇</span><span class="agent-node-copy"><small>2B · Assess</small><strong>Triage</strong><em>Sets urgency and next step</em></span><span class="health-dot good" title="Ready"></span>
-                  </button>
-                </div>
-                <span class="workflow-arrow" aria-hidden="true">→</span>
-                <button class="agent-node" type="button" data-agent="analyst">
-                  <span class="agent-glyph teal">✦</span>
-                  <span class="agent-node-copy"><small>3 · Resolve</small><strong>QBO Analyst</strong><em>Builds the answer</em></span>
-                  <span class="health-pill good"><i></i>Ready</span>
-                </button>
-              </div>
-              <div class="agent-summary" id="agentSummary">
-                <span class="agent-glyph blue large">⌗</span>
-                <div><p class="eyebrow">Selected responsibility</p><h3>Image Parser extracts only what the screenshot shows.</h3><p>It cannot publish knowledge or decide the resolution. If required fields fail validation, the workflow stops before triage.</p></div>
-                <button class="button secondary small" type="button" data-open-agent="parser">Open profile</button>
-              </div>
-            </section>
-
-            <aside class="attention-panel">
-              <div class="panel-head"><div><p class="eyebrow">Your decisions</p><h2>Needs attention</h2></div><span class="attention-count">1</span></div>
-              <article class="decision-card">
-                <div class="decision-top"><span class="change-icon">↗</span><span class="tag review">Review required</span></div>
-                <h3>Evaluate GPT-5.6 Sol for the QBO Analyst</h3>
-                <p>The proposed model is faster in the trial set, but one case needs human review before it can be released.</p>
-                <div class="decision-metrics"><span><small>Quality</small><strong class="good-text">+4%</strong></span><span><small>Median speed</small><strong class="good-text">−18s</strong></span><span><small>Cost / case</small><strong>+$0.07</strong></span></div>
-                <button class="button primary full" type="button" data-open-change>Review comparison</button>
-              </article>
-              <div class="all-clear"><span class="check-badge">✓</span><div><strong>Everything else is clear</strong><p>No provider failures, expired reviews, missing backups, or permission conflicts.</p></div></div>
-            </aside>
-          </div>
-
-          <section class="metrics-grid" aria-label="AI team operating summary">
-            <article class="metric-card"><div class="metric-label"><span>Quality on approved cases</span><button class="info" type="button" aria-label="About quality score">i</button></div><strong>94%</strong><span class="trend good-text">↗ 3 points</span><div class="spark-bars" aria-hidden="true"><i style="height:42%"></i><i style="height:48%"></i><i style="height:44%"></i><i style="height:58%"></i><i style="height:64%"></i><i style="height:72%"></i><i style="height:76%"></i></div><small>Last 30 reviewed cases</small></article>
-            <article class="metric-card"><div class="metric-label"><span>Evidence-complete runs</span><button class="info" type="button" aria-label="About evidence complete runs">i</button></div><strong>29<span>/30</span></strong><span class="trend warning-text">1 needs review</span><div class="completion-line"><i></i></div><small>One older trace expired</small></article>
-            <article class="metric-card"><div class="metric-label"><span>Provider fallback</span><button class="info" type="button" aria-label="About provider fallback">i</button></div><strong>2.1%</strong><span class="trend neutral-text">Within normal range</span><div class="provider-mini"><span>Primary</span><div><i style="width:97.9%"></i></div><span>Backup</span><div><i class="backup" style="width:2.1%"></i></div></div></article>
-            <article class="metric-card"><div class="metric-label"><span>AI cost this month</span><button class="info" type="button" aria-label="About AI cost">i</button></div><strong>$18.42</strong><span class="trend neutral-text">$31.58 remaining</span><div class="completion-line cost"><i></i></div><small>37% of your $50 guide</small></article>
-          </section>
-
-          <section class="panel recent-panel">
-            <div class="panel-head"><div><p class="eyebrow">Latest work</p><h2>Recent agent runs</h2></div><button class="text-button" type="button" data-view-target="activity">View all activity <span aria-hidden="true">→</span></button></div>
-            <div class="run-table" role="table" aria-label="Recent agent runs">
-              <div class="run-row header" role="row"><span>Work</span><span>Agent</span><span>Result</span><span>Provider</span><span>Evidence</span><span>When</span></div>
-              <button class="run-row" type="button" role="row"><span><strong>Case 101847</strong><small>Payroll tax calculation</small></span><span><i class="mini-glyph teal">✦</i> QBO Analyst</span><span><i class="status-dot success"></i>Completed</span><span>Claude Sonnet 5</span><span><span class="tag success">Complete</span></span><span>4 min ago</span></button>
-              <button class="run-row" type="button" role="row"><span><strong>Case 101846</strong><small>Bank feed reconnect</small></span><span><i class="mini-glyph amber">◇</i> Triage</span><span><i class="status-dot success"></i>Completed</span><span>GPT-5.6 Terra</span><span><span class="tag success">Complete</span></span><span>18 min ago</span></button>
-              <button class="run-row" type="button" role="row"><span><strong>Case 101845</strong><small>Missing T4 summary</small></span><span><i class="mini-glyph blue">⌗</i> Image Parser</span><span><i class="status-dot warning"></i>Reviewed</span><span>Gemini 3.6 Flash</span><span><span class="tag warning">Partial</span></span><span>42 min ago</span></button>
-            </div>
-          </section>
-        </section>
-
-        <section class="view" id="view-agents" data-title="Agent team">
-          <div class="page-heading compact-heading">
-            <div><p class="eyebrow">People before infrastructure</p><h1>Agent team</h1><p class="lede">Give every specialist one job, the evidence it needs, and a clear boundary it cannot cross.</p></div>
-            <button class="button secondary" type="button"><span aria-hidden="true">＋</span> Create specialist</button>
-          </div>
-          <div class="agents-layout">
-            <section class="agent-directory panel">
-              <div class="directory-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input type="search" id="agentSearch" placeholder="Find an agent" aria-label="Find an agent"></label><select aria-label="Filter agents"><option>All responsibilities</option><option>Extraction</option><option>Reasoning</option><option>Coordination</option></select></div>
-              <div class="directory-list" id="agentDirectory">
-                <button class="directory-agent active" type="button" data-profile-agent="parser"><span class="agent-glyph blue">⌗</span><span><strong>Image Parser</strong><small>Extract visible case evidence</small></span><span class="health-pill good"><i></i>Ready</span></button>
-                <button class="directory-agent" type="button" data-profile-agent="inv"><span class="agent-glyph violet">⌕</span><span><strong>INV Search</strong><small>Check active known issues</small></span><span class="health-pill good"><i></i>Ready</span></button>
-                <button class="directory-agent" type="button" data-profile-agent="triage"><span class="agent-glyph amber">◇</span><span><strong>Triage</strong><small>Assess urgency and next step</small></span><span class="health-pill good"><i></i>Ready</span></button>
-                <button class="directory-agent" type="button" data-profile-agent="analyst"><span class="agent-glyph teal">✦</span><span><strong>QBO Analyst</strong><small>Recommend the resolution</small></span><span class="health-pill review"><i></i>Change pending</span></button>
-                <button class="directory-agent" type="button" data-profile-agent="knowledge"><span class="agent-glyph green">▤</span><span><strong>Knowledge Curator</strong><small>Prepare reusable lessons</small></span><span class="health-pill good"><i></i>Ready</span></button>
-              </div>
-            </section>
-
-            <section class="profile-panel panel" id="profilePanel">
-              <div class="profile-header">
-                <div class="profile-identity"><span class="agent-glyph blue xl" id="profileGlyph">⌗</span><span><p class="eyebrow" id="profileStage">Stage 1 · Extraction</p><h2 id="profileName">Image Parser</h2><p id="profilePurpose">Turns QBO screenshots into reliable case facts.</p></span></div>
-                <div class="profile-actions"><span class="health-pill good" id="profileHealth"><i></i>Ready</span><button class="button secondary small" type="button" id="testAgentButton">Run test</button><button class="icon-button" type="button" aria-label="More profile actions">•••</button></div>
-              </div>
-              <nav class="profile-tabs" aria-label="Agent profile sections">
-                <button class="active" type="button" data-profile-tab="mission">Mission</button>
-                <button type="button" data-profile-tab="runtime">Runtime</button>
-                <button type="button" data-profile-tab="tools">Tools & permissions</button>
-                <button type="button" data-profile-tab="instructions">Instructions & memory</button>
-                <button type="button" data-profile-tab="evaluation">Evaluation</button>
-              </nav>
-              <div class="profile-content" id="profileContent"></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="view" id="view-providers" data-title="Providers & models">
-          <div class="page-heading compact-heading"><div><p class="eyebrow">Supporting infrastructure</p><h1>Providers & models</h1><p class="lede">Keep the agent team available without making provider details the center of your workflow.</p></div><div class="heading-actions"><button class="button secondary" type="button" id="testConnections">Test connections</button><button class="button secondary" type="button">Check for new models</button></div></div>
-          <div class="provider-summary">
-            <article><span class="status-dot success"></span><div><strong>7 providers ready</strong><small>3 used by active agents</small></div></article>
-            <article><span class="status-dot success"></span><div><strong>All backups available</strong><small>No workflow has a single point of failure</small></div></article>
-            <article><span class="status-dot warning"></span><div><strong>Strict approval is off</strong><small>Legacy custom models may still run</small></div><button class="text-button" type="button">Review</button></article>
-          </div>
-          <section class="panel provider-table-panel">
-            <div class="panel-head"><div><p class="eyebrow">Active routing</p><h2>Provider readiness</h2></div><label class="toggle-row"><span><strong>Approved models only</strong><small>Block unreviewed custom IDs</small></span><input type="checkbox" id="strictToggle"><i aria-hidden="true"></i></label></div>
-            <div class="provider-cards">
-              <article class="provider-card"><div class="provider-logo anthropic">A</div><div><h3>Anthropic API</h3><p>Primary reasoning provider</p></div><span class="health-pill good"><i></i>Ready</span><dl><div><dt>Active agents</dt><dd>2</dd></div><div><dt>Approved models</dt><dd>3</dd></div><div><dt>Last check</dt><dd>2m ago</dd></div></dl><button class="button secondary small" type="button">Manage</button></article>
-              <article class="provider-card"><div class="provider-logo openai">◎</div><div><h3>OpenAI API</h3><p>Primary triage provider</p></div><span class="health-pill good"><i></i>Ready</span><dl><div><dt>Active agents</dt><dd>1</dd></div><div><dt>Approved models</dt><dd>4</dd></div><div><dt>Last check</dt><dd>3m ago</dd></div></dl><button class="button secondary small" type="button">Manage</button></article>
-              <article class="provider-card"><div class="provider-logo gemini">G</div><div><h3>Gemini API</h3><p>Primary extraction provider</p></div><span class="health-pill good"><i></i>Ready</span><dl><div><dt>Active agents</dt><dd>1</dd></div><div><dt>Approved models</dt><dd>3</dd></div><div><dt>Last check</dt><dd>2m ago</dd></div></dl><button class="button secondary small" type="button">Manage</button></article>
-              <article class="provider-card muted-card"><div class="provider-logo local">L</div><div><h3>LM Studio</h3><p>Private local fallback</p></div><span class="health-pill idle"><i></i>Idle</span><dl><div><dt>Active agents</dt><dd>0</dd></div><div><dt>Approved models</dt><dd>2</dd></div><div><dt>Last check</dt><dd>Yesterday</dd></div></dl><button class="button secondary small" type="button">Manage</button></article>
-            </div>
-          </section>
-        </section>
-
-        <section class="view" id="view-releases" data-title="Evaluations & releases">
-          <div class="page-heading compact-heading"><div><p class="eyebrow">Prove changes before they go live</p><h1>Evaluations & releases</h1><p class="lede">Compare proposed prompts and models against approved QBO cases, then make one informed release decision.</p></div><button class="button primary" type="button">Start evaluation</button></div>
-          <section class="release-hero panel">
-            <div class="release-heading"><span class="change-icon large">↗</span><div><span class="tag review">Human review required</span><h2>QBO Analyst · Model upgrade</h2><p>Claude Sonnet 5 → GPT-5.6 Sol</p></div><button class="button primary" type="button" data-open-change>Open comparison</button></div>
-            <div class="release-progress"><div><span class="complete">✓</span><strong>Configuration checked</strong><small>Provider and request contract</small></div><i></i><div><span class="complete">✓</span><strong>Cases replayed</strong><small>24 approved cases</small></div><i></i><div><span class="active">3</span><strong>Human review</strong><small>1 disputed case</small></div><i></i><div><span>4</span><strong>Release</strong><small>Blocked until approval</small></div></div>
-          </section>
-          <div class="release-grid">
-            <section class="panel"><div class="panel-head"><div><p class="eyebrow">Evaluation summary</p><h2>What changed</h2></div></div><div class="compare-metrics"><article><span>Grounded answers</span><strong class="good-text">23 / 24</strong><small>Current: 22 / 24</small></article><article><span>Required next step</span><strong class="good-text">24 / 24</strong><small>Current: 23 / 24</small></article><article><span>Invented facts</span><strong>0</strong><small>Current: 0</small></article><article><span>Median response</span><strong class="good-text">31s</strong><small>Current: 49s</small></article></div></section>
-            <section class="panel"><div class="panel-head"><div><p class="eyebrow">Release safeguards</p><h2>Before approval</h2></div></div><ul class="safeguard-list"><li><span class="check-badge">✓</span><div><strong>Fallback remains unchanged</strong><small>Claude Sonnet 5 stays available as backup.</small></div></li><li><span class="check-badge">✓</span><div><strong>Evidence capture is supported</strong><small>Provider, model, response, usage, and reasoning summary.</small></div></li><li><span class="number-badge">1</span><div><strong>Review disputed case 101779</strong><small>The new model recommends a different escalation path.</small></div></li></ul></section>
-          </div>
-        </section>
-
-        <section class="view" id="view-activity" data-title="Activity & evidence">
-          <div class="page-heading compact-heading"><div><p class="eyebrow">Proof, not terminal logs</p><h1>Activity & evidence</h1><p class="lede">Understand what ran, what changed, what failed, and what the application can actually prove.</p></div><button class="button secondary" type="button">Export review packet</button></div>
-          <div class="activity-layout">
-            <section class="panel timeline-panel"><div class="directory-toolbar"><label class="search-field"><span>⌕</span><input type="search" placeholder="Search cases, agents, providers" aria-label="Search activity"></label><select aria-label="Filter status"><option>All outcomes</option><option>Completed</option><option>Needs review</option><option>Failed</option></select></div><div class="timeline"><article><span class="timeline-dot good"></span><time>00:08</time><div><div class="timeline-title"><strong>QBO Analyst completed case 101847</strong><span class="tag success">Evidence complete</span></div><p>Answer grounded in the parsed screenshot and one trusted knowledge record.</p><small>Claude Sonnet 5 · 38 seconds · $0.19</small></div><button class="text-button" type="button">Inspect</button></article><article><span class="timeline-dot blue"></span><time>23:54</time><div><div class="timeline-title"><strong>Readiness check completed</strong><span class="tag success">Passed</span></div><p>Five agents, three primary providers, and four backups were checked.</p><small>Automatic check · 14 seconds</small></div><button class="text-button" type="button">Evidence</button></article><article><span class="timeline-dot warn"></span><time>23:31</time><div><div class="timeline-title"><strong>Image Parser result reviewed</strong><span class="tag warning">Partial evidence</span></div><p>Visible fields passed, but the older provider reasoning record had expired.</p><small>Case 101845 · Gemini 3.6 Flash</small></div><button class="text-button" type="button">Review gap</button></article><article><span class="timeline-dot violet"></span><time>Yesterday</time><div><div class="timeline-title"><strong>Model change evaluation finished</strong><span class="tag review">Decision needed</span></div><p>GPT-5.6 Sol improved 23 approved cases; one result requires human judgment.</p><small>QBO Analyst · 24-case replay</small></div><button class="text-button" type="button" data-open-change>Compare</button></article></div></section>
-            <aside class="panel evidence-key"><p class="eyebrow">Evidence language</p><h2>What the labels mean</h2><dl><div><dt><span class="status-dot success"></span>Complete</dt><dd>Every required artifact was saved and linked.</dd></div><div><dt><span class="status-dot warning"></span>Partial</dt><dd>The result exists, but some supporting evidence is missing.</dd></div><div><dt><span class="status-dot danger"></span>Failed</dt><dd>The work finished with a confirmed error.</dd></div><div><dt><span class="status-dot neutral"></span>Incomplete</dt><dd>The check stopped or lost evidence, so no honest verdict is possible.</dd></div></dl></aside>
-          </div>
-        </section>
-      </main>
+      <div class="overall-status"><span class="status-dot"></span> Ready for QBO work</div>
     </div>
-  </div>
 
-  <div class="modal-backdrop" id="changeModal" hidden>
-    <section class="change-modal" role="dialog" aria-modal="true" aria-labelledby="changeTitle">
-      <header class="modal-head"><div><p class="eyebrow">Proposed release · QBO Analyst</p><h2 id="changeTitle">Review the model change</h2><p>Compare the current and proposed behavior before anything changes.</p></div><button class="icon-button" type="button" id="closeModal" aria-label="Close comparison">×</button></header>
-      <div class="modal-body">
-        <div class="change-route"><article><span>Current</span><strong>Claude Sonnet 5</strong><small>Primary · released Jun 28</small></article><span class="route-arrow">→</span><article class="proposed"><span>Proposed</span><strong>GPT-5.6 Sol</strong><small>Primary · not live</small></article><article class="unchanged"><span>Backup remains</span><strong>Claude Sonnet 5</strong><small>Automatic failover</small></article></div>
-        <div class="modal-grid">
-          <section class="comparison-card"><div class="panel-head"><div><p class="eyebrow">Approved case replay</p><h3>23 of 24 cases improved or matched</h3></div><span class="tag success">Passed checks</span></div><div class="comparison-table"><div class="comparison-row header"><span>Measure</span><span>Current</span><span>Proposed</span><span>Change</span></div><div class="comparison-row"><span>Evidence-grounded answers</span><span>92%</span><span>96%</span><span class="good-text">+4%</span></div><div class="comparison-row"><span>Median response time</span><span>49s</span><span>31s</span><span class="good-text">−18s</span></div><div class="comparison-row"><span>Average cost per case</span><span>$0.16</span><span>$0.23</span><span>+$0.07</span></div><div class="comparison-row"><span>Fallback success</span><span>100%</span><span>100%</span><span>Same</span></div></div></section>
-          <aside class="review-case"><span class="tag review">Your judgment needed</span><h3>Case 101779 · Payroll correction</h3><p>The proposed model recommends escalation after two failed corrections. The current model recommends collecting another payroll report first.</p><div class="choice-group" role="radiogroup" aria-label="Choose preferred result"><label><input type="radio" name="caseChoice" value="proposed"><span><strong>Proposed is better</strong><small>Escalate after confirmed repeated failure</small></span></label><label><input type="radio" name="caseChoice" value="current"><span><strong>Current is better</strong><small>Collect one more report before escalation</small></span></label><label><input type="radio" name="caseChoice" value="unclear"><span><strong>Neither · update instructions</strong><small>The expected behavior needs clarification</small></span></label></div></aside>
+    <nav class="view-tabs" aria-label="AI team views">
+      <button class="view-tab active" data-view="team" type="button">Team</button>
+      <button class="view-tab" data-view="trust" type="button">Trust</button>
+      <button class="view-tab" data-view="decisions" type="button">
+        Decisions <span class="tab-count">1</span>
+      </button>
+    </nav>
+
+    <section class="view active" id="teamView" aria-labelledby="teamTitle">
+      <div class="section-intro">
+        <div>
+          <h2 id="teamTitle">Your QBO specialist team</h2>
+          <p>Five specialists turn evidence into a reviewed answer. Each one has one clear job.</p>
         </div>
-        <div class="impact-strip"><span class="shield-icon">◇</span><div><strong>Impact if released</strong><p>Only the QBO Analyst changes. Parser, INV Search, Triage, prompts, tools, permissions, and backup routing stay unchanged.</p></div><button class="text-button" type="button">View full evidence</button></div>
+        <button class="secondary-button" id="checkTeamButton" type="button">Check team</button>
       </div>
-      <footer class="modal-foot"><div><span class="status-dot warning"></span><span id="releaseStatus">Choose an answer for the disputed case to continue.</span></div><div><button class="button secondary" type="button" id="rejectChange">Keep current model</button><button class="button primary" type="button" id="approveChange" disabled>Approve and schedule release</button></div></footer>
+
+      <div class="workflow" aria-label="Agent workflow">
+        <button class="agent-step" data-agent="parser" type="button">
+          <span class="step-number">1</span>
+          <span class="agent-copy">
+            <span class="agent-name">Image Parser</span>
+            <span class="agent-job">Reads the screenshot and records only what is visible.</span>
+          </span>
+          <span class="agent-state"><span class="status-dot"></span> Ready</span>
+          <span class="chevron" aria-hidden="true">›</span>
+        </button>
+
+        <div class="handoff"><span></span><small>hands evidence to</small><span></span></div>
+
+        <div class="parallel-group">
+          <p class="group-label">INVESTIGATE IN PARALLEL</p>
+          <button class="agent-step" data-agent="search" type="button">
+            <span class="step-number">2a</span>
+            <span class="agent-copy">
+              <span class="agent-name">INV Search</span>
+              <span class="agent-job">Looks for a known issue that matches the evidence.</span>
+            </span>
+            <span class="agent-state"><span class="status-dot"></span> Ready</span>
+            <span class="chevron" aria-hidden="true">›</span>
+          </button>
+          <button class="agent-step" data-agent="triage" type="button">
+            <span class="step-number">2b</span>
+            <span class="agent-copy">
+              <span class="agent-name">Triage</span>
+              <span class="agent-job">Finds the likely cause and the safest next checks.</span>
+            </span>
+            <span class="agent-state"><span class="status-dot"></span> Ready</span>
+            <span class="chevron" aria-hidden="true">›</span>
+          </button>
+        </div>
+
+        <div class="handoff"><span></span><small>brings findings to</small><span></span></div>
+
+        <button class="agent-step" data-agent="analyst" type="button">
+          <span class="step-number">3</span>
+          <span class="agent-copy">
+            <span class="agent-name">QBO Analyst</span>
+            <span class="agent-job">Combines the findings into a clear recommendation.</span>
+          </span>
+          <span class="agent-state"><span class="status-dot"></span> Ready</span>
+          <span class="chevron" aria-hidden="true">›</span>
+        </button>
+
+        <div class="handoff"><span></span><small>after you confirm the outcome</small><span></span></div>
+
+        <button class="agent-step" data-agent="curator" type="button">
+          <span class="step-number">4</span>
+          <span class="agent-copy">
+            <span class="agent-name">Knowledge Curator</span>
+            <span class="agent-job">Turns a confirmed resolution into reusable team knowledge.</span>
+          </span>
+          <span class="agent-state"><span class="status-dot"></span> Ready</span>
+          <span class="chevron" aria-hidden="true">›</span>
+        </button>
+      </div>
+
+      <div class="human-role">
+        <span class="human-icon" aria-hidden="true">✓</span>
+        <div><strong>Your role</strong><p>You confirm important facts, approve the final answer, and decide what becomes shared knowledge.</p></div>
+      </div>
     </section>
+
+    <section class="view" id="trustView" aria-labelledby="trustTitle">
+      <div class="verdict-card">
+        <div class="verdict-icon">✓</div>
+        <div>
+          <p class="eyebrow">CURRENT VERDICT</p>
+          <h2 id="trustTitle">Ready for QBO work</h2>
+          <p>The team has what it needs, and its latest reviewed tests passed.</p>
+        </div>
+        <button class="secondary-button" id="runCheckButton" type="button">Run check again</button>
+      </div>
+
+      <div class="trust-grid">
+        <div class="checklist-card">
+          <h3>What this verdict checked</h3>
+          <ul class="checklist">
+            <li><span>✓</span><div><strong>Every job has an available specialist</strong><small>5 of 5 agents can work</small></div></li>
+            <li><span>✓</span><div><strong>Important jobs have a backup</strong><small>A provider failure will not silently stop the workflow</small></div></li>
+            <li><span>✓</span><div><strong>Approved examples still pass</strong><small>24 of 24 reviewed QBO cases passed</small></div></li>
+            <li><span>✓</span><div><strong>Work can be explained later</strong><small>Agent, model, evidence, and handoffs are recorded</small></div></li>
+          </ul>
+        </div>
+
+        <div class="review-card">
+          <div class="card-heading"><div><h3>Recent proof</h3><p>Reviewed cases, not abstract scores.</p></div><button class="text-button" type="button">See all</button></div>
+          <div class="proof-row"><span class="proof-status">Passed</span><div><strong>Bank feed stopped updating</strong><small>Reviewed today · answer matched confirmed outcome</small></div></div>
+          <div class="proof-row"><span class="proof-status">Passed</span><div><strong>Duplicate opening balance</strong><small>Reviewed yesterday · evidence remained traceable</small></div></div>
+          <div class="proof-row"><span class="proof-status">Passed</span><div><strong>Payroll tax payment mismatch</strong><small>Reviewed Jul 21 · safe next step was correct</small></div></div>
+        </div>
+      </div>
+
+      <div class="trust-note"><strong>What “ready” does not mean</strong><p>The AI can still be wrong. Ready means the team is available, recently tested, and able to show its evidence. You remain the final reviewer.</p></div>
+    </section>
+
+    <section class="view" id="decisionsView" aria-labelledby="decisionsTitle">
+      <div class="section-intro">
+        <div><h2 id="decisionsTitle">One decision needs you</h2><p>The team will keep using its current setup until you decide.</p></div>
+      </div>
+
+      <article class="decision-card" id="decisionCard">
+        <div class="decision-topline"><span class="decision-type">MODEL CHANGE</span><span class="decision-age">Suggested today</span></div>
+        <h3>Use the newer reasoning model for QBO Analyst?</h3>
+        <p class="decision-summary">It gave clearer next steps in reviewed cases, but used a little more time. Nothing changes unless you approve it.</p>
+
+        <div class="comparison">
+          <label class="choice current-choice">
+            <input type="radio" name="modelChoice" value="current" checked>
+            <span class="choice-radio"></span>
+            <span><small>CURRENT</small><strong>Keep Sonnet 4.6</strong><em>Fast and proven</em></span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="modelChoice" value="proposed">
+            <span class="choice-radio"></span>
+            <span><small>PROPOSED</small><strong>Move to Sonnet 4.7</strong><em>Clearer recommendations</em></span>
+          </label>
+        </div>
+
+        <dl class="decision-evidence">
+          <div><dt>What got better</dt><dd>More specific next actions in 7 of 24 reviewed cases.</dd></div>
+          <div><dt>What might get worse</dt><dd>About 3 seconds slower on complex cases.</dd></div>
+          <div><dt>What stays the same</dt><dd>Agent job, evidence rules, backups, and your approval step.</dd></div>
+        </dl>
+
+        <details>
+          <summary>See the one case reviewers disagreed on</summary>
+          <p>The newer model suggested reconciling before checking the opening balance. The current model suggested the safer order. This case remains marked for human review.</p>
+        </details>
+
+        <div class="decision-actions">
+          <button class="text-button" id="dismissDecision" type="button">Not now</button>
+          <button class="primary-button" id="approveDecision" type="button" disabled>Approve selected change</button>
+        </div>
+      </article>
+
+      <div class="empty-state" id="emptyDecisions" hidden>
+        <div>✓</div><h3>No decisions waiting</h3><p>The AI team will continue with the setup you approved.</p>
+      </div>
+    </section>
+  </main>
+
+  <div class="overlay" id="agentOverlay" hidden>
+    <button class="overlay-backdrop" data-close="agent" aria-label="Close agent details"></button>
+    <aside class="side-panel" role="dialog" aria-modal="true" aria-labelledby="agentPanelTitle">
+      <button class="close-button" data-close="agent" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">SPECIALIST</p>
+      <h2 id="agentPanelTitle">Agent name</h2>
+      <p class="panel-lead" id="agentPanelLead"></p>
+      <div class="detail-block"><h3>Its job</h3><p id="agentPurpose"></p></div>
+      <div class="detail-block"><h3>What it receives</h3><p id="agentInput"></p></div>
+      <div class="detail-block"><h3>What it hands off</h3><p id="agentOutput"></p></div>
+      <div class="boundary-block"><h3>It cannot</h3><p id="agentBoundary"></p></div>
+      <div class="evidence-strip"><span class="status-dot"></span><div><strong>Recently checked</strong><small id="agentEvidence"></small></div></div>
+      <details class="technical-details"><summary>AI setup</summary><div><span>Primary</span><strong id="agentPrimary"></strong><span>Backup</span><strong id="agentBackup"></strong></div></details>
+    </aside>
   </div>
 
-  <div class="command-palette" id="commandPalette" hidden>
-    <div class="command-box" role="dialog" aria-modal="true" aria-label="Search Mission Control"><label><span>⌕</span><input type="search" id="commandInput" placeholder="Search agents, providers, cases, or settings"></label><div class="command-results"><button type="button" data-command-view="agents"><span class="agent-glyph blue">⌗</span><span><strong>Open Image Parser profile</strong><small>Agent team · extraction</small></span><kbd>↵</kbd></button><button type="button" data-command-view="releases"><span class="change-icon">↗</span><span><strong>Review proposed model change</strong><small>Evaluations & releases</small></span><kbd>↵</kbd></button><button type="button" data-command-view="providers"><span class="provider-logo openai small-logo">◎</span><span><strong>Manage OpenAI API</strong><small>Providers & models</small></span><kbd>↵</kbd></button></div></div>
+  <div class="overlay" id="advancedOverlay" hidden>
+    <button class="overlay-backdrop" data-close="advanced" aria-label="Close advanced settings"></button>
+    <aside class="side-panel wide-panel" role="dialog" aria-modal="true" aria-labelledby="advancedTitle">
+      <button class="close-button" data-close="advanced" type="button" aria-label="Close">×</button>
+      <p class="eyebrow">ADVANCED</p>
+      <h2 id="advancedTitle">AI connections</h2>
+      <p class="panel-lead">The team chooses from these approved connections. Most people should not need to change them.</p>
+      <section class="advanced-section"><h3>In use</h3><div class="connection-row"><span class="provider-mark anthropic">A</span><div><strong>Anthropic</strong><small>Used by 3 specialists · healthy</small></div><span class="connected">Connected</span></div><div class="connection-row"><span class="provider-mark openai">O</span><div><strong>OpenAI</strong><small>Used by 2 specialists · healthy</small></div><span class="connected">Connected</span></div></section>
+      <section class="advanced-section"><h3>Backup</h3><div class="connection-row"><span class="provider-mark google">G</span><div><strong>Google</strong><small>Available if a primary connection fails</small></div><span class="connected">Connected</span></div></section>
+      <section class="advanced-section"><h3>Safety</h3><label class="setting-row"><span><strong>Require approval for AI changes</strong><small>Models, prompts, and permissions cannot change silently.</small></span><input type="checkbox" checked><i></i></label></section>
+      <button class="secondary-button full-button" id="providerDetailsButton" type="button">Manage models and credentials</button>
+      <p class="fine-print">Prototype note: detailed provider catalogs and secret management would open one level deeper, away from everyday work.</p>
+    </aside>
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
