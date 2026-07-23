@@ -1,12 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const request = require('supertest');
+const mongoose = require('mongoose');
 
 const { connect, disconnect } = require('./_mongo-helper');
 const { createApp } = require('../src/app');
 const Escalation = require('../src/models/Escalation');
 const EscalationAttentionItem = require('../src/models/EscalationAttentionItem');
 const KnowledgeCandidate = require('../src/models/KnowledgeCandidate');
+const RecoveryOperation = require('../src/models/RecoveryOperation');
 const {
   clearProviderStubs,
   registerProviderStub,
@@ -75,6 +77,7 @@ test.beforeEach(async () => {
   await Escalation.deleteMany({});
   await EscalationAttentionItem.deleteMany({});
   await KnowledgeCandidate.deleteMany({});
+  await RecoveryOperation.deleteMany({});
   delete process.env.KNOWLEDGE_DEFAULT_ROLE;
   delete process.env.KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED;
 });
@@ -167,6 +170,213 @@ test('knowledge management routes support review edits and database-first publis
     .query({ query: 'archived forms employer summary', allowedUse: 'agent-response', includeLegacy: 'false' });
   assert.equal(context.status, 200);
   assert.equal(context.body.context.records[0].id, `candidate:${candidate._id}`);
+});
+
+test('recovery review endpoint clears the active marker into an audited resolution record', async () => {
+  const app = createApp();
+  const agent = request(app);
+  const escalation = await makeEscalation({ caseNumber: 'CASE-MGMT-RECOVERY-REVIEW' });
+  const recoveryOperationId = 'recovery-operation-kb-review';
+  const markedAt = new Date('2026-07-22T12:00:00.000Z');
+  const candidate = await makeCandidate(escalation, {
+    reviewStatus: 'approved',
+    publishTarget: 'category',
+    reusableOutcome: 'canonical',
+    rootCause: 'The recovered triage result changed the supported cause.',
+    exactFix: 'Review the recovered triage result before reusing this lesson.',
+    needsReviewAfterRecovery: {
+      recoveryOperationId,
+      markedAt,
+      reason: 'The triage result changed during recovery. Review this knowledge draft before trusting or publishing it.',
+    },
+  });
+
+  const detail = await agent.get(`/api/knowledge/records/candidate:${candidate._id}`);
+  assert.equal(detail.status, 200);
+  assert.equal(detail.body.record.needsReviewAfterRecovery.recoveryOperationId, recoveryOperationId);
+  assert.equal(detail.body.record.trustState, 'candidate');
+  assert.deepEqual(detail.body.record.allowedUses, ['review-only']);
+
+  const blockedPublish = await agent
+    .post(`/api/knowledge/records/candidate:${candidate._id}/publish`)
+    .set('x-knowledge-role', 'publisher')
+    .set('x-knowledge-actor', 'publisher-before-review')
+    .send({ exportMarkdown: false });
+  assert.equal(blockedPublish.status, 409);
+  assert.equal(blockedPublish.body.code, 'KNOWLEDGE_RECOVERY_REVIEW_REQUIRED');
+
+  const agentDenied = await agent
+    .post(`/api/knowledge/records/candidate:${candidate._id}/recovery-review/resolve`)
+    .set('x-knowledge-role', 'admin')
+    .set('x-knowledge-actor', 'knowledgebase-agent')
+    .send({ recoveryOperationId });
+  assert.equal(agentDenied.status, 403);
+  assert.equal(agentDenied.body.code, 'KNOWLEDGE_PERMISSION_DENIED');
+
+  const resolved = await agent
+    .post(`/api/knowledge/records/candidate:${candidate._id}/recovery-review/resolve`)
+    .set('x-knowledge-role', 'admin')
+    .set('x-knowledge-actor', 'recovery-reviewer')
+    .send({ recoveryOperationId });
+  assert.equal(resolved.status, 200, JSON.stringify(resolved.body));
+  assert.equal(resolved.body.resolved, true);
+  assert.equal(resolved.body.idempotent, false);
+  assert.equal(resolved.body.record.needsReviewAfterRecovery, null);
+  assert.equal(resolved.body.record.reviewedAfterRecovery.recoveryOperationId, recoveryOperationId);
+  assert.equal(resolved.body.record.reviewedAfterRecovery.resolvedBy, 'recovery-reviewer');
+  assert.ok(resolved.body.record.reviewedAfterRecovery.resolvedAt);
+  assert.equal(resolved.body.record.auditEvents[0].action, 'record.recovery-review.resolve');
+
+  const durable = await KnowledgeCandidate.findById(candidate._id).lean();
+  assert.equal(durable.needsReviewAfterRecovery, null);
+  assert.equal(durable.reviewedAfterRecovery.recoveryOperationId, recoveryOperationId);
+  assert.ok(durable.reviewedAfterRecovery.resolvedAt);
+
+  const repeated = await agent
+    .post(`/api/knowledge/records/candidate:${candidate._id}/recovery-review/resolve`)
+    .set('x-knowledge-role', 'admin')
+    .set('x-knowledge-actor', 'recovery-reviewer')
+    .send({ recoveryOperationId });
+  assert.equal(repeated.status, 200);
+  assert.equal(repeated.body.resolved, false);
+  assert.equal(repeated.body.idempotent, true);
+});
+
+test('recovery review resolution rejects a stale displayed operation and preserves the newer marker', async () => {
+  const app = createApp();
+  const agent = request(app);
+  const escalation = await makeEscalation({ caseNumber: 'CASE-MGMT-STALE-RECOVERY-REVIEW' });
+  const candidate = await makeCandidate(escalation, {
+    needsReviewAfterRecovery: {
+      recoveryOperationId: 'recovery-operation-b',
+      markedAt: new Date(),
+      reason: 'Review the newer recovery B.',
+    },
+    recoveryReviewHistory: [{
+      recoveryOperationId: 'recovery-operation-a',
+      markedAt: new Date(Date.now() - 2_000),
+      reason: 'Review recovery A.',
+      supersededAt: new Date(Date.now() - 1_000),
+      supersededByRecoveryOperationId: 'recovery-operation-b',
+    }],
+  });
+
+  const staleResolve = await agent
+    .post(`/api/knowledge/records/candidate:${candidate._id}/recovery-review/resolve`)
+    .set('x-knowledge-role', 'admin')
+    .set('x-knowledge-actor', 'stale-recovery-reviewer')
+    .send({ recoveryOperationId: 'recovery-operation-a' });
+
+  assert.equal(staleResolve.status, 409);
+  assert.equal(staleResolve.body.code, 'KNOWLEDGE_RECOVERY_REVIEW_REMARKED');
+  assert.match(staleResolve.body.error, /re-marked by a newer recovery/i);
+  const durable = await KnowledgeCandidate.findById(candidate._id).lean();
+  assert.equal(durable.needsReviewAfterRecovery.recoveryOperationId, 'recovery-operation-b');
+  assert.equal(durable.reviewedAfterRecovery, null);
+});
+
+test('publish is blocked while a matching recovery intent is pending before its marker is attached', async () => {
+  const app = createApp();
+  const agent = request(app);
+  const conversationId = new mongoose.Types.ObjectId();
+  const escalation = await makeEscalation({
+    caseNumber: 'CASE-MGMT-PENDING-RECOVERY-PUBLISH',
+    conversationId,
+  });
+  const candidate = await makeCandidate(escalation, {
+    conversationId,
+    reviewStatus: 'approved',
+    publishTarget: 'category',
+    reusableOutcome: 'canonical',
+    rootCause: 'A verified cause exists.',
+    exactFix: 'Use the verified final fix.',
+  });
+  await RecoveryOperation.create({
+    operationId: 'pending-publish-gate-recovery',
+    idempotencyKey: 'pending-publish-gate-idempotency',
+    dedupeKey: 'pending-publish-gate-dedupe',
+    conversationId,
+    targetStage: 'triage',
+    strategy: 'rerun-stage',
+    status: 'succeeded',
+    evidenceFingerprint: { contractVersion: 1, evidenceUpdatedAt: '', missingCodes: [] },
+    downstreamMarking: {
+      status: 'pending',
+      knowledgeCandidateId: null,
+      reason: 'The previous triage result was lost.',
+      markedAt: new Date(),
+    },
+  });
+
+  const publish = await agent
+    .post(`/api/knowledge/records/candidate:${candidate._id}/publish`)
+    .set('x-knowledge-role', 'publisher')
+    .set('x-knowledge-actor', 'publisher-during-recovery-window')
+    .send({ exportMarkdown: false });
+  assert.equal(publish.status, 409, JSON.stringify(publish.body));
+  assert.equal(publish.body.code, 'KNOWLEDGE_RECOVERY_REVIEW_REQUIRED');
+  assert.match(publish.body.error, /still being attached/i);
+});
+
+test('draft generation stays successful when recovery reconciliation fails and a later retry attaches the marker', async () => {
+  const app = createApp();
+  const agent = request(app);
+  const conversationId = new mongoose.Types.ObjectId();
+  const escalation = await makeEscalation({
+    caseNumber: 'CASE-MGMT-NONFATAL-RECOVERY-RECONCILE',
+    conversationId,
+  });
+  const operation = await RecoveryOperation.create({
+    operationId: 'nonfatal-draft-reconcile-recovery',
+    idempotencyKey: 'nonfatal-draft-reconcile-idempotency',
+    dedupeKey: 'nonfatal-draft-reconcile-dedupe',
+    conversationId,
+    targetStage: 'triage',
+    strategy: 'rerun-stage',
+    status: 'succeeded',
+    evidenceFingerprint: { contractVersion: 1, evidenceUpdatedAt: '', missingCodes: [] },
+    conversationWriteApplied: true,
+    downstreamMarking: {
+      status: 'pending',
+      knowledgeCandidateId: null,
+      reason: 'The previous triage result was lost.',
+      markedAt: new Date(),
+    },
+  });
+  const recoveryService = require('../src/services/evidence-recovery-service');
+  const realReconcile = recoveryService.reconcilePendingRecoveryForKnowledgeCandidate;
+  const realWarn = console.warn;
+  let warned = '';
+  recoveryService.reconcilePendingRecoveryForKnowledgeCandidate = async () => {
+    throw new Error('Transient recovery lookup failure');
+  };
+  console.warn = (...args) => { warned = args.join(' '); };
+
+  let generated;
+  try {
+    generated = await agent
+      .post(`/api/escalations/${escalation._id}/knowledge/generate?enrich=false`)
+      .send({ force: true });
+  } finally {
+    recoveryService.reconcilePendingRecoveryForKnowledgeCandidate = realReconcile;
+    console.warn = realWarn;
+  }
+
+  assert.equal(generated.status, 200, JSON.stringify(generated.body));
+  assert.equal(generated.body.ok, true);
+  assert.match(warned, /reconciliation failed \(non-fatal\).*Transient recovery lookup failure/i);
+  const candidate = await KnowledgeCandidate.findOne({ escalationId: escalation._id });
+  assert.ok(candidate, 'the draft was already saved before reconciliation failed');
+  assert.equal(candidate.needsReviewAfterRecovery, null);
+
+  const reconciled = await realReconcile(candidate);
+  assert.equal(reconciled, 1);
+  const [markedCandidate, durableOperation] = await Promise.all([
+    KnowledgeCandidate.findById(candidate._id).lean(),
+    RecoveryOperation.findById(operation._id).lean(),
+  ]);
+  assert.equal(markedCandidate.needsReviewAfterRecovery.recoveryOperationId, operation.operationId);
+  assert.equal(durableOperation.downstreamMarking.status, 'done');
 });
 
 test('knowledge publish rejects attempted steps that are not a proven final fix', async () => {

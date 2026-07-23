@@ -251,6 +251,36 @@ function isGenuineAiTriageResult(result) {
   return DIRECT_TRIAGE_PROVIDERS.includes(provider) && Boolean(model) && Boolean(providerPackageId);
 }
 
+function isReliablePreviousBaseline(result, inputSnapshot, deterministicFields) {
+  return Boolean(
+    result
+    && isGenuineAiTriageResult(result)
+    && isUnexpiredTriageResult(result)
+    && sha256(safeString(result.parserText, '')) === inputSnapshot?.canonicalTemplateSha256
+    && parseFieldsAgree(deterministicFields, result.parseFields)
+  );
+}
+
+function resolvePreviousBaseline({
+  sourceResult,
+  inputSnapshot,
+  deterministicFields,
+  visibleCard = null,
+}) {
+  const reliable = isReliablePreviousBaseline(sourceResult, inputSnapshot, deterministicFields);
+  return {
+    displayCard: isObject(visibleCard)
+      ? visibleCard
+      : reliable && isObject(sourceResult?.card) ? sourceResult.card : null,
+    reliable,
+  };
+}
+
+function isRetryableTerminalOperation(operation) {
+  return RETRYABLE_TERMINAL_STATUSES.has(operation?.status)
+    || (operation?.status === 'manual-review' && operation?.errorCode === 'RECOVERY_CANDIDATE_EXPIRED');
+}
+
 function normalizeFingerprint(value) {
   return {
     contractVersion: Number(value?.contractVersion) || EVIDENCE_CONTRACT_VERSION,
@@ -420,19 +450,30 @@ async function buildReadiness(runtimeSnapshot) {
   const cachedPreflight = peekPreflightCache(provider, model);
 
   let label;
+  let state = 'unknown';
   if (!DIRECT_TRIAGE_PROVIDERS.includes(provider)) {
+    state = 'unsupported';
     label = 'The configured provider is not supported by the triage stage.';
   } else if (keyRequired && !keyConfigured) {
+    state = 'key-required';
     label = 'The required provider key is not configured.';
+  } else if (cachedPreflight?.ok === false) {
+    state = 'failed-preflight';
+    label = `The last connection check for this provider failed at ${cachedPreflight.checkedAt}; recovery would likely fail.`;
   } else if (cachedPreflight?.ok) {
+    state = 'ready';
     label = 'A recent live readiness check passed.';
   } else if (!health.healthy) {
+    state = 'unhealthy';
     label = 'Recent provider failures indicate that the provider may be unavailable.';
   } else if (keyRequired) {
+    state = 'not-checked';
     label = 'Key configured; live readiness not checked.';
   } else if (URL_BASED_PROVIDERS.has(provider)) {
+    state = 'not-checked';
     label = 'A server URL is configured; no API key is required, and live readiness has not been checked.';
   } else {
+    state = 'not-checked';
     label = 'No API key is required; live readiness has not been checked.';
   }
 
@@ -441,6 +482,7 @@ async function buildReadiness(runtimeSnapshot) {
     model,
     keyRequired,
     keyConfigured,
+    state,
     recentHealth: {
       healthy: Boolean(health.healthy),
       consecutiveFailures: Number(health.consecutiveFailures) || 0,
@@ -494,9 +536,7 @@ function estimateDuration(conversation, sourceResult) {
 }
 
 async function buildDownstreamNote(conversation) {
-  const candidateFilters = [];
-  if (conversation?._id) candidateFilters.push({ conversationId: conversation._id });
-  if (conversation?.escalationId) candidateFilters.push({ escalationId: conversation.escalationId });
+  const candidateFilters = knowledgeCandidateFilters(conversation);
   const knowledgeCandidateExists = candidateFilters.length > 0
     ? Boolean(await KnowledgeCandidate.exists({ $or: candidateFilters }))
     : false;
@@ -509,29 +549,266 @@ async function buildDownstreamNote(conversation) {
   };
 }
 
-async function markKnowledgeDraftAfterMeaningfulRecovery(operation, conversation, markedAt) {
-  if (!operation?.candidateResult?.comparison?.meaningfullyDifferent) return null;
+function knowledgeCandidateFilters(conversation) {
   const candidateFilters = [];
   if (conversation?._id) candidateFilters.push({ conversationId: conversation._id });
   if (conversation?.escalationId) candidateFilters.push({ escalationId: conversation.escalationId });
-  if (candidateFilters.length === 0) return null;
-  const marker = {
-    recoveryOperationId: operation.operationId,
-    markedAt,
-    reason: 'An accepted recovery changed the triage card meaningfully. Review this knowledge draft before trusting or publishing it.',
+  return candidateFilters;
+}
+
+function publicDownstreamMarker(operation) {
+  const marking = operation?.downstreamMarking || {};
+  if (!['pending', 'done'].includes(marking.status) || !marking.knowledgeCandidateId) return null;
+  return {
+    recoveryOperationId: safeString(operation.operationId, ''),
+    knowledgeCandidateId: safeString(marking.knowledgeCandidateId, ''),
+    markedAt: marking.markedAt || null,
+    reason: safeString(marking.reason, ''),
   };
-  const candidate = await KnowledgeCandidate.findOneAndUpdate(
-    { $or: candidateFilters },
-    { $set: { needsReviewAfterRecovery: marker } },
-    { returnDocument: 'after' }
-  )
+}
+
+async function markDownstreamOperationSuperseded(
+  operationId,
+  supersededByRecoveryOperationId,
+  { expectedStatuses = ['pending', 'done'] } = {}
+) {
+  if (!operationId || operationId === supersededByRecoveryOperationId) return false;
+  const completedAt = new Date();
+  const statusFilter = expectedStatuses.length === 1
+    ? expectedStatuses[0]
+    : { $in: expectedStatuses };
+  const updated = await RecoveryOperation.updateOne(
+    {
+      operationId,
+      'downstreamMarking.status': statusFilter,
+    },
+    {
+      $set: {
+        'downstreamMarking.status': 'superseded',
+        'downstreamMarking.completedAt': completedAt,
+        heartbeatAt: completedAt,
+      },
+      $unset: { 'postRecoveryEvidence.knowledgeDraftNeedsReview': 1 },
+      $push: {
+        progress: {
+          $each: [{
+            at: completedAt,
+            kind: 'downstream-superseded',
+            message: `A newer recovery (${supersededByRecoveryOperationId}) now owns the knowledge draft review marker.`,
+          }],
+          $slice: -MAX_PROGRESS_EVENTS,
+        },
+      },
+    }
+  );
+  return updated.modifiedCount === 1;
+}
+
+function actualDownstreamMarkerOwner(candidate) {
+  return safeString(
+    candidate?.needsReviewAfterRecovery?.recoveryOperationId
+      || candidate?.reviewedAfterRecovery?.recoveryOperationId,
+    ''
+  );
+}
+
+async function reconcileDoneDownstreamOwnership(operation) {
+  const marking = operation?.downstreamMarking;
+  if (marking?.status !== 'done' || !marking.knowledgeCandidateId) return operation;
+
+  const candidate = await KnowledgeCandidate.findById(marking.knowledgeCandidateId)
+    .select('needsReviewAfterRecovery reviewedAfterRecovery')
+    .lean();
+  const actualOwner = actualDownstreamMarkerOwner(candidate);
+  if (!actualOwner || actualOwner === operation.operationId) return operation;
+
+  await markDownstreamOperationSuperseded(operation.operationId, actualOwner, {
+    expectedStatuses: ['done'],
+  });
+  operation.downstreamMarking.status = 'superseded';
+  operation.downstreamMarking.completedAt = new Date();
+  if (operation.postRecoveryEvidence?.knowledgeDraftNeedsReview) {
+    delete operation.postRecoveryEvidence.knowledgeDraftNeedsReview;
+  }
+  return operation;
+}
+
+async function operationOutranksDownstreamOwner(operation, activeMarker) {
+  const activeOperation = await RecoveryOperation.findOne({
+    operationId: activeMarker.recoveryOperationId,
+  }).select('attemptNumber downstreamMarking.markedAt').lean();
+  const operationAttempt = Number(operation.attemptNumber) || 1;
+  const activeAttempt = Number(activeOperation?.attemptNumber) || 1;
+  const operationMarkedAt = validDateOr(operation.downstreamMarking.markedAt, new Date(0)).getTime();
+  const activeMarkedAt = validDateOr(
+    activeOperation?.downstreamMarking?.markedAt || activeMarker.markedAt,
+    new Date(0)
+  ).getTime();
+  return operationAttempt > activeAttempt
+    || (operationAttempt === activeAttempt && operationMarkedAt > activeMarkedAt);
+}
+
+async function claimDownstreamMarker(operation, candidateId, marker, activeMarker = null) {
+  const filter = { _id: candidateId };
+  const update = { $set: { needsReviewAfterRecovery: marker } };
+  if (activeMarker?.recoveryOperationId) {
+    filter['needsReviewAfterRecovery.recoveryOperationId'] = activeMarker.recoveryOperationId;
+    update.$push = {
+      recoveryReviewHistory: {
+        recoveryOperationId: activeMarker.recoveryOperationId,
+        markedAt: activeMarker.markedAt || null,
+        reason: activeMarker.reason || '',
+        supersededAt: new Date(),
+        supersededByRecoveryOperationId: operation.operationId,
+      },
+    };
+  } else {
+    filter.needsReviewAfterRecovery = null;
+  }
+  const updated = await KnowledgeCandidate.findOneAndUpdate(filter, update, { returnDocument: 'after' })
     .select('_id needsReviewAfterRecovery')
     .lean();
-  if (!candidate) return null;
-  return {
-    ...marker,
-    knowledgeCandidateId: safeString(candidate._id, ''),
-  };
+  const ownsMarker = safeString(
+    updated?.needsReviewAfterRecovery?.recoveryOperationId,
+    ''
+  ) === operation.operationId;
+  if (ownsMarker && activeMarker?.recoveryOperationId !== undefined
+    && activeMarker.recoveryOperationId !== operation.operationId) {
+    await markDownstreamOperationSuperseded(activeMarker.recoveryOperationId, operation.operationId);
+  }
+  return ownsMarker;
+}
+
+async function prepareDownstreamMarkingIntent(
+  operation,
+  conversation,
+  comparison,
+  baselineReliable,
+  commitStartedAt,
+  markedAt
+) {
+  const candidateFilters = knowledgeCandidateFilters(conversation);
+  const candidate = candidateFilters.length > 0
+    ? await KnowledgeCandidate.findOne({ $or: candidateFilters }).select('_id').lean()
+    : null;
+  const reason = !comparison
+    ? 'The previous triage result was lost, so this draft could not be checked against it. Review this knowledge draft before trusting or publishing it.'
+    : !baselineReliable
+      ? 'The previous triage result was lost or could not be fully verified, so this draft could not be checked against an authoritative result. Review this knowledge draft before trusting or publishing it.'
+      : comparison.meaningfullyDifferent
+        ? 'The triage result changed during recovery. Review this knowledge draft before trusting or publishing it.'
+        : '';
+  const downstreamMarking = reason
+    ? {
+        status: 'pending',
+        knowledgeCandidateId: candidate?._id || null,
+        reason,
+        markedAt,
+        completedAt: null,
+      }
+    : {
+        status: 'none',
+        knowledgeCandidateId: null,
+        reason: '',
+        markedAt: null,
+        completedAt: null,
+      };
+  const recorded = await RecoveryOperation.updateOne(
+    {
+      operationId: operation.operationId,
+      status: 'running',
+      executorId: operation.executorId,
+      commitStartedAt,
+    },
+    { $set: { downstreamMarking, heartbeatAt: markedAt } }
+  );
+  if (recorded.modifiedCount !== 1) {
+    throw createServiceError('RECOVERY_STATE_CHANGED', 'Recovery lost ownership before its downstream review intent could be saved.', 409);
+  }
+  operation.downstreamMarking = downstreamMarking;
+  return downstreamMarking;
+}
+
+async function applyPendingDownstreamMarker(operation) {
+  if (operation?.downstreamMarking?.status !== 'pending') {
+    return { marker: publicDownstreamMarker(operation), ownership: 'unchanged' };
+  }
+  let candidateId = operation.downstreamMarking.knowledgeCandidateId;
+  if (!candidateId) {
+    const conversation = await Conversation.findById(operation.conversationId)
+      .select('_id escalationId')
+      .lean();
+    const filters = knowledgeCandidateFilters(conversation || { _id: operation.conversationId });
+    const candidate = filters.length > 0
+      ? await KnowledgeCandidate.findOne({ $or: filters })
+      .select('_id')
+      .lean()
+      : null;
+    if (!candidate) return { marker: null, ownership: 'unavailable' };
+    const linked = await RecoveryOperation.updateOne(
+      {
+        operationId: operation.operationId,
+        'downstreamMarking.status': 'pending',
+        'downstreamMarking.knowledgeCandidateId': null,
+      },
+      { $set: { 'downstreamMarking.knowledgeCandidateId': candidate._id } }
+    );
+    if (linked.modifiedCount !== 1) {
+      const latest = await RecoveryOperation.findOne({ operationId: operation.operationId })
+        .select('downstreamMarking')
+        .lean();
+      candidateId = latest?.downstreamMarking?.knowledgeCandidateId || null;
+      operation.downstreamMarking = latest?.downstreamMarking || operation.downstreamMarking;
+    } else {
+      candidateId = candidate._id;
+      operation.downstreamMarking.knowledgeCandidateId = candidate._id;
+    }
+  }
+  const marker = publicDownstreamMarker(operation);
+  if (!marker || !candidateId) return { marker: null, ownership: 'unavailable' };
+  const current = await KnowledgeCandidate.findById(candidateId)
+    .select('_id needsReviewAfterRecovery reviewedAfterRecovery recoveryReviewHistory')
+    .lean();
+  if (!current) {
+    throw createServiceError('KNOWLEDGE_CANDIDATE_MISSING', 'The linked knowledge draft no longer exists, so its recovery review marker could not be completed.', 409);
+  }
+  if (
+    safeString(current.reviewedAfterRecovery?.recoveryOperationId, '') === operation.operationId
+    || safeString(current.needsReviewAfterRecovery?.recoveryOperationId, '') === operation.operationId
+  ) {
+    return { marker, ownership: 'owned' };
+  }
+  const activeMarker = current.needsReviewAfterRecovery;
+  if (activeMarker?.recoveryOperationId) {
+    if (!(await operationOutranksDownstreamOwner(operation, activeMarker))) {
+      return {
+        marker: null,
+        ownership: 'superseded',
+        supersededByRecoveryOperationId: safeString(activeMarker.recoveryOperationId, ''),
+      };
+    }
+  }
+  if (await claimDownstreamMarker(operation, candidateId, marker, activeMarker)) {
+    return { marker, ownership: 'owned' };
+  }
+
+  const latest = await KnowledgeCandidate.findById(candidateId)
+    .select('needsReviewAfterRecovery reviewedAfterRecovery')
+    .lean();
+  if (
+    safeString(latest?.needsReviewAfterRecovery?.recoveryOperationId, '') === operation.operationId
+    || safeString(latest?.reviewedAfterRecovery?.recoveryOperationId, '') === operation.operationId
+  ) return { marker, ownership: 'owned' };
+  const latestActiveMarker = latest?.needsReviewAfterRecovery;
+  const supersededByRecoveryOperationId = safeString(latestActiveMarker?.recoveryOperationId, '');
+  if (supersededByRecoveryOperationId) {
+    if (await operationOutranksDownstreamOwner(operation, latestActiveMarker)) {
+      const tookOver = await claimDownstreamMarker(operation, candidateId, marker, latestActiveMarker);
+      if (tookOver) return { marker, ownership: 'owned' };
+    }
+    return { marker: null, ownership: 'superseded', supersededByRecoveryOperationId };
+  }
+  throw createServiceError('KNOWLEDGE_MARKER_FAILED', 'The linked knowledge draft could not be marked for recovery review.', 500);
 }
 
 function manualRecoveryReason(artifact) {
@@ -604,15 +881,19 @@ async function buildRecoveryOptions(conversationId) {
   const currentVisibleCard = isObject(conversation.caseIntake?.triageCard)
     ? conversation.caseIntake.triageCard
     : null;
+  const previousBaseline = resolvePreviousBaseline({
+    sourceResult,
+    inputSnapshot,
+    deterministicFields,
+    visibleCard: currentVisibleCard,
+  });
+  // Comparison answers what the reviewer would see change. Baseline reliability
+  // separately decides whether equivalence is allowed to suppress the review marker.
   const repersistComparison = sourceResult && currentVisibleCard
     ? compareTriageCards(currentVisibleCard, sourceResult.card)
     : { meaningfullyDifferent: false, differences: [], plainSummary: [] };
   const repersistEligible = Boolean(
-    sourceResult
-    && sourceIsGenuineAiResult
-    && isUnexpiredTriageResult(sourceResult)
-    && sha256(safeString(sourceResult.parserText, '')) === inputSnapshot.canonicalTemplateSha256
-    && parseFieldsAgree(deterministicFields, sourceResult.parseFields)
+    previousBaseline.reliable
     && currentParseAgrees
   );
   const rerunEligible = Boolean(
@@ -753,6 +1034,7 @@ async function buildRecoveryOptions(conversationId) {
 }
 
 function publicAttempt(attempt) {
+  const provenance = isObject(attempt?.provenance) ? attempt.provenance : {};
   return {
     attempt: attempt?.attempt || 1,
     strategy: attempt?.strategy || '',
@@ -768,6 +1050,27 @@ function publicAttempt(attempt) {
     triageResultId: attempt?.triageResultId || '',
     errorCode: attempt?.errorCode || '',
     errorMessage: attempt?.errorMessage || '',
+    provenance: {
+      plannedProvider: safeString(provenance.plannedProvider, attempt?.provider || ''),
+      plannedModel: safeString(provenance.plannedModel, attempt?.model || ''),
+      providerHandoffAt: provenance.providerHandoffAt || null,
+      contactedProviders: (Array.isArray(provenance.contactedProviders) ? provenance.contactedProviders : [])
+        .map((contact) => ({
+          attemptIndex: Number(contact?.attemptIndex) || 0,
+          role: safeString(contact?.role, ''),
+          provider: safeString(contact?.provider, ''),
+          model: safeString(contact?.model, ''),
+          contactedAt: contact?.contactedAt || null,
+          providerPackageIds: uniqueStrings(contact?.providerPackageIds),
+          traceIds: uniqueStrings(contact?.traceIds),
+          errorCode: safeString(contact?.errorCode, ''),
+        }))
+        .filter((contact) => contact.provider),
+      providerPackageIds: uniqueStrings(provenance.providerPackageIds),
+      triageResultIds: uniqueStrings(provenance.triageResultIds),
+      fallbackContacted: Boolean(provenance.fallbackContacted),
+      costMayHaveBeenIncurred: Boolean(provenance.costMayHaveBeenIncurred),
+    },
   };
 }
 
@@ -780,7 +1083,10 @@ function progressEventAt(operation, kinds) {
 
 function serializeOperation(value) {
   const operation = clonePlain(value, {}) || {};
-  const knowledgeDraftNeedsReview = operation.postRecoveryEvidence?.knowledgeDraftNeedsReview || null;
+  const downstreamMarking = operation.downstreamMarking || { status: 'none' };
+  const downstreamReviewRequired = ['pending', 'done'].includes(downstreamMarking.status);
+  const knowledgeDraftNeedsReview = operation.postRecoveryEvidence?.knowledgeDraftNeedsReview
+    || (downstreamReviewRequired ? publicDownstreamMarker(operation) : null);
   return {
     operationId: operation.operationId || '',
     planId: operationPlanId(operation),
@@ -804,11 +1110,21 @@ function serializeOperation(value) {
     progress: operation.progress || [],
     postRecoveryEvidence: operation.postRecoveryEvidence || null,
     knowledgeDraftNeedsReview,
+    downstreamReviewRequired,
+    downstreamMarking: {
+      status: downstreamMarking.status || 'none',
+      knowledgeCandidateId: downstreamMarking.knowledgeCandidateId
+        ? safeString(downstreamMarking.knowledgeCandidateId, '')
+        : null,
+      reason: downstreamMarking.reason || '',
+      markedAt: downstreamMarking.markedAt || null,
+      completedAt: downstreamMarking.completedAt || null,
+    },
     conversationWriteApplied: Boolean(operation.conversationWriteApplied),
-    providerHandoffAt: progressEventAt(operation, [
+    providerHandoffAt: operation.attempts?.map((attempt) => attempt?.provenance?.providerHandoffAt).find(Boolean)
+      || progressEventAt(operation, [
       'triage.agent_handoff_to_provider',
       'triage.generation_started',
-      'cancel-requested',
     ]),
     commitStartedAt: operation.commitStartedAt || null,
     commitCompletedAt: operation.commitCompletedAt || null,
@@ -855,6 +1171,7 @@ function serializeHistoryOperation(value) {
       plainSummary: Array.isArray(operation.candidateResult.comparison.plainSummary)
         ? operation.candidateResult.comparison.plainSummary
         : [],
+      previousResultVerified: Boolean(operation.candidateResult.comparison.previousResultVerified),
       candidateSha256: safeString(operation.candidateResult.comparison.candidateSha256, ''),
       previousSha256: safeString(operation.candidateResult.comparison.previousSha256, ''),
     } : null,
@@ -866,6 +1183,8 @@ function serializeHistoryOperation(value) {
     commitCompletedAt: serialized.commitCompletedAt,
     postRecoveryEvidence: serialized.postRecoveryEvidence,
     knowledgeDraftNeedsReview: serialized.knowledgeDraftNeedsReview,
+    downstreamReviewRequired: serialized.downstreamReviewRequired,
+    downstreamMarking: serialized.downstreamMarking,
     errorCode: serialized.errorCode,
     errorMessage: serialized.errorMessage,
     startedAt: serialized.startedAt,
@@ -919,12 +1238,138 @@ function eventMessage(kind) {
 function createRecoveryEventBus(operationId, registryEntry) {
   return {
     emit(kind, detail = {}) {
-      if (kind === 'triage.agent_handoff_to_provider') registryEntry.handedOff = true;
+      if (kind === 'triage.agent_handoff_to_provider') {
+        const contactedAt = new Date();
+        registryEntry.handedOff = true;
+        registryEntry.providerHandoffAt ||= contactedAt;
+        const provider = safeString(detail.provider, '');
+        const model = safeString(detail.model, '');
+        const role = safeString(detail.role, '') || (registryEntry.contactedProviders.length === 0 ? 'primary' : 'fallback');
+        const attemptIndex = Number(detail.attemptIndex) || (registryEntry.contactedProviders.length + 1);
+        const existing = registryEntry.contactedProviders.find((contact) => (
+          contact.provider === provider && contact.model === model
+          && contact.role === role && contact.attemptIndex === attemptIndex
+        ));
+        if (!existing && provider) {
+          registryEntry.contactedProviders.push({
+            attemptIndex,
+            role,
+            provider,
+            model,
+            contactedAt,
+            providerPackageIds: [],
+            traceIds: [],
+            errorCode: '',
+          });
+        }
+        const provenance = {
+          plannedProvider: registryEntry.plannedProvider,
+          plannedModel: registryEntry.plannedModel,
+          providerHandoffAt: registryEntry.providerHandoffAt,
+          contactedProviders: registryEntry.contactedProviders,
+          providerPackageIds: [],
+          triageResultIds: [],
+          fallbackContacted: registryEntry.contactedProviders.length > 1,
+          costMayHaveBeenIncurred: true,
+        };
+        const provenanceWrite = RecoveryOperation.updateOne(
+          { operationId, executorId: registryEntry.executorId, 'attempts.attempt': 1 },
+          { $set: { 'attempts.$.provenance': provenance, heartbeatAt: contactedAt } }
+        ).catch(() => {});
+        registryEntry.provenanceWrites.push(provenanceWrite);
+      }
       const message = eventMessage(kind);
       if (!message) return;
       appendProgress(operationId, kind, message, detail, registryEntry.executorId).catch(() => {});
     },
   };
+}
+
+function buildAttemptProvenance(operation, registryEntry, resultLike, persistObservation) {
+  const attempted = Array.isArray(resultLike?.triageMeta?.attempted)
+    ? resultLike.triageMeta.attempted.filter((item) => item?.contacted !== false)
+    : [];
+  const contacts = [];
+  const addContact = (candidate) => {
+    const provider = safeString(candidate?.provider, '');
+    if (!provider) return;
+    const model = safeString(candidate?.model, '');
+    const role = safeString(candidate?.role, '') || (contacts.length === 0 ? 'primary' : 'fallback');
+    const attemptIndex = Number(candidate?.attemptIndex) || 0;
+    let contact = contacts.find((item) => (
+      item.provider === provider && item.model === model
+      && item.role === role
+      && (!attemptIndex || !item.attemptIndex || item.attemptIndex === attemptIndex)
+    ));
+    if (!contact) {
+      contact = {
+        attemptIndex,
+        role,
+        provider,
+        model,
+        contactedAt: candidate?.contactedAt || null,
+        providerPackageIds: [],
+        traceIds: [],
+        errorCode: '',
+      };
+      contacts.push(contact);
+    }
+    contact.contactedAt ||= candidate?.contactedAt || null;
+    contact.providerPackageIds = uniqueStrings([
+      ...contact.providerPackageIds,
+      candidate?.providerPackageId,
+      ...(Array.isArray(candidate?.providerPackageIds) ? candidate.providerPackageIds : []),
+    ]);
+    contact.traceIds = uniqueStrings([
+      ...contact.traceIds,
+      candidate?.traceId,
+      ...(Array.isArray(candidate?.traceIds) ? candidate.traceIds : []),
+    ]);
+    contact.errorCode ||= safeString(candidate?.errorCode, '');
+  };
+  registryEntry.contactedProviders.forEach(addContact);
+  attempted.forEach(addContact);
+
+  const producingPackageId = safeString(
+    resultLike?.triageMeta?.providerPackageId
+      || resultLike?.savedResult?.providerPackageId,
+    ''
+  );
+  if (producingPackageId && contacts.length > 0) {
+    const producingProvider = safeString(resultLike?.providerUsed || resultLike?.triageMeta?.providerUsed, '');
+    const producing = contacts.find((contact) => contact.provider === producingProvider) || contacts.at(-1);
+    producing.providerPackageIds = uniqueStrings([...producing.providerPackageIds, producingPackageId]);
+  }
+  const triageResultIds = uniqueStrings([
+    persistObservation?.id,
+    resultLike?.savedResult?.id,
+    resultLike?.triageMeta?.resultId,
+  ]);
+  const providerHandoffAt = registryEntry.providerHandoffAt || null;
+  return {
+    plannedProvider: safeString(operation.runtimeSnapshot?.provider, ''),
+    plannedModel: safeString(operation.runtimeSnapshot?.model, ''),
+    providerHandoffAt,
+    contactedProviders: contacts,
+    providerPackageIds: uniqueStrings(contacts.flatMap((contact) => contact.providerPackageIds)),
+    triageResultIds,
+    fallbackContacted: contacts.some((contact) => ['backup', 'fallback'].includes(contact.role)),
+    costMayHaveBeenIncurred: Boolean(providerHandoffAt),
+  };
+}
+
+async function recordAttemptProvenance(operation, registryEntry, resultLike, persistObservation) {
+  await Promise.allSettled(registryEntry.provenanceWrites || []);
+  registryEntry.provenanceWrites = [];
+  const provenance = buildAttemptProvenance(operation, registryEntry, resultLike, persistObservation);
+  const write = await RecoveryOperation.updateOne(
+    { operationId: operation.operationId, executorId: operation.executorId, 'attempts.attempt': 1 },
+    { $set: { 'attempts.$.provenance': provenance, heartbeatAt: new Date() } }
+  );
+  if (write.modifiedCount !== 1) {
+    throw createServiceError('RECOVERY_STATE_CHANGED', 'Recovery state changed before provider provenance could be recorded.', 409);
+  }
+  return provenance;
 }
 
 function validDateOr(value, fallback) {
@@ -952,6 +1397,117 @@ async function findAppliedConversationWrite(operation) {
     appliedAt: validDateOr(receipt.completedAt || receipt.recordedAt, new Date()),
     receipt,
   };
+}
+
+async function reconcilePendingDownstreamMarking(operation, { conversationWriteKnownApplied = false } = {}) {
+  if (operation?.downstreamMarking?.status !== 'pending') {
+    return operation?.downstreamMarking?.status === 'done' ? publicDownstreamMarker(operation) : null;
+  }
+  if (!conversationWriteKnownApplied && !(await findAppliedConversationWrite(operation))) return null;
+
+  const markerResult = await applyPendingDownstreamMarker(operation);
+  if (markerResult.ownership === 'superseded') {
+    await markDownstreamOperationSuperseded(
+      operation.operationId,
+      markerResult.supersededByRecoveryOperationId
+    );
+    operation.downstreamMarking.status = 'superseded';
+    return null;
+  }
+  const marker = markerResult.marker;
+  if (!marker) return null;
+  const completedAt = new Date();
+  const postRecoveryEvidence = {
+    ...(clonePlain(operation.postRecoveryEvidence, {}) || {}),
+    knowledgeDraftNeedsReview: marker,
+  };
+  const completed = await RecoveryOperation.updateOne(
+    {
+      operationId: operation.operationId,
+      'downstreamMarking.status': 'pending',
+    },
+    {
+      $set: {
+        'downstreamMarking.status': 'done',
+        'downstreamMarking.completedAt': completedAt,
+        postRecoveryEvidence,
+        heartbeatAt: completedAt,
+      },
+      $push: {
+        progress: {
+          $each: [{
+            at: completedAt,
+            kind: 'downstream-marked',
+            message: 'The linked knowledge draft was marked for review after triage recovery.',
+          }],
+          $slice: -MAX_PROGRESS_EVENTS,
+        },
+      },
+    }
+  );
+  if (completed.modifiedCount === 1) {
+    operation.downstreamMarking.status = 'done';
+    operation.downstreamMarking.completedAt = completedAt;
+    operation.postRecoveryEvidence = postRecoveryEvidence;
+    return marker;
+  }
+  const latest = await RecoveryOperation.findOne({ operationId: operation.operationId })
+    .select('downstreamMarking postRecoveryEvidence')
+    .lean();
+  if (latest?.downstreamMarking?.status === 'done') return publicDownstreamMarker({
+    operationId: operation.operationId,
+    downstreamMarking: latest.downstreamMarking,
+  });
+  if (latest?.downstreamMarking?.status === 'superseded') return null;
+  throw createServiceError('KNOWLEDGE_MARKER_INTENT_FAILED', 'The knowledge draft review marker was applied, but its recovery intent could not be completed.', 500);
+}
+
+async function reconcilePendingRecoveryForKnowledgeCandidate(candidateLike) {
+  const candidate = candidateLike?.toObject ? candidateLike.toObject() : candidateLike;
+  if (!candidate?._id) return 0;
+  let conversationId = candidate.conversationId || null;
+  if (!conversationId && candidate.escalationId) {
+    const conversation = await Conversation.findOne({ escalationId: candidate.escalationId })
+      .select('_id')
+      .lean();
+    conversationId = conversation?._id || null;
+  }
+  if (!conversationId) return 0;
+  const operations = await RecoveryOperation.find({
+    conversationId,
+    'downstreamMarking.status': 'pending',
+    $or: [
+      { 'downstreamMarking.knowledgeCandidateId': null },
+      { 'downstreamMarking.knowledgeCandidateId': candidate._id },
+    ],
+  })
+    .sort({ createdAt: 1 })
+    .limit(100)
+    .lean();
+  let reconciled = 0;
+  for (const operation of operations) {
+    try {
+      const marker = await reconcilePendingDownstreamMarking(operation);
+      if (marker) reconciled += 1;
+    } catch {
+      // The durable intent and publish gate keep this safe for a later retry.
+    }
+  }
+  return reconciled;
+}
+
+async function reconcilePendingDownstreamMarkings() {
+  const pending = await RecoveryOperation.find({ 'downstreamMarking.status': 'pending' })
+    .sort({ updatedAt: 1 })
+    .limit(100)
+    .lean();
+  for (const operation of pending) {
+    try {
+      await reconcilePendingDownstreamMarking(operation);
+    } catch {
+      // Leave the durable intent pending. A later status lookup or stale pass can retry it safely.
+    }
+  }
 }
 
 async function markWriteAppliedUnverified(operation, {
@@ -1000,6 +1556,7 @@ async function markWriteAppliedUnverified(operation, {
 
 async function markStaleRunningOperations() {
   if (!RecoveryOperation.db || RecoveryOperation.db.readyState !== 1) return;
+  await reconcilePendingDownstreamMarkings();
   const now = new Date();
   const cutoff = new Date(now.getTime() - STALE_HEARTBEAT_MS);
   const liveOperationIds = [...inFlightOperations.keys()];
@@ -1026,6 +1583,13 @@ async function markStaleRunningOperations() {
   for (const operation of staleOperations) {
     const appliedWrite = await findAppliedConversationWrite(operation);
     if (appliedWrite) {
+      if (operation.downstreamMarking?.status === 'pending') {
+        try {
+          await reconcilePendingDownstreamMarking(operation, { conversationWriteKnownApplied: true });
+        } catch {
+          // The operation still records downstreamReviewRequired while a later lookup retries the marker.
+        }
+      }
       await markWriteAppliedUnverified(operation, {
         allowedStatuses: [operation.status],
         appliedAt: appliedWrite.appliedAt,
@@ -1049,6 +1613,10 @@ async function markStaleRunningOperations() {
             cancellationAcknowledgedAt: now,
             errorCode: '',
             errorMessage: '',
+            ...(operation.downstreamMarking?.status === 'pending' ? {
+              'downstreamMarking.status': 'none',
+              'downstreamMarking.completedAt': now,
+            } : {}),
           },
           $unset: { activePlanId: '' },
           $push: {
@@ -1082,6 +1650,10 @@ async function markStaleRunningOperations() {
           heartbeatAt: now,
           errorCode: 'RECOVERY_INTERRUPTED',
           errorMessage: interruptedMessage,
+          ...(operation.downstreamMarking?.status === 'pending' ? {
+            'downstreamMarking.status': 'none',
+            'downstreamMarking.completedAt': now,
+          } : {}),
         },
         $unset: { activePlanId: '' },
         $push: {
@@ -1310,7 +1882,17 @@ async function claimFinalCommit(operation, registryEntry) {
   return commitStartedAt;
 }
 
-async function commitTriageResult(operation, currentState, sourceResult, resultLike, commitStartedAt) {
+async function commitTriageResult(
+  operation,
+  currentState,
+  sourceResult,
+  resultLike,
+  commitStartedAt,
+  {
+    comparison = operation?.candidateResult?.comparison || null,
+    baselineReliable = Boolean(operation?.candidateResult?.comparison?.previousResultVerified),
+  } = {}
+) {
   const now = new Date();
   const { conversation } = currentState;
   const card = clonePlain(resultLike?.card || sourceResult?.card, null);
@@ -1332,6 +1914,14 @@ async function commitTriageResult(operation, currentState, sourceResult, resultL
   if (!ownsCommit) {
     throw createServiceError('RECOVERY_STATE_CHANGED', 'Recovery no longer owns the final write.', 409);
   }
+  await prepareDownstreamMarkingIntent(
+    operation,
+    conversation,
+    comparison,
+    baselineReliable,
+    commitStartedAt,
+    now
+  );
   const filter = {
     _id: operation.conversationId,
     'caseIntake.canonicalTemplate': operation.inputSnapshot.canonicalTemplate,
@@ -1361,10 +1951,9 @@ async function commitTriageResult(operation, currentState, sourceResult, resultL
   if (result.modifiedCount !== 1) {
     throw createServiceError('EVIDENCE_CHANGED', 'Conversation evidence changed before the recovery write could commit.', 409);
   }
-  const knowledgeDraftNeedsReview = await markKnowledgeDraftAfterMeaningfulRecovery(
+  const knowledgeDraftNeedsReview = await reconcilePendingDownstreamMarking(
     operation,
-    conversation,
-    now
+    { conversationWriteKnownApplied: true }
   );
   const writeMarker = await RecoveryOperation.updateOne(
     {
@@ -1383,7 +1972,10 @@ async function commitTriageResult(operation, currentState, sourceResult, resultL
           acceptedAt: now,
         },
         ...(knowledgeDraftNeedsReview ? {
-          postRecoveryEvidence: { knowledgeDraftNeedsReview },
+          postRecoveryEvidence: {
+            ...(clonePlain(operation.postRecoveryEvidence, {}) || {}),
+            knowledgeDraftNeedsReview,
+          },
         } : {}),
       },
       $push: {
@@ -1403,7 +1995,12 @@ async function commitTriageResult(operation, currentState, sourceResult, resultL
   }
   operation.conversationWriteApplied = true;
   operation.commitCompletedAt = now;
-  operation.postRecoveryEvidence = knowledgeDraftNeedsReview ? { knowledgeDraftNeedsReview } : null;
+  operation.postRecoveryEvidence = knowledgeDraftNeedsReview
+    ? {
+        ...(clonePlain(operation.postRecoveryEvidence, {}) || {}),
+        knowledgeDraftNeedsReview,
+      }
+    : null;
   return {
     card,
     resultId: receipt.savedResultId,
@@ -1446,6 +2043,13 @@ async function failOperation(operationId, error, status = 'failed', {
   if (currentOperation) {
     const appliedWrite = await findAppliedConversationWrite(currentOperation);
     if (appliedWrite) {
+      if (currentOperation.downstreamMarking?.status === 'pending') {
+        try {
+          await reconcilePendingDownstreamMarking(currentOperation, { conversationWriteKnownApplied: true });
+        } catch {
+          // The pending intent remains visible and will be retried by later reconciliation lookups.
+        }
+      }
       await markWriteAppliedUnverified(currentOperation, {
         executorId,
         allowedStatuses,
@@ -1464,6 +2068,10 @@ async function failOperation(operationId, error, status = 'failed', {
         heartbeatAt: completedAt,
         errorCode,
         errorMessage,
+        ...(currentOperation?.downstreamMarking?.status === 'pending' ? {
+          'downstreamMarking.status': 'none',
+          'downstreamMarking.completedAt': completedAt,
+        } : {}),
       },
       $unset: { activePlanId: '' },
       $push: {
@@ -1592,17 +2200,20 @@ async function parkCandidateIfDifferent({
   previousCard,
   candidateResult,
   resultLike,
+  comparison = null,
+  baselineReliable = false,
 }) {
   if (!previousCard) return false;
-  const comparison = compareTriageCards(previousCard, candidateResult.card);
-  if (!comparison.meaningfullyDifferent) return false;
+  const resolvedComparison = comparison || compareTriageCards(previousCard, candidateResult.card);
+  if (!resolvedComparison.meaningfullyDifferent) return false;
   if (registryEntry.controller.signal.aborted || registryEntry.cancelRequested) {
     await markCancelled(operation.operationId, 'The recovery cancellation was acknowledged; no candidate was adopted into the conversation.');
     return true;
   }
   const completedAt = new Date();
   const comparisonWithHashes = {
-    ...comparison,
+    ...resolvedComparison,
+    previousResultVerified: Boolean(baselineReliable),
     candidateSha256: sha256(candidateResult.card),
     previousSha256: sha256(previousCard),
   };
@@ -1684,9 +2295,14 @@ async function executeRepersist(operation, registryEntry, startedAt) {
     return;
   }
   await recordActualProvider(operation, sourceResult, sourceResult);
-  const previousCard = isObject(currentState.conversation?.caseIntake?.triageCard)
-    ? currentState.conversation.caseIntake.triageCard
-    : null;
+  const previousBaseline = resolvePreviousBaseline({
+    sourceResult,
+    inputSnapshot: operation.inputSnapshot,
+    deterministicFields: currentState.deterministic,
+    visibleCard: currentState.conversation?.caseIntake?.triageCard,
+  });
+  const previousCard = previousBaseline.displayCard;
+  const comparison = previousCard ? compareTriageCards(previousCard, sourceResult.card) : null;
   const parked = await parkCandidateIfDifferent({
     operation,
     registryEntry,
@@ -1694,6 +2310,8 @@ async function executeRepersist(operation, registryEntry, startedAt) {
     previousCard,
     candidateResult: sourceResult,
     resultLike: sourceResult,
+    comparison,
+    baselineReliable: previousBaseline.reliable,
   });
   if (parked) return;
   if (registryEntry.controller.signal.aborted || await operationWasCancelled(operation.operationId)) {
@@ -1710,14 +2328,21 @@ async function executeRepersist(operation, registryEntry, startedAt) {
     elapsedMs: sourceResult.latencyMs,
     runId: sourceResult.runId,
     fallbackUsed: sourceResult.fallbackUsed,
-  }, commitStartedAt);
+  }, commitStartedAt, { comparison, baselineReliable: previousBaseline.reliable });
   await finalizeCommittedOperation(operation, committed, startedAt);
 }
 
-async function loadPriorCard(operation, conversation) {
-  if (isObject(conversation?.caseIntake?.triageCard)) return conversation.caseIntake.triageCard;
+async function loadPriorBaseline(operation, conversation) {
   const sourceResult = await locateTriageResult(conversation, operation.inputSnapshot?.sourceRecordIds);
-  return isObject(sourceResult?.card) ? sourceResult.card : null;
+  const deterministicFields = operation.inputSnapshot?.canonicalTemplate
+    ? parseEscalationText(operation.inputSnapshot.canonicalTemplate)
+    : null;
+  return resolvePreviousBaseline({
+    sourceResult,
+    inputSnapshot: operation.inputSnapshot,
+    deterministicFields,
+    visibleCard: conversation?.caseIntake?.triageCard,
+  });
 }
 
 async function executeRerun(operation, registryEntry, startedAt) {
@@ -1725,24 +2350,31 @@ async function executeRerun(operation, registryEntry, startedAt) {
   let persistObservation = null;
   const runtime = operation.runtimeSnapshot || {};
   const runId = `recovery-${operation.operationId}`;
-  const result = await runTriage(operation.inputSnapshot.canonicalTemplate, {
-    runId,
-    provider: runtime.provider,
-    model: runtime.model,
-    fallbackProvider: runtime.fallbackProvider,
-    fallbackModel: runtime.fallbackModel,
-    reasoningEffort: runtime.reasoningEffort,
-    serviceTier: runtime.serviceTier,
-    agentRuntime: { ...runtime, configured: true },
-    signal: registryEntry.controller.signal,
-    propagateAbort: true,
-    eventBus: createRecoveryEventBus(operation.operationId, registryEntry),
-    source: 'evidence-recovery',
-    triageMeta: { recoveryOperationId: operation.operationId },
-    onPersistResult(observation) {
-      persistObservation = clonePlain(observation, null);
-    },
-  });
+  let result;
+  try {
+    result = await runTriage(operation.inputSnapshot.canonicalTemplate, {
+      runId,
+      provider: runtime.provider,
+      model: runtime.model,
+      fallbackProvider: runtime.fallbackProvider,
+      fallbackModel: runtime.fallbackModel,
+      reasoningEffort: runtime.reasoningEffort,
+      serviceTier: runtime.serviceTier,
+      agentRuntime: { ...runtime, configured: true },
+      signal: registryEntry.controller.signal,
+      propagateAbort: true,
+      eventBus: createRecoveryEventBus(operation.operationId, registryEntry),
+      source: 'evidence-recovery',
+      triageMeta: { recoveryOperationId: operation.operationId },
+      onPersistResult(observation) {
+        persistObservation = clonePlain(observation, null);
+      },
+    });
+  } catch (error) {
+    await recordAttemptProvenance(operation, registryEntry, error, persistObservation);
+    throw error;
+  }
+  await recordAttemptProvenance(operation, registryEntry, result, persistObservation);
 
   if (await operationWasCancelled(operation.operationId) || registryEntry.controller.signal.aborted) {
     await markCancelled(operation.operationId, 'The recovery cancellation was acknowledged; no candidate was adopted into the conversation.');
@@ -1771,7 +2403,9 @@ async function executeRerun(operation, registryEntry, startedAt) {
   if (!candidateResult || !isUnexpiredTriageResult(candidateResult) || !isGenuineAiTriageResult(candidateResult)) {
     throw createServiceError('TRIAGE_RESULT_UNREADABLE', 'The new triage history result is not readable.', 500);
   }
-  const previousCard = await loadPriorCard(operation, currentState.conversation);
+  const previousBaseline = await loadPriorBaseline(operation, currentState.conversation);
+  const previousCard = previousBaseline.displayCard;
+  const comparison = previousCard ? compareTriageCards(previousCard, candidateResult.card) : null;
   await recordActualProvider(operation, result, candidateResult);
   const parked = await parkCandidateIfDifferent({
     operation,
@@ -1780,6 +2414,8 @@ async function executeRerun(operation, registryEntry, startedAt) {
     previousCard,
     candidateResult,
     resultLike: result,
+    comparison,
+    baselineReliable: previousBaseline.reliable,
   });
   if (parked) return;
 
@@ -1791,7 +2427,7 @@ async function executeRerun(operation, registryEntry, startedAt) {
   const committed = await commitTriageResult(operation, currentState, candidateResult, {
     ...result,
     runId,
-  }, commitStartedAt);
+  }, commitStartedAt, { comparison, baselineReliable: previousBaseline.reliable });
   await finalizeCommittedOperation(operation, committed, startedAt);
 }
 
@@ -1835,6 +2471,11 @@ async function executeRecoveryOperation(operationId) {
     executorId,
     controller: new AbortController(),
     handedOff: false,
+    providerHandoffAt: null,
+    plannedProvider: safeString(operation.runtimeSnapshot?.provider, ''),
+    plannedModel: safeString(operation.runtimeSnapshot?.model, ''),
+    contactedProviders: [],
+    provenanceWrites: [],
     committing: false,
     cancelRequested: false,
     heartbeatTimer: null,
@@ -1887,9 +2528,7 @@ async function confirmRecovery(conversationId, { action, evidenceFingerprint, id
   const existingOperations = await RecoveryOperation.find(planOperationFilter(cleanAction))
     .sort({ attemptNumber: -1, createdAt: -1 })
     .lean();
-  const blockingOperation = existingOperations.find((candidate) => (
-    !RETRYABLE_TERMINAL_STATUSES.has(candidate.status)
-  ));
+  const blockingOperation = existingOperations.find((candidate) => !isRetryableTerminalOperation(candidate));
   if (blockingOperation) {
     if (safeString(blockingOperation.conversationId, '') !== safeString(conversationId, '')) {
       throw createServiceError('IDEMPOTENCY_KEY_CONFLICT', 'That recovery plan belongs to a different conversation.', 409);
@@ -2036,21 +2675,60 @@ async function confirmRecovery(conversationId, { action, evidenceFingerprint, id
   return { operation: serializeOperation(operation), created };
 }
 
+async function reconcileExpiredAwaitingAcceptance({ conversationId = null, operationId = '' } = {}) {
+  const now = new Date();
+  const reason = 'The stored result expired before it was accepted; human review is required.';
+  const filter = {
+    status: 'awaiting-acceptance',
+    acceptExpiresAt: { $ne: null, $lte: now },
+  };
+  if (conversationId) filter.conversationId = conversationId;
+  if (operationId) filter.operationId = operationId;
+  await RecoveryOperation.updateMany(
+    filter,
+    {
+      $set: {
+        status: 'manual-review',
+        completedAt: now,
+        heartbeatAt: now,
+        errorCode: 'RECOVERY_CANDIDATE_EXPIRED',
+        errorMessage: reason,
+        'attempts.$[attempt].status': 'manual-review',
+        'attempts.$[attempt].completedAt': now,
+        'attempts.$[attempt].errorCode': 'RECOVERY_CANDIDATE_EXPIRED',
+        'attempts.$[attempt].errorMessage': reason,
+      },
+      $unset: { activePlanId: '' },
+      $push: {
+        progress: {
+          $each: [{ at: now, kind: 'manual-review', message: reason }],
+          $slice: -MAX_PROGRESS_EVENTS,
+        },
+      },
+    },
+    { arrayFilters: [{ 'attempt.status': 'awaiting-acceptance' }] }
+  );
+}
+
 async function getOperation(conversationId, operationId) {
   await markStaleRunningOperations();
+  await reconcileExpiredAwaitingAcceptance({ conversationId, operationId });
   const operation = await RecoveryOperation.findOne({ conversationId, operationId }).lean();
   if (!operation) throw createServiceError('RECOVERY_NOT_FOUND', 'Recovery operation not found.', 404);
+  await reconcileDoneDownstreamOwnership(operation);
   return serializeOperation(operation);
 }
 
 async function listConversationRecoveryHistory(conversationId) {
   await markStaleRunningOperations();
+  await reconcileExpiredAwaitingAcceptance({ conversationId });
   const conversationExists = await Conversation.exists({ _id: conversationId });
   if (!conversationExists) throw createServiceError('NOT_FOUND', 'Conversation not found', 404);
   const operations = await RecoveryOperation.find({ conversationId })
     .sort({ createdAt: 1, attemptNumber: 1 })
     .limit(100)
     .lean();
+  await Promise.all(operations.map(reconcileDoneDownstreamOwnership));
   return operations.map(serializeHistoryOperation);
 }
 
@@ -2079,11 +2757,6 @@ async function acceptCandidate(conversationId, operationId, { candidateSha256, p
     throw createServiceError('RECOVERY_CANDIDATE_CHANGED', 'The shown recovery comparison changed. Review it again before accepting.', 409);
   }
 
-  const currentState = await loadCurrentRecoveryState(operation);
-  const previousCard = await loadPriorCard(operation, currentState.conversation);
-  if (!previousCard || sha256(previousCard) !== cleanPreviousSha) {
-    throw createServiceError('RECOVERY_PREVIOUS_CHANGED', 'The previous triage card changed. Review the comparison again.', 409);
-  }
   const candidateResult = await TriageResult.findById(operation.candidateResult?.triageResultId).lean();
   const acceptExpiresAt = candidateResult?.expiresAt || operation.acceptExpiresAt || null;
   const acceptExpiryMs = acceptExpiresAt ? new Date(acceptExpiresAt).getTime() : null;
@@ -2097,6 +2770,13 @@ async function acceptCandidate(conversationId, operationId, { candidateSha256, p
       allowedStatuses: ['awaiting-acceptance'],
     });
     throw expiredError;
+  }
+  const currentState = await loadCurrentRecoveryState(operation);
+  // The stored hashes protect the comparison the reviewer saw. Marker suppression
+  // is stricter: it only trusts that visible card when a reliable stored source backs it.
+  const previousBaseline = await loadPriorBaseline(operation, currentState.conversation);
+  if (!previousBaseline.displayCard || sha256(previousBaseline.displayCard) !== cleanPreviousSha) {
+    throw createServiceError('RECOVERY_PREVIOUS_CHANGED', 'The previous triage card changed. Review the comparison again.', 409);
   }
   if (
     !candidateResult
@@ -2168,7 +2848,10 @@ async function acceptCandidate(conversationId, operationId, { candidateSha256, p
       elapsedMs: candidateResult.latencyMs,
       runId: candidateResult.runId,
       fallbackUsed: candidateResult.fallbackUsed,
-    }, commitStartedAt);
+    }, commitStartedAt, {
+      comparison: locked.candidateResult?.comparison || null,
+      baselineReliable: previousBaseline.reliable,
+    });
     await finalizeCommittedOperation(locked, committed, locked.startedAt ? new Date(locked.startedAt) : acceptedAt);
   } catch (error) {
     await failOperation(operationId, error, 'failed', { executorId });
@@ -2276,11 +2959,13 @@ async function cancelOperation(conversationId, operationId) {
 
 async function listActiveOperations() {
   await markStaleRunningOperations();
+  await reconcileExpiredAwaitingAcceptance();
   const operations = await RecoveryOperation.find({ status: { $in: ACTIVE_STATUSES } })
-    .select('operationId conversationId targetStage strategy status missingCodes heartbeatAt startedAt createdAt updatedAt acceptExpiresAt candidateResult.comparison')
+    .select('operationId conversationId targetStage strategy status missingCodes heartbeatAt startedAt createdAt updatedAt acceptExpiresAt candidateResult.comparison downstreamMarking')
     .sort({ updatedAt: -1 })
     .limit(50)
     .lean();
+  await Promise.all(operations.map(reconcileDoneDownstreamOwnership));
   return operations.map((operation) => ({
     operationId: operation.operationId,
     conversationId: safeString(operation.conversationId, ''),
@@ -2316,4 +3001,5 @@ module.exports = {
   getOperation,
   listActiveOperations,
   listConversationRecoveryHistory,
+  reconcilePendingRecoveryForKnowledgeCandidate,
 };

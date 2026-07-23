@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Escalation = require('../models/Escalation');
 const KnowledgeCandidate = require('../models/KnowledgeCandidate');
+const RecoveryOperation = require('../models/RecoveryOperation');
 const { syncKnowledgeReviewAttentionItem } = require('../lib/escalation-attention');
 const { publishKnowledgeCandidate } = require('../lib/knowledge-promotion');
 const {
@@ -471,6 +472,98 @@ async function updateKnowledgeRecord(recordId, payload = {}, actorInput = {}) {
   return { record: normalizeKnowledgeCandidate(doc), knowledgeReview, operationalIntelligence };
 }
 
+async function resolveKnowledgeRecoveryReview(recordId, recoveryOperationId, actorInput = {}) {
+  const actor = resolveKnowledgeActor(actorInput);
+  assertKnowledgePermission(actor, 'review');
+  if (isAgentActor(actor)) {
+    throw createServiceError(
+      'KNOWLEDGE_PERMISSION_DENIED',
+      403,
+      'A human knowledge reviewer must mark the triage recovery review complete.'
+    );
+  }
+  const expectedOperationId = safeString(recoveryOperationId, '').trim();
+  if (!expectedOperationId) {
+    throw createServiceError(
+      'KNOWLEDGE_RECOVERY_OPERATION_REQUIRED',
+      400,
+      'The recovery operation reference shown for this draft is required.'
+    );
+  }
+  const doc = await loadCandidateForRecord(recordId);
+  const marker = doc.needsReviewAfterRecovery;
+  if (!marker?.recoveryOperationId) {
+    if (doc.reviewedAfterRecovery?.recoveryOperationId === expectedOperationId) {
+      return { record: normalizeKnowledgeCandidate(doc), resolved: false, idempotent: true };
+    }
+    throw createServiceError(
+      'KNOWLEDGE_RECOVERY_REVIEW_NOT_REQUIRED',
+      409,
+      'This knowledge draft does not have an unresolved triage recovery review.'
+    );
+  }
+  if (marker.recoveryOperationId !== expectedOperationId) {
+    throw createServiceError(
+      'KNOWLEDGE_RECOVERY_REVIEW_REMARKED',
+      409,
+      'This draft was re-marked by a newer recovery — please review the current marker.'
+    );
+  }
+
+  const resolvedAt = new Date();
+  const resolution = {
+    recoveryOperationId: marker.recoveryOperationId,
+    markedAt: marker.markedAt || null,
+    resolvedAt,
+    resolvedBy: actor.actor,
+    reason: marker.reason || '',
+  };
+  const auditHolder = { auditEvents: [] };
+  appendAuditEvent(auditHolder, {
+    action: 'record.recovery-review.resolve',
+    actor,
+    summary: 'Knowledge draft reviewed after triage recovery.',
+    metadata: { recoveryOperationId: marker.recoveryOperationId },
+  });
+  const resolvedDoc = await KnowledgeCandidate.findOneAndUpdate(
+    {
+      _id: doc._id,
+      'needsReviewAfterRecovery.recoveryOperationId': expectedOperationId,
+    },
+    {
+      $set: {
+        reviewedAfterRecovery: resolution,
+        needsReviewAfterRecovery: null,
+      },
+      $push: {
+        auditEvents: {
+          $each: auditHolder.auditEvents,
+          $slice: -120,
+        },
+      },
+    },
+    { returnDocument: 'after' }
+  );
+  if (!resolvedDoc) {
+    throw createServiceError(
+      'KNOWLEDGE_RECOVERY_REVIEW_REMARKED',
+      409,
+      'This draft was re-marked by a newer recovery — please review the current marker.'
+    );
+  }
+  const [knowledgeReview, operationalIntelligence] = await Promise.all([
+    syncReviewAttention(resolvedDoc),
+    syncOperationalIntelligence(resolvedDoc, actor, 'knowledge.record.recovery-review.resolve'),
+  ]);
+  return {
+    record: normalizeKnowledgeCandidate(resolvedDoc),
+    resolved: true,
+    idempotent: false,
+    knowledgeReview,
+    operationalIntelligence,
+  };
+}
+
 async function publishKnowledgeRecord(recordId, options = {}, actorInput = {}) {
   const actor = resolveKnowledgeActor(actorInput);
   assertKnowledgePermission(actor, 'publish');
@@ -479,6 +572,33 @@ async function publishKnowledgeRecord(recordId, options = {}, actorInput = {}) {
   // for every route (the legacy escalations route enforces the same flag).
   const markdownPublishDisabled = envFlag('KNOWLEDGE_MARKDOWN_PUBLISH_DISABLED', false);
   const doc = await loadCandidateForRecord(recordId);
+  let recoveryConversationId = doc.conversationId || null;
+  if (!recoveryConversationId && doc.escalationId) {
+    const escalation = await Escalation.findById(doc.escalationId).select('conversationId').lean();
+    recoveryConversationId = escalation?.conversationId || null;
+  }
+  const pendingRecoveryIntent = await RecoveryOperation.exists({
+    conversationId: recoveryConversationId,
+    'downstreamMarking.status': 'pending',
+    $or: [
+      { 'downstreamMarking.knowledgeCandidateId': doc._id },
+      { 'downstreamMarking.knowledgeCandidateId': null },
+    ],
+  });
+  if (pendingRecoveryIntent) {
+    throw createServiceError(
+      'KNOWLEDGE_RECOVERY_REVIEW_REQUIRED',
+      409,
+      'A triage recovery review is still being attached to this knowledge record. Review it before publishing.'
+    );
+  }
+  if (doc.needsReviewAfterRecovery?.recoveryOperationId) {
+    throw createServiceError(
+      'KNOWLEDGE_RECOVERY_REVIEW_REQUIRED',
+      409,
+      'Mark the triage recovery review complete before publishing this knowledge record.'
+    );
+  }
   // Redacted records are masked on READ, but the markdown publisher writes the
   // RAW stored text to the playbook filesystem — so a redacted record must
   // never export markdown. Force a database-only publish instead.
@@ -812,6 +932,7 @@ module.exports = {
   publishKnowledgeRecord,
   redactKnowledgeRecord,
   recordKnowledgeFeedback,
+  resolveKnowledgeRecoveryReview,
   resolveKnowledgeActor,
   updateKnowledgeRecord,
   getKnowledgeRecordById,

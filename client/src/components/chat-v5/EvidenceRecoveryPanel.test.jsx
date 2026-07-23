@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import EvidenceRecoveryPanel from './EvidenceRecoveryPanel.jsx';
 import EvidenceSummary from './EvidenceSummary.jsx';
 import { useEvidenceRecovery } from './useEvidenceRecovery.js';
+import { RecoveryTimeline } from '../SessionsView.jsx';
 
 const apiMocks = vi.hoisted(() => ({
   acceptEvidenceRecoveryCandidate: vi.fn(),
@@ -228,6 +229,16 @@ describe('EvidenceRecoveryPanel choices', () => {
       },
       explanation: /AI provider may be unavailable/i,
     },
+    {
+      caseName: 'failed cached preflight',
+      readiness: {
+        state: 'failed-preflight',
+        label: 'The last connection check for this provider failed at 2026-07-22T14:30:00.000Z; recovery would likely fail.',
+        cachedPreflight: { ok: false, checkedAt: '2026-07-22T14:30:00.000Z' },
+        recentHealth: { healthy: true },
+      },
+      explanation: /last connection check.*failed.*recovery would likely fail/i,
+    },
   ])('blocks Start for $caseName without calling confirmation', async ({ readiness, explanation }) => {
     const user = userEvent.setup();
     const rerun = makeOption({
@@ -251,7 +262,107 @@ describe('EvidenceRecoveryPanel choices', () => {
   });
 });
 
+describe('Recovery timeline provider provenance', () => {
+  it('renders planned, primary-contacted, fallback-contacted, and no-handoff states without calling planned actual', async () => {
+    const user = userEvent.setup();
+    const base = {
+      attemptNumber: 1,
+      strategy: 'rerun-stage',
+      status: 'failed',
+      runtimeSnapshot: { provider: 'lm-studio', model: 'primary-model' },
+      originalEvidence: { failureMessage: 'Original save failed.' },
+      startedAt: '2026-07-22T12:00:00.000Z',
+      completedAt: '2026-07-22T12:00:02.000Z',
+    };
+    render(<RecoveryTimeline historyState={{
+      state: 'ready',
+      operations: [
+        {
+          ...base,
+          operationId: 'failed-both-providers',
+          attempts: [{
+            provenance: {
+              plannedProvider: 'lm-studio',
+              plannedModel: 'primary-model',
+              providerHandoffAt: '2026-07-22T12:00:00.500Z',
+              contactedProviders: [
+                { role: 'primary', provider: 'lm-studio', model: 'primary-model' },
+                { role: 'fallback', provider: 'openai', model: 'fallback-model' },
+                { role: 'repair', provider: 'openai', model: 'repair-model' },
+              ],
+              providerPackageIds: ['primary-package', 'fallback-package'],
+              triageResultIds: ['degraded-result'],
+              fallbackContacted: true,
+              costMayHaveBeenIncurred: true,
+            },
+          }],
+        },
+        {
+          ...base,
+          operationId: 'preflight-failed',
+          attemptNumber: 2,
+          attempts: [{
+            provenance: {
+              plannedProvider: 'lm-studio',
+              plannedModel: 'primary-model',
+              contactedProviders: [],
+              providerPackageIds: [],
+              triageResultIds: ['preflight-result'],
+              costMayHaveBeenIncurred: false,
+            },
+          }],
+        },
+      ],
+    }} />);
+
+    expect(screen.getAllByText(/Planned provider: lm-studio · primary-model/)).toHaveLength(2);
+    expect(screen.getByText(/Provider contacted: lm-studio · primary-model/)).toBeVisible();
+    expect(screen.getByText(/Fallback contacted: openai · fallback-model/)).toBeVisible();
+    expect(screen.getByText(/Repair attempt contacted: openai · repair-model/)).toBeVisible();
+    expect(screen.getAllByText(/No provider handoff recorded/).some((item) => item.tagName === 'SPAN')).toBe(true);
+    expect(screen.queryByText(/Actual provider:/)).not.toBeInTheDocument();
+
+    const technicalButtons = screen.getAllByText('Technical details');
+    await user.click(technicalButtons[0]);
+    const technical = technicalButtons[0].closest('details');
+    expect(within(technical).getByText('primary-package, fallback-package')).toBeVisible();
+    expect(within(technical).getByText('degraded-result')).toBeVisible();
+  });
+});
+
 describe('EvidenceRecoveryPanel outcomes', () => {
+  it('uses recorded roles only when contacts are reordered or a role is missing', async () => {
+    const user = userEvent.setup();
+    const option = makeOption({ strategy: 'rerun-stage', aiCallNeeded: true });
+    const operation = {
+      operationId: 'role-only-provider-labels',
+      attemptNumber: 1,
+      strategy: 'rerun-stage',
+      status: 'failed',
+      errorMessage: 'Recovery stopped for this display test.',
+      attempts: [{
+        provenance: {
+          contactedProviders: [
+            { role: 'fallback', provider: 'openai', model: 'fallback-first' },
+            { provider: 'local-provider', model: 'role-not-recorded' },
+            { role: 'primary', provider: 'lm-studio', model: 'primary-last' },
+          ],
+        },
+      }],
+    };
+    render(<EvidenceRecoveryPanel controller={makeController([option], {
+      operation,
+      selectedOption: option,
+    })} />);
+
+    await user.click(screen.getByText('Technical details'));
+    const details = screen.getByText('Technical details').closest('details');
+    expect(within(details).getByText('Fallback contacted').closest('div')).toHaveTextContent('openai · fallback-first');
+    const neutralRows = within(details).getAllByText('Provider contacted').map((label) => label.closest('div'));
+    expect(neutralRows.some((row) => row.textContent.includes('local-provider · role-not-recorded'))).toBe(true);
+    expect(neutralRows.some((row) => row.textContent.includes('lm-studio · primary-last'))).toBe(true);
+  });
+
   it('uses neutral provider-call cancellation wording until durable handoff is reported', () => {
     const option = makeOption({ strategy: 'rerun-stage', aiCallNeeded: true });
     const baseController = makeController([option], {
@@ -364,9 +475,11 @@ describe('EvidenceRecoveryPanel outcomes', () => {
         strategy: 'repersist',
         status: 'succeeded-unverified',
         conversationWriteApplied: true,
+        downstreamReviewRequired: true,
         knowledgeDraftNeedsReview: {
           recoveryOperationId: 'operation-succeeded-unverified',
           markedAt: '2026-07-22T12:00:02.000Z',
+          reason: 'The previous triage result was lost, so this draft could not be checked against it.',
         },
         postRecoveryEvidence: {
           status: 'incomplete',
@@ -378,11 +491,11 @@ describe('EvidenceRecoveryPanel outcomes', () => {
 
     render(<EvidenceRecoveryPanel controller={controller} />);
 
-    const result = screen.getByRole('region', { name: 'Recovery saved; confirmation incomplete' });
+    const result = screen.getByRole('region', { name: 'Recovered — your knowledge draft needs review' });
     expect(within(result).getByText(
       'Recovery data was saved, but final confirmation could not be completed — check the evidence status.',
     )).toBeVisible();
-    expect(within(result).getByText(/knowledge draft may need review/i)).toBeVisible();
+    expect(within(result).getByText(/previous triage result was lost/i)).toBeVisible();
     expect(within(result).queryByText('No unreviewed replacement was applied.')).not.toBeInTheDocument();
     expect(within(result).queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
     await user.click(within(result).getByText('Technical details'));

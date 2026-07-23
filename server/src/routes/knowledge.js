@@ -25,6 +25,7 @@ const {
   publishKnowledgeRecord,
   redactKnowledgeRecord,
   recordKnowledgeFeedback,
+  resolveKnowledgeRecoveryReview,
   resolveKnowledgeActor,
   updateKnowledgeRecord,
 } = require('../services/knowledgebase-management-service');
@@ -216,6 +217,20 @@ router.patch('/records/:recordId', async (req, res) => {
     return res.json({ ok: true, ...result });
   } catch (err) {
     return knowledgeError(res, err, 'KNOWLEDGE_UPDATE_FAILED');
+  }
+});
+
+// POST /api/knowledge/records/:recordId/recovery-review/resolve
+router.post('/records/:recordId/recovery-review/resolve', async (req, res) => {
+  try {
+    const result = await resolveKnowledgeRecoveryReview(
+      req.params.recordId,
+      req.body?.recoveryOperationId,
+      resolveKnowledgeActor(req)
+    );
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return knowledgeError(res, err, 'KNOWLEDGE_RECOVERY_REVIEW_RESOLVE_FAILED');
   }
 });
 

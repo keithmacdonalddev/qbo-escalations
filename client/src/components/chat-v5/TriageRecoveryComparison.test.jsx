@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TriageRecoveryComparison from './TriageRecoveryComparison.jsx';
@@ -74,6 +74,15 @@ describe('TriageRecoveryComparison', () => {
     expect(unchangedCells[0]).toHaveTextContent('Recovery Agent');
     expect(unchangedCells[1]).toHaveTextContent('Recovery Agent');
     unchangedCells.forEach((cell) => expect(cell).not.toHaveClass('is-changed'));
+  });
+
+  it('warns when the previously shown comparison card could not be fully verified', () => {
+    const operation = makeOperation();
+    operation.candidateResult.comparison.previousResultVerified = false;
+    render(<TriageRecoveryComparison operation={operation} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(/previously shown result could not be fully verified/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/against what was visible before recovery/i);
   });
 
   it('passes the exact shown hashes only after the user explicitly accepts', async () => {
@@ -154,5 +163,41 @@ describe('TriageRecoveryComparison', () => {
     expect(screen.getByText(
       'This result was produced by the backup provider anthropic · claude-backup after the primary openai · gpt-primary failed.',
     )).toBeVisible();
+  });
+
+  it('disables acceptance locally once the stored result deadline has passed', async () => {
+    const user = userEvent.setup();
+    const onAccept = vi.fn();
+    render(<TriageRecoveryComparison
+      operation={{ ...makeOperation(), acceptExpiresAt: '2020-01-02T15:04:00.000Z' }}
+      onAccept={onAccept}
+    />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/acceptance deadline has passed/i);
+    const accept = screen.getByRole('button', { name: 'Acceptance deadline passed' });
+    expect(accept).toBeDisabled();
+    await user.click(accept);
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('re-checks long deadlines after the maximum timer interval instead of expiring early', async () => {
+    vi.useFakeTimers();
+    try {
+      const start = new Date('2026-07-23T12:00:00.000Z');
+      vi.setSystemTime(start);
+      const maxTimerMs = 2_147_483_647;
+      const deadline = new Date(start.getTime() + maxTimerMs + 5_000).toISOString();
+      render(<TriageRecoveryComparison operation={{ ...makeOperation(), acceptExpiresAt: deadline }} />);
+
+      expect(screen.getByRole('button', { name: 'Accept recovered result' })).toBeEnabled();
+      await act(async () => { vi.advanceTimersByTime(maxTimerMs); });
+      expect(screen.getByRole('button', { name: 'Accept recovered result' })).toBeEnabled();
+      expect(screen.queryByText(/acceptance deadline has passed/i)).not.toBeInTheDocument();
+
+      await act(async () => { vi.advanceTimersByTime(5_025); });
+      expect(screen.getByRole('button', { name: 'Acceptance deadline passed' })).toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

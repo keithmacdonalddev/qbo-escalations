@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import './evidence-recovery.css';
 
 const CARD_FIELDS = [
@@ -56,6 +57,64 @@ function formatAcceptanceDeadline(value) {
   return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
 
+function acceptanceExpired(value) {
+  if (!value) return false;
+  const expiresAt = new Date(value).getTime();
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
+function useAcceptanceExpired(value) {
+  const [expired, setExpired] = useState(() => acceptanceExpired(value));
+  useEffect(() => {
+    setExpired(acceptanceExpired(value));
+    const expiresAt = value ? new Date(value).getTime() : NaN;
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return undefined;
+    let timer;
+    const scheduleDeadlineCheck = () => {
+      const remainingMs = expiresAt - Date.now();
+      if (remainingMs <= 0) {
+        setExpired(true);
+        return;
+      }
+      timer = window.setTimeout(scheduleDeadlineCheck, Math.min(remainingMs + 25, 2_147_483_647));
+    };
+    scheduleDeadlineCheck();
+    return () => window.clearTimeout(timer);
+  }, [value]);
+  return expired;
+}
+
+function providerProvenanceRows(operation) {
+  const attempt = (Array.isArray(operation?.attempts) ? operation.attempts : [])
+    .find((item) => item?.provenance);
+  const provenance = attempt?.provenance || {};
+  const runtime = operation?.runtimeSnapshot || {};
+  const contacts = Array.isArray(provenance.contactedProviders) ? provenance.contactedProviders : [];
+  const rows = [];
+  const planned = providerAndModel(
+    provenance.plannedProvider || runtime.provider,
+    provenance.plannedModel || runtime.model
+  );
+  if (planned) rows.push(['Planned provider', planned]);
+  contacts.forEach((contact) => {
+    const provider = providerAndModel(contact?.provider, contact?.model);
+    if (!provider) return;
+    rows.push([
+      contact?.role === 'repair'
+        ? 'Repair attempt contacted'
+        : contact?.role === 'fallback' ? 'Fallback contacted' : 'Provider contacted',
+      provider,
+    ]);
+  });
+  if (contacts.length === 0) {
+    const recordedProducer = providerAndModel(runtime.actualProvider, runtime.actualModel);
+    if (recordedProducer) rows.push(['Provider contacted', recordedProducer]);
+    else if (operation?.providerHandoffAt) rows.push(['Provider contacted', 'Details unavailable']);
+    else rows.push(['No provider handoff recorded', 'No provider call was recorded for this attempt.']);
+  }
+  return rows;
+}
+
 export default function TriageRecoveryComparison({
   operation,
   accepting = false,
@@ -71,10 +130,12 @@ export default function TriageRecoveryComparison({
   const summaries = Array.isArray(comparison.plainSummary) ? comparison.plainSummary : [];
   const storedCopy = operation?.strategy === 'repersist';
   const deadline = formatAcceptanceDeadline(operation?.acceptExpiresAt);
+  const expired = useAcceptanceExpired(operation?.acceptExpiresAt);
   const provenance = failoverProvenance(operation);
+  const providerRows = providerProvenanceRows(operation);
 
   const accept = () => {
-    if (!comparison.candidateSha256 || !comparison.previousSha256) return;
+    if (expired || !comparison.candidateSha256 || !comparison.previousSha256) return;
     onAccept?.({
       candidateSha256: comparison.candidateSha256,
       previousSha256: comparison.previousSha256,
@@ -103,12 +164,22 @@ export default function TriageRecoveryComparison({
           ? 'Nothing has replaced the currently shown triage result. Compare it with the stored copy and accept it only if it is the right result.'
           : 'Nothing has replaced the saved triage result. Compare both versions and accept the recovered result only if it is more accurate.'}
       </p>
-      {deadline && (
+      {deadline && !expired && (
         <p className="recovery-warning">
           You can accept this until {deadline}; after that it will need human review.
         </p>
       )}
+      {expired && (
+        <p className="recovery-warning" role="alert">
+          The acceptance deadline has passed. This stored result now needs human review.
+        </p>
+      )}
       {provenance && <p className="recovery-note">{provenance}</p>}
+      {comparison.previousResultVerified === false && (
+        <p className="recovery-warning" role="status">
+          The previously shown result could not be fully verified. This comparison is still against what was visible before recovery.
+        </p>
+      )}
 
       {summaries.length > 0 && (
         <div className="recovery-summary" aria-label="Important changes">
@@ -157,10 +228,10 @@ export default function TriageRecoveryComparison({
         <button
           type="button"
           className="recovery-action is-primary"
-          disabled={accepting || !comparison.candidateSha256 || !comparison.previousSha256}
+          disabled={expired || accepting || !comparison.candidateSha256 || !comparison.previousSha256}
           onClick={accept}
         >
-          {accepting ? 'Accepting…' : storedCopy ? 'Accept stored copy' : 'Accept recovered result'}
+          {expired ? 'Acceptance deadline passed' : accepting ? 'Accepting…' : storedCopy ? 'Accept stored copy' : 'Accept recovered result'}
         </button>
         <button type="button" className="recovery-action" disabled={accepting} onClick={onKeepLater}>
           Keep for review later
@@ -175,6 +246,9 @@ export default function TriageRecoveryComparison({
           <div><dt>Previous result hash</dt><dd>{comparison.previousSha256 || 'Unavailable'}</dd></div>
           <div><dt>Recovered result hash</dt><dd>{comparison.candidateSha256 || 'Unavailable'}</dd></div>
           <div><dt>Difference fields</dt><dd>{[...changedFields].join(', ') || 'None'}</dd></div>
+          {providerRows.map(([label, value], index) => (
+            <div key={`${label}-${index}`}><dt>{label}</dt><dd>{value}</dd></div>
+          ))}
         </dl>
       </details>
     </section>

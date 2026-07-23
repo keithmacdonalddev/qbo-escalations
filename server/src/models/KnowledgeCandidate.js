@@ -178,6 +178,22 @@ const recoveryReviewMarkerSchema = new mongoose.Schema({
   reason: { type: String, default: '' },
 }, { _id: false });
 
+const recoveryReviewResolutionSchema = new mongoose.Schema({
+  recoveryOperationId: { type: String, required: true },
+  markedAt: { type: Date, default: null },
+  resolvedAt: { type: Date, required: true },
+  resolvedBy: { type: String, default: '' },
+  reason: { type: String, default: '' },
+}, { _id: false });
+
+const recoveryReviewHistorySchema = new mongoose.Schema({
+  recoveryOperationId: { type: String, required: true },
+  markedAt: { type: Date, default: null },
+  reason: { type: String, default: '' },
+  supersededAt: { type: Date, required: true },
+  supersededByRecoveryOperationId: { type: String, required: true },
+}, { _id: false });
+
 const knowledgeCandidateSchema = new mongoose.Schema({
   escalationId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -259,6 +275,8 @@ const knowledgeCandidateSchema = new mongoose.Schema({
   kbAgentMessages: { type: [kbAgentMessageSchema], default: [] },
   sourceSnapshot: { type: sourceSnapshotSchema, default: () => ({}) },
   needsReviewAfterRecovery: { type: recoveryReviewMarkerSchema, default: null },
+  reviewedAfterRecovery: { type: recoveryReviewResolutionSchema, default: null },
+  recoveryReviewHistory: { type: [recoveryReviewHistorySchema], default: [] },
   generatedAt: { type: Date, default: null },
   publishedAt: { type: Date, default: null },
   publishedDocType: {

@@ -1338,6 +1338,7 @@ async function runTriage(text, options = {}) {
   let promptTrace = { promptId: TRIAGE_AGENT_ID, promptVersion: '', promptLength: 0 };
   let providerTrace = null;
   let knowledgeContextTrace = null;
+  const providerAttempts = [];
 
   try {
     const baseSystemPrompt = getRenderedAgentPrompt(TRIAGE_AGENT_ID);
@@ -1392,8 +1393,8 @@ async function runTriage(text, options = {}) {
         persistenceSource: safeString(options.source, ''),
         recoveryOperationId: safeString(options.triageMeta?.recoveryOperationId, ''),
         onPersistResult: options.onPersistResult,
-        // Only the primary was attempted (no failover before its own pre-flight).
-        attempted: [{ provider: primaryProvider, model: primaryModel, role: 'primary' }],
+        // Selection and pre-flight are not a provider handoff and must not imply cost.
+        attempted: [{ provider: primaryProvider, model: primaryModel, role: 'primary', contacted: false }],
       });
     }
 
@@ -1416,6 +1417,18 @@ async function runTriage(text, options = {}) {
     async function attemptProviderTriage(attemptProvider, attemptModel, callOverrides = {}) {
       const attemptUserPrompt = safeString(callOverrides.userPrompt, '') || userPrompt;
       const attemptPromptTrace = callOverrides.promptTrace || promptTrace;
+      const attemptRecord = {
+        attemptIndex: providerAttempts.length + 1,
+        provider: attemptProvider,
+        model: attemptModel,
+        role: safeString(callOverrides.role, '') || (providerAttempts.length === 0 ? 'primary' : 'backup'),
+        contacted: true,
+        contactedAt: new Date().toISOString(),
+        providerPackageId: '',
+        traceId: '',
+        errorCode: '',
+      };
+      providerAttempts.push(attemptRecord);
       eventBus?.emit('triage.generation_started', {
         provider: attemptProvider,
         model: attemptModel,
@@ -1423,35 +1436,55 @@ async function runTriage(text, options = {}) {
         serviceTier: options.serviceTier || '',
       });
       eventBus?.emit('triage.agent_handoff_to_provider', {
+        attemptIndex: attemptRecord.attemptIndex,
+        role: attemptRecord.role,
         provider: attemptProvider,
         model: attemptModel,
         forceCapture: true,
         operation: TRIAGE_PROVIDER_OPERATION,
       });
 
-      const providerResult = await directCall({
-        provider: attemptProvider,
-        model: attemptModel,
-        systemPrompt,
-        userPrompt: attemptUserPrompt,
-        reasoningEffort: options.reasoningEffort || '',
-        serviceTier: options.serviceTier || '',
-        timeoutMs,
-        promptTrace: attemptPromptTrace,
-        eventBus,
-        signal,
-      });
-      const attemptTrace = providerResult?.providerTrace || null;
-      const attemptPackage = await waitForPackage(attemptTrace, eventBus, signal);
-      const attemptPayload = await extractTriageTextFromProviderPackage(attemptPackage, attemptTrace);
-      if (!attemptPayload.text) {
-        const emptyErr = createTriageError('Provider package did not contain usable triage text', 'PROVIDER_PACKAGE_EMPTY_RESPONSE', {
-          providerPackageId: attemptTrace?.providerPackageId || null,
+      let attemptTrace = null;
+      try {
+        const providerResult = await directCall({
+          provider: attemptProvider,
+          model: attemptModel,
+          systemPrompt,
+          userPrompt: attemptUserPrompt,
+          reasoningEffort: options.reasoningEffort || '',
+          serviceTier: options.serviceTier || '',
+          timeoutMs,
+          promptTrace: attemptPromptTrace,
+          eventBus,
+          signal,
         });
-        emptyErr.providerTrace = attemptTrace;
-        throw emptyErr;
+        attemptTrace = providerResult?.providerTrace || null;
+        attemptRecord.providerPackageId = safeString(attemptTrace?.providerPackageId, '');
+        attemptRecord.traceId = safeString(attemptTrace?.traceId || attemptTrace?.aiTraceId, '');
+        const attemptPackage = await waitForPackage(attemptTrace, eventBus, signal);
+        const attemptPayload = await extractTriageTextFromProviderPackage(attemptPackage, attemptTrace);
+        if (!attemptPayload.text) {
+          const emptyErr = createTriageError('Provider package did not contain usable triage text', 'PROVIDER_PACKAGE_EMPTY_RESPONSE', {
+            providerPackageId: attemptTrace?.providerPackageId || null,
+          });
+          emptyErr.providerTrace = attemptTrace;
+          throw emptyErr;
+        }
+        return { providerTrace: attemptTrace, providerPackage: attemptPackage, payload: attemptPayload };
+      } catch (error) {
+        const errorTrace = error?.providerTrace || attemptTrace || null;
+        attemptRecord.providerPackageId = safeString(
+          error?.providerPackageId || errorTrace?.providerPackageId || attemptRecord.providerPackageId,
+          ''
+        );
+        attemptRecord.traceId = safeString(
+          errorTrace?.traceId || errorTrace?.aiTraceId || attemptRecord.traceId,
+          ''
+        );
+        attemptRecord.errorCode = safeString(error?.code, 'TRIAGE_PROVIDER_FAILED');
+        if (errorTrace && !error.providerTrace) error.providerTrace = errorTrace;
+        throw error;
       }
-      return { providerTrace: attemptTrace, providerPackage: attemptPackage, payload: attemptPayload };
     }
 
     // Automatic provider-to-provider failover (Wave 2): Triage now fails over to
@@ -1522,7 +1555,7 @@ async function runTriage(text, options = {}) {
       // the result. If the backup throws, it propagates to the catch -> rule card.
       provider = backupProvider;
       model = backupModel;
-      attempt = await attemptProviderTriage(backupProvider, backupModel);
+      attempt = await attemptProviderTriage(backupProvider, backupModel, { role: 'fallback' });
     }
 
     providerTrace = attempt.providerTrace;
@@ -1574,6 +1607,7 @@ async function runTriage(text, options = {}) {
           parseFields,
         });
         const repairAttempt = await attemptProviderTriage(provider, model, {
+          role: 'repair',
           userPrompt: repairUserPrompt,
           promptTrace: repairPromptTrace,
         });
@@ -1637,6 +1671,7 @@ async function runTriage(text, options = {}) {
       severity: built.severity,
       latencyMs: elapsedMs,
       knowledgeContext: knowledgeContextTrace,
+      attempted: providerAttempts,
     });
     const recoveryOperationId = safeString(options.triageMeta?.recoveryOperationId, '');
     if (recoveryOperationId) triageMeta.recoveryOperationId = recoveryOperationId;
@@ -1692,7 +1727,13 @@ async function runTriage(text, options = {}) {
       savedResult: serializeTriageResultDoc(saved),
     };
   } catch (err) {
-    if (options.propagateAbort === true && signal?.aborted) throw err;
+    if (options.propagateAbort === true && signal?.aborted) {
+      err.triageMeta = {
+        ...(err.triageMeta && typeof err.triageMeta === 'object' ? err.triageMeta : {}),
+        attempted: providerAttempts.map((attempt) => ({ ...attempt })),
+      };
+      throw err;
+    }
     providerTrace = err?.providerTrace || providerTrace || null;
     const code = err?.code || 'TRIAGE_PROVIDER_FAILED';
     const failureStage = code && code.startsWith('PROVIDER_PACKAGE') ? 'provider-package-readback' : 'provider-call';
@@ -1700,11 +1741,6 @@ async function runTriage(text, options = {}) {
     // here, and if `provider` was reassigned to a backup (a failover was tried)
     // that backup failed too. Record both in order so the card does not blame the
     // backup alone when the active attempt happened to be the backup.
-    const failedOverToBackup = provider !== primaryProvider;
-    const attempted = [{ provider: primaryProvider, model: primaryModel, role: 'primary' }];
-    if (failedOverToBackup) {
-      attempted.push({ provider, model, role: 'backup' });
-    }
     return buildFallbackRun({
       runId,
       text: parserText,
@@ -1719,7 +1755,7 @@ async function runTriage(text, options = {}) {
       startedAt,
       eventBus,
       knowledgeContext: knowledgeContextTrace,
-      attempted,
+      attempted: providerAttempts,
       persistenceSource: safeString(options.source, ''),
       recoveryOperationId: safeString(options.triageMeta?.recoveryOperationId, ''),
       onPersistResult: options.onPersistResult,

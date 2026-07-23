@@ -173,6 +173,7 @@ function baseTrustState(candidate) {
 
   if (candidate?.deprecatedAt) return TRUST_STATES.DEPRECATED;
   if (reviewStatus === 'rejected') return TRUST_STATES.REJECTED;
+  if (candidate?.needsReviewAfterRecovery?.recoveryOperationId) return TRUST_STATES.CANDIDATE;
   if (reusableOutcome === 'unsafe-to-reuse') return TRUST_STATES.RESTRICTED;
   if (reviewStatus === 'published') return TRUST_STATES.TRUSTED;
   if (reviewStatus === 'approved') return TRUST_STATES.REVIEWED;
@@ -208,6 +209,10 @@ function deriveBaseAllowedUses(candidate) {
   }
 
   if (reviewStatus === 'rejected') {
+    return [ALLOWED_USES.REVIEW_ONLY];
+  }
+
+  if (candidate?.needsReviewAfterRecovery?.recoveryOperationId) {
     return [ALLOWED_USES.REVIEW_ONLY];
   }
 
@@ -276,6 +281,7 @@ function buildWarnings(candidate, trustState, allowedUses) {
   if (candidate?.deprecatedAt) warnings.push('deprecated_guidance');
   if (candidate?.supersededBy) warnings.push('superseded_by_newer_guidance');
   if (candidate?.redaction?.customerIdentifiersRedacted) warnings.push('source_identifiers_redacted');
+  if (candidate?.needsReviewAfterRecovery?.recoveryOperationId) warnings.push('triage_recovery_review_required');
   if (!allowedUses.some((use) => FINAL_AGENT_USES.has(use))) warnings.push('not_allowed_for_final_agent_response');
   if (!safeString(candidate?.finalOutcome || candidate?.exactFix, '').trim()) warnings.push('missing_exact_fix');
   if (!safeString(candidate?.confirmedCause || candidate?.rootCause, '').trim()) warnings.push('missing_root_cause');
@@ -564,6 +570,27 @@ function normalizeKnowledgeCandidate(candidate) {
         ? toIso(source.kbAgentMessages[source.kbAgentMessages.length - 1]?.createdAt)
         : null,
     },
+    needsReviewAfterRecovery: source.needsReviewAfterRecovery?.recoveryOperationId ? {
+      recoveryOperationId: safeString(source.needsReviewAfterRecovery.recoveryOperationId),
+      markedAt: toIso(source.needsReviewAfterRecovery.markedAt),
+      reason: compactText(source.needsReviewAfterRecovery.reason, 500),
+    } : null,
+    reviewedAfterRecovery: source.reviewedAfterRecovery?.recoveryOperationId ? {
+      recoveryOperationId: safeString(source.reviewedAfterRecovery.recoveryOperationId),
+      markedAt: toIso(source.reviewedAfterRecovery.markedAt),
+      resolvedAt: toIso(source.reviewedAfterRecovery.resolvedAt),
+      resolvedBy: safeString(source.reviewedAfterRecovery.resolvedBy),
+      reason: compactText(source.reviewedAfterRecovery.reason, 500),
+    } : null,
+    recoveryReviewHistory: (Array.isArray(source.recoveryReviewHistory) ? source.recoveryReviewHistory : [])
+      .slice(-40)
+      .map((item) => ({
+        recoveryOperationId: safeString(item.recoveryOperationId),
+        markedAt: toIso(item.markedAt),
+        reason: compactText(item.reason, 500),
+        supersededAt: toIso(item.supersededAt),
+        supersededByRecoveryOperationId: safeString(item.supersededByRecoveryOperationId),
+      })),
     warnings,
     updatedAt: toIso(source.updatedAt),
   };

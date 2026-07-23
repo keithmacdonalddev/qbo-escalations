@@ -1308,6 +1308,12 @@ async function createKnowledgeDraftForEscalation(escalation, {
   }
   applyKnowledgeBaseAgentSnapshot(knowledge, kbAgentContextBundle);
   await knowledge.save();
+  try {
+    const { reconcilePendingRecoveryForKnowledgeCandidate } = require('../services/evidence-recovery-service');
+    await reconcilePendingRecoveryForKnowledgeCandidate(knowledge);
+  } catch (reconcileErr) {
+    console.warn('[knowledge/generate] Recovery review reconciliation failed (non-fatal):', reconcileErr.message);
+  }
   const [knowledgeReview, operationalIntelligence] = await Promise.all([
     syncKnowledgeReviewAttentionItem(knowledge, escalation),
     syncOperationalIntelligenceForKnowledgeCandidate({

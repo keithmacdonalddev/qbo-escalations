@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getKnowledgeRecord: vi.fn(),
   listKnowledgeRecords: vi.fn(),
   recordKnowledgeFeedback: vi.fn(),
+  resolveKnowledgeRecoveryReview: vi.fn(),
 }));
 
 vi.mock('../api/knowledgeApi.js', () => ({
@@ -15,6 +16,7 @@ vi.mock('../api/knowledgeApi.js', () => ({
   getKnowledgeOntologySummary: vi.fn().mockResolvedValue({}), getKnowledgeRecord: mocks.getKnowledgeRecord,
   getKnowledgeSummary: vi.fn().mockResolvedValue({}), listKnowledgeRecords: mocks.listKnowledgeRecords,
   publishKnowledgeRecord: vi.fn(), recordKnowledgeFeedback: mocks.recordKnowledgeFeedback, redactKnowledgeRecord: vi.fn(),
+  resolveKnowledgeRecoveryReview: mocks.resolveKnowledgeRecoveryReview,
   scanKnowledgeAgent: vi.fn(), searchKnowledge: vi.fn().mockResolvedValue({ records: [], total: 0 }),
   sendKnowledgeAgentMessage: vi.fn(), updateKnowledgeRecord: vi.fn(),
 }));
@@ -42,6 +44,16 @@ beforeEach(() => {
   });
   mocks.getKnowledgeRecord.mockResolvedValue(record());
   mocks.recordKnowledgeFeedback.mockImplementation(async (_id, payload) => record({ outcomeFeedback: [{ outcome: payload.outcome }] }));
+  mocks.resolveKnowledgeRecoveryReview.mockResolvedValue(record({
+    reviewStatus: 'draft',
+    trustState: 'candidate',
+    needsReviewAfterRecovery: null,
+    reviewedAfterRecovery: {
+      recoveryOperationId: 'recovery-operation-1',
+      resolvedAt: '2026-07-22T12:30:00.000Z',
+      resolvedBy: 'local-user',
+    },
+  }));
 });
 
 it('distinguishes draft and published knowledge and keeps source-case navigation visible', async () => {
@@ -62,4 +74,71 @@ it('records explicit did-not-work feedback on a published linked record', async 
 
   await waitFor(() => expect(mocks.recordKnowledgeFeedback).toHaveBeenCalledWith('knowledge-1', expect.objectContaining({ outcome: 'did-not-work' })));
   expect(await screen.findByText('Outcome feedback recorded.')).toBeVisible();
+});
+
+it('shows the triage recovery marker and lets the reviewer resolve it explicitly', async () => {
+  const user = userEvent.setup();
+  const markedRecord = record({
+    reviewStatus: 'draft',
+    trustState: 'candidate',
+    sourceIds: { escalationId: 'esc-linked', conversationId: 'conversation-recovered' },
+    needsReviewAfterRecovery: {
+      recoveryOperationId: 'recovery-operation-1',
+      markedAt: '2026-07-22T12:00:00.000Z',
+      reason: 'The previous triage result was lost, so this draft could not be checked against it.',
+    },
+  });
+  mocks.getKnowledgeRecord.mockResolvedValue(markedRecord);
+  mocks.listKnowledgeRecords.mockResolvedValue({ records: [markedRecord], total: 1 });
+
+  render(<KnowledgebaseView recordIdFromRoute="knowledge-1" />);
+
+  const marker = await screen.findByRole('region', { name: 'Needs review after triage recovery' });
+  expect(marker).toHaveTextContent('The previous triage result was lost');
+  expect(marker).toHaveTextContent('recovery-operation-1');
+  expect(screen.getByRole('link', { name: 'Open the conversation, then view Audit → Recovery timeline' })).toHaveAttribute(
+    'href',
+    '#/chat/conversation-recovered',
+  );
+
+  await user.click(screen.getByRole('button', { name: 'Mark reviewed' }));
+
+  await waitFor(() => expect(mocks.resolveKnowledgeRecoveryReview).toHaveBeenCalledWith(
+    'knowledge-1',
+    'recovery-operation-1',
+  ));
+  expect(await screen.findByText('Recovery review marked complete.')).toBeVisible();
+});
+
+it('refreshes and shows the newer recovery marker when a stale review is rejected', async () => {
+  const user = userEvent.setup();
+  const firstMarker = record({
+    reviewStatus: 'draft',
+    trustState: 'candidate',
+    needsReviewAfterRecovery: {
+      recoveryOperationId: 'recovery-operation-a',
+      reason: 'Review recovery A.',
+    },
+  });
+  const newerMarker = record({
+    reviewStatus: 'draft',
+    trustState: 'candidate',
+    needsReviewAfterRecovery: {
+      recoveryOperationId: 'recovery-operation-b',
+      reason: 'Review the newer recovery B.',
+    },
+  });
+  mocks.getKnowledgeRecord.mockResolvedValueOnce(firstMarker).mockResolvedValueOnce(newerMarker);
+  mocks.listKnowledgeRecords.mockResolvedValue({ records: [newerMarker], total: 1 });
+  const staleError = new Error('This draft was re-marked by a newer recovery — please review the current marker.');
+  staleError.code = 'KNOWLEDGE_RECOVERY_REVIEW_REMARKED';
+  mocks.resolveKnowledgeRecoveryReview.mockRejectedValueOnce(staleError);
+
+  render(<KnowledgebaseView recordIdFromRoute="knowledge-1" />);
+  await user.click(await screen.findByRole('button', { name: 'Mark reviewed' }));
+
+  expect(await screen.findByText(/re-marked by a newer recovery/i)).toBeVisible();
+  expect((await screen.findAllByText('Review the newer recovery B.')).some((item) => item.tagName === 'P')).toBe(true);
+  expect(screen.getByText('recovery-operation-b')).toBeVisible();
+  expect(mocks.getKnowledgeRecord).toHaveBeenCalledTimes(2);
 });

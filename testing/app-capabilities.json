@@ -216,11 +216,10 @@
       ],
       "requiredCheckTypes": ["component", "server", "browser"],
       "evidence": [
-        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/chat-v5/UnsavedResultNotice.test.jsx", "client/src/components/chat-v5/useStageOrchestrator.test.jsx", "client/src/components/chat-v5/EvidenceRecoveryPanel.test.jsx", "client/src/components/chat-v5/TriageRecoveryComparison.test.jsx", "client/src/components/chat-v5/useEvidenceRecovery.test.jsx"] },
-        { "type": "server", "groupId": "server-suite", "paths": ["server/test/triage-result-persistence.test.js", "server/test/evidence-recovery.test.js"] },
-        { "type": "browser", "groupIds": ["qbo-stress-slices", "all-stress-slices"], "paths": ["stress-testing/slices/client-surfaces/harness/run.js"] }
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/chat-v5/UnsavedResultNotice.test.jsx", "client/src/components/chat-v5/useStageOrchestrator.test.jsx", "client/src/components/chat-v5/EvidenceRecoveryPanel.test.jsx", "client/src/components/chat-v5/TriageRecoveryComparison.test.jsx", "client/src/components/chat-v5/useEvidenceRecovery.test.jsx", "client/src/components/SessionsView.recovery-timeline.test.jsx"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/triage-result-persistence.test.js", "server/test/evidence-recovery.test.js"] }
       ],
-      "knownGaps": ["The browser journey now forces Chat V5 triage persistence failure and exercises Copy, but external browser transport must complete repeated passing runs before this evidence is trusted."],
+      "knownGaps": ["No browser journey covers reviewing a recovery plan, starting recovery, navigating away, reattaching to the operation, accepting a comparison, or viewing recovery history. Phase 2 browser recovery coverage is deliberately deferred until a live-app journey can be run."],
       "lastHumanReviewDate": "2026-07-22"
     },
     {

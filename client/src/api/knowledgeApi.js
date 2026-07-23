@@ -85,6 +85,15 @@ export async function updateKnowledgeRecord(id, fields) {
   return data.record;
 }
 
+export async function resolveKnowledgeRecoveryReview(id, recoveryOperationId) {
+  const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/recovery-review/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recoveryOperationId }),
+  }, 'Failed to mark the recovery review complete');
+  return data.record;
+}
+
 export async function publishKnowledgeRecord(id, options = {}) {
   const data = await apiFetchJson(`${BASE}/records/${encodeURIComponent(id)}/publish`, {
     method: 'POST',

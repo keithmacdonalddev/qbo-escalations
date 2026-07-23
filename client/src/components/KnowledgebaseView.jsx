@@ -12,6 +12,7 @@ import {
   publishKnowledgeRecord,
   recordKnowledgeFeedback,
   redactKnowledgeRecord,
+  resolveKnowledgeRecoveryReview,
   scanKnowledgeAgent,
   searchKnowledge,
   sendKnowledgeAgentMessage,
@@ -87,6 +88,7 @@ const WARNING_LABELS = {
   missing_confirmed_cause: 'Confirmed cause missing',
   restricted_trust_state: 'Restricted trust',
   deprecated_trust_state: 'Deprecated trust',
+  triage_recovery_review_required: 'Needs review after triage recovery',
 };
 
 const KNOWLEDGE_DRAFT_FIELD_LABELS = {
@@ -251,6 +253,7 @@ function formatCategory(value) {
 }
 
 function formatRecordStatus(record = {}) {
+  if (record.needsReviewAfterRecovery) return 'Needs review after triage recovery';
   const status = record.reviewStatus || 'draft';
   if (status === 'draft') return 'Draft - needs review';
   return REVIEW_LABELS[status] || humanizeToken(status);
@@ -274,6 +277,7 @@ function getRecordCaseQueueLabel(record) {
 
 function isFinalizationQueueRecord(record) {
   if (!record || record.sourceType !== 'knowledge-candidate') return false;
+  if (record.needsReviewAfterRecovery) return true;
   if (record.reviewStatus === 'published' || record.reviewStatus === 'rejected') return false;
   if (record.trustState === 'trusted' || record.trustState === 'rejected' || record.trustState === 'deprecated') return false;
   return true;
@@ -393,6 +397,11 @@ function getPublishReadiness(record = {}) {
   const hasProvenFix = Boolean(fixText) && !looksUnprovenFix(fixText);
   const hasSourceEvidence = Array.isArray(record.evidence) && record.evidence.length > 0;
   const checks = [
+    {
+      key: 'recoveryReview',
+      label: 'Triage recovery reviewed',
+      ok: !record.needsReviewAfterRecovery,
+    },
     {
       key: 'approved',
       label: 'Approved',
@@ -727,6 +736,15 @@ function getRecordCardTask(record = {}) {
   const missingFix = missing.some((check) => check.key === 'fix');
   const missingRoot = missing.some((check) => check.key === 'root');
   const missingScope = missing.some((check) => check.key === 'scope');
+
+  if (record.needsReviewAfterRecovery) {
+    return {
+      tone: 'warning',
+      label: 'Needs review after triage recovery',
+      detail: record.needsReviewAfterRecovery.reason || 'The triage evidence changed and this lesson needs a human check.',
+      button: 'Review',
+    };
+  }
 
   if (record.reviewStatus === 'published') {
     return {
@@ -1519,6 +1537,38 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
     }
   }, [loadKnowledge, loadOperationalIntel, selectedRecord?.id]);
 
+  const handleResolveRecoveryReview = useCallback(async () => {
+    if (!selectedRecord?.id || !selectedRecord.needsReviewAfterRecovery) return;
+    setRecordActionBusy(true);
+    setRecordNotice('');
+    try {
+      const record = await resolveKnowledgeRecoveryReview(
+        selectedRecord.id,
+        selectedRecord.needsReviewAfterRecovery.recoveryOperationId
+      );
+      setSelectedRecord(record);
+      setRecordDraft(toEditableDraft(record));
+      await loadOperationalIntel(record.id);
+      setRecordNotice('Recovery review marked complete.');
+      await loadKnowledge();
+    } catch (err) {
+      if (err?.code === 'KNOWLEDGE_RECOVERY_REVIEW_REMARKED') {
+        try {
+          const currentRecord = await getKnowledgeRecord(selectedRecord.id);
+          setSelectedRecord(currentRecord);
+          setRecordDraft(toEditableDraft(currentRecord));
+          await loadOperationalIntel(currentRecord.id);
+          await loadKnowledge();
+        } catch {
+          // Keep the server's re-review instruction visible even if refresh also fails.
+        }
+      }
+      setRecordNotice(err?.message || 'Could not mark the recovery review complete.');
+    } finally {
+      setRecordActionBusy(false);
+    }
+  }, [loadKnowledge, loadOperationalIntel, selectedRecord]);
+
   const handleQuickReviewStatus = useCallback(async (reviewStatus) => {
     if (!selectedRecord?.id || !recordDraft) return;
     if (reviewStatus === 'approved') {
@@ -1674,6 +1724,7 @@ export default function KnowledgebaseView({ recordIdFromRoute = null }) {
           onRedact={handleRedactRecord}
           onRelationship={handleAddRelationship}
           onFeedback={handleRecordFeedback}
+          onResolveRecoveryReview={handleResolveRecoveryReview}
         />
 
         <KnowledgeBaseAgentSidebar
@@ -1759,10 +1810,13 @@ function KnowledgeDraftTopbar({
 }) {
   const isPublished = record?.reviewStatus === 'published';
   const isRejected = record?.reviewStatus === 'rejected';
-  const canPublish = record?.reviewStatus === 'approved' && readiness?.ready;
+  const recoveryReviewRequired = Boolean(record?.needsReviewAfterRecovery);
+  const canPublish = record?.reviewStatus === 'approved' && readiness?.ready && !recoveryReviewRequired;
   const caseLabel = record ? getRecordCaseQueueLabel(record) : 'No draft selected';
   const primaryLabel = isPublished
     ? 'Published'
+    : recoveryReviewRequired
+      ? 'Review required'
     : canPublish
       ? 'Publish'
       : 'Approve';
@@ -1814,7 +1868,7 @@ function KnowledgeDraftTopbar({
             className="knowledge-draft-btn ghost"
             type="button"
             onClick={onReject}
-            disabled={!record || busy || isRejected || isPublished}
+            disabled={!record || busy || isRejected || isPublished || recoveryReviewRequired}
           >
             Reject
           </button>
@@ -2714,6 +2768,7 @@ function KnowledgeRecordDetail({
   onRedact,
   onRelationship,
   onFeedback,
+  onResolveRecoveryReview,
 }) {
   const [editingField, setEditingField] = useState('');
   const [editingValue, setEditingValue] = useState('');
@@ -2971,6 +3026,31 @@ function KnowledgeRecordDetail({
         </div>
 
         {notice && <div className="knowledgebase-detail-notice knowledge-draft-notice">{notice}</div>}
+
+        {record.needsReviewAfterRecovery && (
+          <section className="knowledge-recovery-review" aria-label="Needs review after triage recovery">
+            <div>
+              <strong>Needs review after triage recovery</strong>
+              <p>{record.needsReviewAfterRecovery.reason}</p>
+              <span>
+                Recovery operation reference: <code>{record.needsReviewAfterRecovery.recoveryOperationId}</code>
+              </span>
+              {record.sourceIds?.conversationId && (
+                <a href={`#/chat/${encodeURIComponent(record.sourceIds.conversationId)}`}>
+                  Open the conversation, then view Audit → Recovery timeline
+                </a>
+              )}
+            </div>
+            <button
+              className="btn btn-primary btn-sm"
+              type="button"
+              onClick={onResolveRecoveryReview}
+              disabled={busy}
+            >
+              Mark reviewed
+            </button>
+          </section>
+        )}
 
         {sections.map((section) => (
           <KnowledgeDraftDocumentSection

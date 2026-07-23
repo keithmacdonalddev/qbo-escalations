@@ -16,6 +16,7 @@ const TriageResult = require('../src/models/TriageResult');
 const { parseEscalationText } = require('../src/lib/escalation-parser');
 const { compareTriageCards } = require('../src/lib/triage-recovery-compare');
 const { saveConversationLenient } = require('../src/routes/chat/shared');
+const { resolveKnowledgeRecoveryReview } = require('../src/services/knowledgebase-management-service');
 
 const TRIAGE_PATH = require.resolve('../src/services/triage');
 const AGENT_IDENTITY_PATH = require.resolve('../src/services/agent-identity-service');
@@ -99,6 +100,7 @@ const providerStub = {
   fallbackCalls: 0,
   repairCalls: 0,
   boundaryGate: null,
+  afterHandoffGate: null,
   entered: null,
   settled: null,
 };
@@ -113,6 +115,7 @@ const DEFAULT_RUNTIME = {
 };
 
 let runtimeDefaultsStub = clone(DEFAULT_RUNTIME);
+let preflightCacheStub = null;
 const evidenceStub = { failOnceAfterRecoveryWrite: false };
 
 function resetProviderStub() {
@@ -122,9 +125,11 @@ function resetProviderStub() {
   providerStub.fallbackCalls = 0;
   providerStub.repairCalls = 0;
   providerStub.boundaryGate = null;
+  providerStub.afterHandoffGate = null;
   providerStub.entered = null;
   providerStub.settled = null;
   runtimeDefaultsStub = clone(DEFAULT_RUNTIME);
+  preflightCacheStub = null;
   evidenceStub.failOnceAfterRecoveryWrite = false;
 }
 
@@ -154,20 +159,64 @@ async function mockRunTriage(text, options = {}) {
     });
 
     const parseFields = parseEscalationText(text);
-    const failoverSucceeded = providerStub.mode === 'failover-success';
-    const actualProvider = failoverSucceeded ? 'openai' : options.provider;
-    const actualModel = failoverSucceeded ? 'gpt-5.5' : options.model;
-    if (failoverSucceeded) {
+    const failoverAttempted = ['failover-success', 'failover-failed'].includes(providerStub.mode);
+    const actualProvider = failoverAttempted ? 'openai' : options.provider;
+    const actualModel = failoverAttempted ? 'gpt-5.5' : options.model;
+    if (failoverAttempted) {
       options.eventBus?.emit('triage.provider_failover', {
         from: options.provider,
         to: actualProvider,
       });
+      options.eventBus?.emit('triage.agent_handoff_to_provider', {
+        provider: actualProvider,
+        model: actualModel,
+      });
       providerStub.calls.push({ kind: 'backup', provider: actualProvider, model: actualModel });
     }
-    const packageId = `recovery-package-${new mongoose.Types.ObjectId()}`;
+    const primaryPackageId = `recovery-primary-package-${new mongoose.Types.ObjectId()}`;
+    const fallbackPackageId = failoverAttempted
+      ? `recovery-fallback-package-${new mongoose.Types.ObjectId()}`
+      : '';
+    const packageId = fallbackPackageId || primaryPackageId;
     const recoveryOperationId = options.triageMeta?.recoveryOperationId || '';
 
-    if (providerStub.mode === 'degraded') {
+    if (providerStub.afterHandoffGate) {
+      providerStub.entered?.resolve();
+      await providerStub.afterHandoffGate.promise;
+      if (options.signal?.aborted) {
+        const error = abortError();
+        error.triageMeta = {
+          attempted: [{
+            attemptIndex: 1,
+            role: 'primary',
+            provider: options.provider,
+            model: options.model,
+            contacted: true,
+            contactedAt: new Date().toISOString(),
+            providerPackageId: primaryPackageId,
+            traceId: 'abort-mid-call-trace',
+            errorCode: 'ABORT_ERR',
+          }],
+        };
+        throw error;
+      }
+    }
+
+    const repairAttempted = providerStub.mode === 'repair-failed';
+    const repairPackageId = repairAttempted
+      ? `recovery-repair-package-${new mongoose.Types.ObjectId()}`
+      : '';
+    if (repairAttempted) {
+      providerStub.repairCalls += 1;
+      options.eventBus?.emit('triage.agent_handoff_to_provider', {
+        attemptIndex: 2,
+        role: 'repair',
+        provider: options.provider,
+        model: options.model,
+      });
+    }
+
+    if (['degraded', 'failover-failed', 'repair-failed'].includes(providerStub.mode)) {
       providerStub.fallbackCalls += 1;
       const card = {
         ...clone(providerStub.card),
@@ -191,15 +240,29 @@ async function mockRunTriage(text, options = {}) {
         failureStage: 'provider-call',
         errorCode: 'PROVIDER_FAILED',
         providerPackageId: packageId,
-        provider: options.provider,
-        model: options.model,
+        provider: actualProvider,
+        model: actualModel,
         latencyMs: 5,
         triageMeta: {
           source: 'fallback',
-          providerUsed: options.provider,
-          model: options.model,
+          providerUsed: actualProvider,
+          model: actualModel,
           providerPackageId: packageId,
           fallbackUsed: true,
+          attempted: [
+            {
+              role: 'primary', provider: options.provider, model: options.model,
+              contacted: true, providerPackageId: primaryPackageId, errorCode: 'PRIMARY_FAILED',
+            },
+            ...(failoverAttempted ? [{
+              role: 'fallback', provider: actualProvider, model: actualModel,
+              contacted: true, providerPackageId: fallbackPackageId, errorCode: 'FALLBACK_FAILED',
+            }] : []),
+            ...(repairAttempted ? [{
+              attemptIndex: 2, role: 'repair', provider: options.provider, model: options.model,
+              contacted: true, providerPackageId: repairPackageId, traceId: 'repair-failure-trace', errorCode: 'TRIAGE_REPAIR_FAILED',
+            }] : []),
+          ],
           recoveryOperationId,
         },
         parserText: text,
@@ -213,15 +276,29 @@ async function mockRunTriage(text, options = {}) {
         rawOutput: '',
         triageMeta: {
           source: 'fallback',
-          providerUsed: options.provider,
-          model: options.model,
+          providerUsed: actualProvider,
+          model: actualModel,
           providerPackageId: packageId,
           resultId: String(saved._id),
+          attempted: [
+            {
+              role: 'primary', provider: options.provider, model: options.model,
+              contacted: true, providerPackageId: primaryPackageId, errorCode: 'PRIMARY_FAILED',
+            },
+            ...(failoverAttempted ? [{
+              role: 'fallback', provider: actualProvider, model: actualModel,
+              contacted: true, providerPackageId: fallbackPackageId, errorCode: 'FALLBACK_FAILED',
+            }] : []),
+            ...(repairAttempted ? [{
+              attemptIndex: 2, role: 'repair', provider: options.provider, model: options.model,
+              contacted: true, providerPackageId: repairPackageId, traceId: 'repair-failure-trace', errorCode: 'TRIAGE_REPAIR_FAILED',
+            }] : []),
+          ],
           recoveryOperationId,
         },
         elapsedMs: 5,
-        providerUsed: options.provider,
-        modelUsed: options.model,
+        providerUsed: actualProvider,
+        modelUsed: actualModel,
         fallbackUsed: true,
         savedResult: { id: String(saved._id) },
       };
@@ -238,7 +315,7 @@ async function mockRunTriage(text, options = {}) {
       rawOutput,
       card,
       validationIssues: [],
-      fallbackUsed: failoverSucceeded,
+      fallbackUsed: failoverAttempted,
       providerPackageId: packageId,
       provider: actualProvider,
       model: actualModel,
@@ -249,6 +326,10 @@ async function mockRunTriage(text, options = {}) {
         model: actualModel,
         providerPackageId: packageId,
         validation: { passed: true, issues: [] },
+        attempted: [
+          { role: 'primary', provider: options.provider, model: options.model, contacted: true, providerPackageId: primaryPackageId },
+          ...(failoverAttempted ? [{ role: 'fallback', provider: actualProvider, model: actualModel, contacted: true, providerPackageId: fallbackPackageId }] : []),
+        ],
         recoveryOperationId,
       },
       parserText: text,
@@ -266,14 +347,18 @@ async function mockRunTriage(text, options = {}) {
         model: actualModel,
         providerPackageId: packageId,
         resultId: String(saved._id),
+        attempted: [
+          { role: 'primary', provider: options.provider, model: options.model, contacted: true, providerPackageId: primaryPackageId },
+          ...(failoverAttempted ? [{ role: 'fallback', provider: actualProvider, model: actualModel, contacted: true, providerPackageId: fallbackPackageId }] : []),
+        ],
         validation: { passed: true, issues: [] },
         recoveryOperationId,
       },
       elapsedMs: 5,
       providerUsed: actualProvider,
       modelUsed: actualModel,
-      fallbackUsed: failoverSucceeded,
-      fallbackFrom: failoverSucceeded ? options.provider : '',
+      fallbackUsed: failoverAttempted,
+      fallbackFrom: failoverAttempted ? options.provider : '',
       savedResult: { id: String(saved._id) },
     };
   } finally {
@@ -284,7 +369,7 @@ async function mockRunTriage(text, options = {}) {
 function installDependencyStubs() {
   require.cache[TRIAGE_PATH].exports = {
     ...realTriageService,
-    peekPreflightCache: () => null,
+    peekPreflightCache: () => clone(preflightCacheStub),
     runTriage: mockRunTriage,
   };
   require.cache[AGENT_IDENTITY_PATH].exports = {
@@ -363,6 +448,7 @@ async function seedConversation({
   sourceFallbackUsed = false,
   sourceMetaSource = null,
   sourceExpiresAt = null,
+  sourceCard = ORIGINAL_CARD,
 } = {}) {
   const now = new Date();
   const suffix = new mongoose.Types.ObjectId().toString();
@@ -394,13 +480,13 @@ async function seedConversation({
       runId: standaloneRunId,
       status: sourceStatus,
       severity: {
-        raw: ORIGINAL_CARD.severity,
-        validated: ORIGINAL_CARD.severity,
-        displayed: ORIGINAL_CARD.severity,
+        raw: sourceCard.severity,
+        validated: sourceCard.severity,
+        displayed: sourceCard.severity,
       },
-      category: ORIGINAL_CARD.category,
-      rawOutput: JSON.stringify(ORIGINAL_CARD),
-      card: clone(ORIGINAL_CARD),
+      category: sourceCard.category,
+      rawOutput: JSON.stringify(sourceCard),
+      card: clone(sourceCard),
       validationIssues: sourceStatus === 'success' ? [] : [{ code: 'DEGRADED_SOURCE' }],
       fallbackUsed: sourceFallbackUsed,
       fallbackReason: sourceFallbackUsed ? 'Original provider evidence was degraded.' : '',
@@ -945,6 +1031,71 @@ test('validated provider failover succeeds with honest actual-provider provenanc
   assert.equal(repersistOperation.attempts[0].provider, 'openai');
 });
 
+test('failed primary and fallback calls retain durable per-attempt provenance in status and history', async () => {
+  providerStub.mode = 'failover-failed';
+  runtimeDefaultsStub = {
+    ...clone(DEFAULT_RUNTIME),
+    fallbackProvider: 'openai',
+    fallbackModel: 'gpt-5.5',
+  };
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(
+    app, seeded.conversation._id, recovery, triagePlan(recovery), 'failed-provider-provenance'
+  );
+  const failed = await waitForOperation(
+    app, seeded.conversation._id, confirmation.body.operation.operationId, 'failed'
+  );
+
+  assert.ok(!failed.runtimeSnapshot.actualProvider);
+  assert.ok(failed.providerHandoffAt);
+  const provenance = failed.attempts[0].provenance;
+  assert.equal(provenance.plannedProvider, 'lm-studio');
+  assert.equal(provenance.plannedModel, 'recovery-test-model');
+  assert.equal(provenance.costMayHaveBeenIncurred, true);
+  assert.equal(provenance.fallbackContacted, true);
+  assert.deepEqual(
+    provenance.contactedProviders.map(({ role, provider }) => ({ role, provider })),
+    [{ role: 'primary', provider: 'lm-studio' }, { role: 'fallback', provider: 'openai' }]
+  );
+  assert.equal(provenance.providerPackageIds.length, 2);
+  assert.match(provenance.providerPackageIds[0], /^recovery-primary-package-/);
+  assert.match(provenance.providerPackageIds[1], /^recovery-fallback-package-/);
+  assert.equal(provenance.triageResultIds.length, 1);
+
+  const history = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/history`);
+  assert.equal(history.status, 200, JSON.stringify(history.body));
+  const historical = history.body.operations.find((item) => item.operationId === failed.operationId);
+  assert.deepEqual(historical.attempts[0].provenance, provenance);
+});
+
+test('repair failure remains a distinct contacted-provider instance through Mongo and public history', async () => {
+  providerStub.mode = 'repair-failed';
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(
+    app, seeded.conversation._id, recovery, triagePlan(recovery), 'repair-failure-provenance'
+  );
+  const failed = await waitForOperation(
+    app, seeded.conversation._id, confirmation.body.operation.operationId, 'failed'
+  );
+  const publicContacts = failed.attempts[0].provenance.contactedProviders;
+  assert.deepEqual(publicContacts.map((contact) => contact.role), ['primary', 'repair']);
+  assert.equal(publicContacts[1].errorCode, 'TRIAGE_REPAIR_FAILED');
+  assert.match(publicContacts[1].providerPackageIds[0], /^recovery-repair-package-/);
+
+  const durable = await RecoveryOperation.findOne({ operationId: failed.operationId }).lean();
+  const durableContacts = durable.attempts[0].provenance.contactedProviders;
+  assert.deepEqual(durableContacts.map((contact) => contact.role), ['primary', 'repair']);
+  assert.equal(durableContacts[1].errorCode, 'TRIAGE_REPAIR_FAILED');
+
+  const history = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/history`);
+  const historical = history.body.operations.find((item) => item.operationId === failed.operationId);
+  assert.deepEqual(historical.attempts[0].provenance.contactedProviders, publicContacts);
+});
+
 test('concurrent confirmations dedupe same idempotency key and same plan to one operation/write/provider call', async () => {
   const seeded = await seedConversation({ state: 'rerun' });
   const recovery = await getRecoveryOptions(app, seeded.conversation._id);
@@ -1159,9 +1310,112 @@ test('degraded source with missing/unsupported provider evidence is never offere
   assert.equal(plan.aiCallNeeded, true);
 });
 
-test('meaningfully different rerun waits for acceptance, commits shown hashes, and resolves repeats/conflicts safely', async () => {
+test('degraded source is not used as an equivalent baseline and the committed recovery marks the draft', async () => {
+  const seeded = await seedConversation({
+    state: 'repersist',
+    sourceStatus: 'degraded',
+    sourceFallbackUsed: true,
+    priorCard: ORIGINAL_CARD,
+  });
+  const knowledgeCandidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft whose degraded baseline was lost',
+  });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(
+    app, seeded.conversation._id, recovery, triagePlan(recovery), 'degraded-source-lost-baseline'
+  );
+  const operation = await waitForOperation(
+    app, seeded.conversation._id, confirmation.body.operation.operationId, 'succeeded'
+  );
+
+  assert.equal(operation.downstreamMarking.status, 'done');
+  assert.match(operation.knowledgeDraftNeedsReview.reason, /previous triage result was lost/i);
+  const marked = await KnowledgeCandidate.findById(knowledgeCandidate._id).lean();
+  assert.equal(marked.needsReviewAfterRecovery.recoveryOperationId, operation.operationId);
+});
+
+test('an unverified visible baseline still parks a different recovery and marks the draft after acceptance', async () => {
+  const seeded = await seedConversation({
+    state: 'repersist',
+    sourceStatus: 'degraded',
+    sourceFallbackUsed: true,
+    priorCard: ORIGINAL_CARD,
+  });
   providerStub.card = clone(DIFFERENT_CARD);
-  const seeded = await seedConversation({ state: 'rerun', priorCard: ORIGINAL_CARD });
+  const knowledgeCandidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft with an unverified visible baseline',
+  });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    triagePlan(recovery),
+    'unverified-visible-baseline-different-card'
+  );
+  const operationId = confirmation.body.operation.operationId;
+  const awaiting = await waitForOperation(
+    app,
+    seeded.conversation._id,
+    operationId,
+    'awaiting-acceptance'
+  );
+
+  assert.equal(awaiting.candidateResult.comparison.meaningfullyDifferent, true);
+  assert.equal(awaiting.candidateResult.comparison.previousResultVerified, false);
+  assert.ok(awaiting.candidateResult.comparison.plainSummary.length > 0);
+
+  const accepted = await supertest(app)
+    .post(`/api/conversations/${seeded.conversation._id}/evidence/recovery/${operationId}/accept`)
+    .send({
+      candidateSha256: awaiting.candidateResult.comparison.candidateSha256,
+      previousSha256: awaiting.candidateResult.comparison.previousSha256,
+    });
+  assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+  assert.equal(accepted.body.operation.status, 'succeeded');
+  assert.equal(accepted.body.operation.downstreamMarking.status, 'done');
+  assert.match(accepted.body.operation.knowledgeDraftNeedsReview.reason, /could not be fully verified/i);
+  const marked = await KnowledgeCandidate.findById(knowledgeCandidate._id).lean();
+  assert.equal(marked.needsReviewAfterRecovery.recoveryOperationId, operationId);
+});
+
+test('no-baseline recovery marks an existing knowledge draft with the lost-result reason', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const knowledgeCandidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft created from the lost triage result',
+  });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(
+    app,
+    seeded.conversation._id,
+    recovery,
+    triagePlan(recovery),
+    'lost-baseline-knowledge-marker'
+  );
+  const operation = await waitForOperation(
+    app,
+    seeded.conversation._id,
+    confirmation.body.operation.operationId,
+    'succeeded'
+  );
+
+  assert.equal(operation.downstreamReviewRequired, true);
+  assert.equal(operation.downstreamMarking.status, 'done');
+  assert.equal(operation.downstreamMarking.knowledgeCandidateId, String(knowledgeCandidate._id));
+  assert.match(operation.knowledgeDraftNeedsReview.reason, /previous triage result was lost, so this draft could not be checked against it/i);
+  const markedCandidate = await KnowledgeCandidate.findById(knowledgeCandidate._id).lean();
+  assert.equal(markedCandidate.needsReviewAfterRecovery.recoveryOperationId, operation.operationId);
+  assert.match(markedCandidate.needsReviewAfterRecovery.reason, /previous triage result was lost/i);
+});
+
+test('meaningfully different recovery waits for acceptance, commits shown hashes, and resolves repeats/conflicts safely', async () => {
+  const seeded = await seedConversation({ state: 'repersist', priorCard: ORIGINAL_CARD, sourceCard: DIFFERENT_CARD });
   const knowledgeCandidate = await KnowledgeCandidate.create({
     escalationId: new mongoose.Types.ObjectId(),
     conversationId: seeded.conversation._id,
@@ -1174,7 +1428,7 @@ test('meaningfully different rerun waits for acceptance, commits shown hashes, a
   assert.equal(confirmation.status, 202, JSON.stringify(confirmation.body));
   const operationId = confirmation.body.operation.operationId;
   const awaiting = await waitForOperation(app, seeded.conversation._id, operationId, 'awaiting-acceptance');
-  assert.equal(providerStub.calls.length, 1);
+  assert.equal(providerStub.calls.length, 0);
   assert.equal(awaiting.candidateResult.comparison.meaningfullyDifferent, true);
   assert.ok(awaiting.candidateResult.comparison.plainSummary.length > 0);
 
@@ -1191,15 +1445,17 @@ test('meaningfully different rerun waits for acceptance, commits shown hashes, a
   assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
   assert.equal(accepted.body.operation.status, 'succeeded');
   assert.equal(accepted.body.idempotent, false);
+  assert.equal(accepted.body.operation.downstreamReviewRequired, true);
+  assert.equal(accepted.body.operation.downstreamMarking.status, 'done');
   assert.equal(accepted.body.operation.knowledgeDraftNeedsReview.recoveryOperationId, operationId);
-  assert.match(accepted.body.operation.knowledgeDraftNeedsReview.reason, /review this knowledge draft/i);
+  assert.match(accepted.body.operation.knowledgeDraftNeedsReview.reason, /triage result changed/i);
   const committed = await Conversation.findById(seeded.conversation._id).lean();
   assert.equal(committed.caseIntake.triageCard.severity, DIFFERENT_CARD.severity);
   assert.equal(committed.caseIntake.triageCard.read, DIFFERENT_CARD.read);
   const markedCandidate = await KnowledgeCandidate.findById(knowledgeCandidate._id).lean();
   assert.equal(markedCandidate.needsReviewAfterRecovery.recoveryOperationId, operationId);
   assert.ok(markedCandidate.needsReviewAfterRecovery.markedAt);
-  assert.match(markedCandidate.needsReviewAfterRecovery.reason, /changed the triage card meaningfully/i);
+  assert.match(markedCandidate.needsReviewAfterRecovery.reason, /triage result changed/i);
 
   const repeated = await supertest(app)
     .post(`/api/conversations/${seeded.conversation._id}/evidence/recovery/${operationId}/accept`)
@@ -1216,7 +1472,7 @@ test('meaningfully different rerun waits for acceptance, commits shown hashes, a
 });
 
 test('equivalent recovery commits do not mark an existing knowledge draft for review', async () => {
-  const seeded = await seedConversation({ state: 'rerun', priorCard: ORIGINAL_CARD });
+  const seeded = await seedConversation({ state: 'repersist', priorCard: ORIGINAL_CARD });
   const knowledgeCandidate = await KnowledgeCandidate.create({
     escalationId: new mongoose.Types.ObjectId(),
     conversationId: seeded.conversation._id,
@@ -1237,13 +1493,369 @@ test('equivalent recovery commits do not mark an existing knowledge draft for re
     'succeeded'
   );
   assert.equal(operation.knowledgeDraftNeedsReview, null);
+  assert.equal(operation.downstreamReviewRequired, false);
+  assert.equal(operation.downstreamMarking.status, 'none');
   const unchangedCandidate = await KnowledgeCandidate.findById(knowledgeCandidate._id).lean();
   assert.equal(unchangedCandidate.needsReviewAfterRecovery, null);
 });
 
+test('a draft created between intent lookup and conversation commit is re-queried and marked', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const realUpdateOne = Conversation.updateOne;
+  let createdCandidate = null;
+  Conversation.updateOne = async function createDraftInsideCommitWindow(filter, update, options) {
+    if (!createdCandidate && update?.$set?.['caseIntake.triageCard']) {
+      createdCandidate = await KnowledgeCandidate.create({
+        escalationId: new mongoose.Types.ObjectId(),
+        conversationId: seeded.conversation._id,
+        title: 'Draft created inside the recovery commit window',
+      });
+    }
+    return realUpdateOne.call(this, filter, update, options);
+  };
+  try {
+    const confirmation = await confirmPlan(
+      app, seeded.conversation._id, recovery, triagePlan(recovery), 'draft-created-during-commit'
+    );
+    const operation = await waitForOperation(
+      app, seeded.conversation._id, confirmation.body.operation.operationId, 'succeeded'
+    );
+    assert.ok(createdCandidate);
+    assert.equal(operation.downstreamMarking.status, 'done');
+    const marked = await KnowledgeCandidate.findById(createdCandidate._id).lean();
+    assert.equal(marked.needsReviewAfterRecovery.recoveryOperationId, operation.operationId);
+  } finally {
+    Conversation.updateOne = realUpdateOne;
+  }
+});
+
+test('a newer recovery marker supersedes the active marker with audit history and owns completion', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const candidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft with sequential recovery reviews',
+  });
+  const markedAtA = new Date(Date.now() - 1_000);
+  const operationA = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 1,
+    overrides: {
+      conversationWriteApplied: true,
+      downstreamMarking: {
+        status: 'pending', knowledgeCandidateId: candidate._id,
+        reason: 'Review recovery A.', markedAt: markedAtA,
+      },
+    },
+  });
+  const recoveryService = require(RECOVERY_SERVICE_PATH);
+  await recoveryService.reconcilePendingRecoveryForKnowledgeCandidate(candidate);
+  let afterA = await KnowledgeCandidate.findById(candidate._id).lean();
+  assert.equal(afterA.needsReviewAfterRecovery.recoveryOperationId, operationA.operationId);
+
+  const operationB = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 2,
+    overrides: {
+      conversationWriteApplied: true,
+      downstreamMarking: {
+        status: 'pending', knowledgeCandidateId: candidate._id,
+        reason: 'Review recovery B.', markedAt: new Date(),
+      },
+    },
+  });
+  await recoveryService.reconcilePendingRecoveryForKnowledgeCandidate(candidate);
+  const durableB = await RecoveryOperation.findById(operationB._id).lean();
+  assert.equal(durableB.downstreamMarking.status, 'done');
+  afterA = await KnowledgeCandidate.findById(candidate._id).lean();
+  assert.equal(afterA.needsReviewAfterRecovery.recoveryOperationId, operationB.operationId);
+  assert.equal(afterA.recoveryReviewHistory.length, 1);
+  assert.equal(afterA.recoveryReviewHistory[0].recoveryOperationId, operationA.operationId);
+  assert.equal(afterA.recoveryReviewHistory[0].supersededByRecoveryOperationId, operationB.operationId);
+
+  await resolveKnowledgeRecoveryReview(
+    `candidate:${candidate._id}`,
+    operationB.operationId,
+    { actor: 'sequential-recovery-reviewer', role: 'reviewer' }
+  );
+  const resolved = await KnowledgeCandidate.findById(candidate._id).lean();
+  assert.equal(resolved.reviewedAfterRecovery.recoveryOperationId, operationB.operationId);
+  assert.equal(resolved.recoveryReviewHistory[0].recoveryOperationId, operationA.operationId);
+  assert.equal(resolved.recoveryReviewHistory[0].resolvedAt, undefined);
+});
+
+test('an older simultaneous-claim loser stays honestly superseded, never done', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const candidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft with an interleaved recovery marker',
+  });
+  const operationA = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 1,
+    overrides: {
+      conversationWriteApplied: true,
+      downstreamMarking: {
+        status: 'pending', knowledgeCandidateId: candidate._id,
+        reason: 'Review recovery A.', markedAt: new Date(Date.now() - 1_000),
+      },
+    },
+  });
+  const operationB = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 2,
+    overrides: {
+      conversationWriteApplied: true,
+      downstreamMarking: {
+        status: 'pending', knowledgeCandidateId: candidate._id,
+        reason: 'Review recovery B.', markedAt: new Date(),
+      },
+    },
+  });
+  const realCandidateFindOneAndUpdate = KnowledgeCandidate.findOneAndUpdate;
+  const realOperationUpdateOne = RecoveryOperation.updateOne;
+  let interleaved = false;
+  let earlierDoneObserved = false;
+  KnowledgeCandidate.findOneAndUpdate = function interleaveNewerMarker(filter, update, options) {
+    const model = this;
+    return {
+      select() { return this; },
+      async lean() {
+        if (
+          !interleaved
+          && String(filter?._id) === String(candidate._id)
+          && update?.$set?.needsReviewAfterRecovery?.recoveryOperationId === operationA.operationId
+        ) {
+          interleaved = true;
+          await realCandidateFindOneAndUpdate.call(
+            model,
+            { _id: candidate._id, needsReviewAfterRecovery: null },
+            {
+              $set: {
+                needsReviewAfterRecovery: {
+                  recoveryOperationId: operationB.operationId,
+                  markedAt: operationB.downstreamMarking.markedAt,
+                  reason: operationB.downstreamMarking.reason,
+                },
+              },
+            },
+            { returnDocument: 'after' }
+          ).lean();
+        }
+        return realCandidateFindOneAndUpdate.call(model, filter, update, options).lean();
+      },
+    };
+  };
+  RecoveryOperation.updateOne = async function observeEarlierState(filter, update, options) {
+    if (
+      filter?.operationId === operationA.operationId
+      && update?.$set?.['downstreamMarking.status'] === 'done'
+    ) earlierDoneObserved = true;
+    return realOperationUpdateOne.call(this, filter, update, options);
+  };
+
+  try {
+    const recoveryService = require(RECOVERY_SERVICE_PATH);
+    await recoveryService.reconcilePendingRecoveryForKnowledgeCandidate(candidate);
+  } finally {
+    KnowledgeCandidate.findOneAndUpdate = realCandidateFindOneAndUpdate;
+    RecoveryOperation.updateOne = realOperationUpdateOne;
+  }
+
+  const [durableA, durableB, markedCandidate] = await Promise.all([
+    RecoveryOperation.findById(operationA._id).lean(),
+    RecoveryOperation.findById(operationB._id).lean(),
+    KnowledgeCandidate.findById(candidate._id).lean(),
+  ]);
+  assert.equal(interleaved, true);
+  assert.equal(earlierDoneObserved, false);
+  assert.equal(durableA.downstreamMarking.status, 'superseded');
+  assert.equal(durableB.downstreamMarking.status, 'done');
+  assert.equal(markedCandidate.needsReviewAfterRecovery.recoveryOperationId, operationB.operationId);
+  assert.equal(markedCandidate.recoveryReviewHistory.length, 0);
+});
+
+test('a simultaneous-claim loser that outranks the first writer takes ownership once', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const candidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft with a lower-ranked first writer',
+  });
+  const operationA = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 2,
+    overrides: {
+      conversationWriteApplied: true,
+      downstreamMarking: {
+        status: 'pending', knowledgeCandidateId: candidate._id,
+        reason: 'Review higher-ranked recovery A.', markedAt: new Date(),
+      },
+    },
+  });
+  const operationB = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 1,
+    overrides: {
+      conversationWriteApplied: true,
+      downstreamMarking: {
+        status: 'pending', knowledgeCandidateId: candidate._id,
+        reason: 'Review lower-ranked recovery B.', markedAt: new Date(Date.now() - 1_000),
+      },
+    },
+  });
+  const realCandidateFindOneAndUpdate = KnowledgeCandidate.findOneAndUpdate;
+  let firstWriterWon = false;
+  KnowledgeCandidate.findOneAndUpdate = function interleaveLowerRankedFirstWriter(filter, update, options) {
+    const model = this;
+    return {
+      select() { return this; },
+      async lean() {
+        if (
+          !firstWriterWon
+          && String(filter?._id) === String(candidate._id)
+          && update?.$set?.needsReviewAfterRecovery?.recoveryOperationId === operationA.operationId
+        ) {
+          firstWriterWon = true;
+          await realCandidateFindOneAndUpdate.call(
+            model,
+            { _id: candidate._id, needsReviewAfterRecovery: null },
+            {
+              $set: {
+                needsReviewAfterRecovery: {
+                  recoveryOperationId: operationB.operationId,
+                  markedAt: operationB.downstreamMarking.markedAt,
+                  reason: operationB.downstreamMarking.reason,
+                },
+              },
+            },
+            { returnDocument: 'after' }
+          ).lean();
+        }
+        return realCandidateFindOneAndUpdate.call(model, filter, update, options).lean();
+      },
+    };
+  };
+
+  try {
+    const recoveryService = require(RECOVERY_SERVICE_PATH);
+    await recoveryService.reconcilePendingRecoveryForKnowledgeCandidate(candidate);
+  } finally {
+    KnowledgeCandidate.findOneAndUpdate = realCandidateFindOneAndUpdate;
+  }
+
+  const [durableA, durableB, markedCandidate] = await Promise.all([
+    RecoveryOperation.findById(operationA._id).lean(),
+    RecoveryOperation.findById(operationB._id).lean(),
+    KnowledgeCandidate.findById(candidate._id).lean(),
+  ]);
+  assert.equal(firstWriterWon, true);
+  assert.equal(durableA.downstreamMarking.status, 'done');
+  assert.equal(durableB.downstreamMarking.status, 'superseded');
+  assert.equal(markedCandidate.needsReviewAfterRecovery.recoveryOperationId, operationA.operationId);
+  assert.equal(markedCandidate.recoveryReviewHistory.length, 1);
+  assert.equal(markedCandidate.recoveryReviewHistory[0].recoveryOperationId, operationB.operationId);
+  assert.equal(markedCandidate.recoveryReviewHistory[0].supersededByRecoveryOperationId, operationA.operationId);
+});
+
+test('read paths self-heal done markers whose candidate is owned by another recovery', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+  const candidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft whose former owner crashed before operation correction',
+  });
+  const markerFields = (operation, reason) => ({
+    status: 'done',
+    knowledgeCandidateId: candidate._id,
+    reason,
+    markedAt: new Date(),
+    completedAt: new Date(),
+  });
+  const operationA = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 1,
+    overrides: { downstreamMarking: markerFields(null, 'Stale get-operation owner.') },
+  });
+  const operationB = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 2,
+    overrides: { downstreamMarking: markerFields(null, 'Actual candidate owner.') },
+  });
+  await KnowledgeCandidate.updateOne(
+    { _id: candidate._id },
+    {
+      $set: {
+        needsReviewAfterRecovery: {
+          recoveryOperationId: operationB.operationId,
+          markedAt: operationB.downstreamMarking.markedAt,
+          reason: operationB.downstreamMarking.reason,
+        },
+      },
+    }
+  );
+  await RecoveryOperation.updateOne(
+    { operationId: operationA.operationId },
+    {
+      $set: {
+        postRecoveryEvidence: {
+          knowledgeDraftNeedsReview: {
+            recoveryOperationId: operationA.operationId,
+            knowledgeCandidateId: candidate._id,
+          },
+        },
+      },
+    }
+  );
+  assert.equal(await RecoveryOperation.countDocuments({ 'downstreamMarking.status': 'pending' }), 0);
+
+  const getResponse = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/${operationA.operationId}`);
+  assert.equal(getResponse.status, 200, JSON.stringify(getResponse.body));
+  assert.equal(getResponse.body.operation.downstreamMarking.status, 'superseded');
+  assert.equal(getResponse.body.operation.downstreamReviewRequired, false);
+  assert.equal(getResponse.body.operation.knowledgeDraftNeedsReview, null);
+
+  const activeOperation = await createPlanAttempt({
+    seeded, recovery, plan, status: 'awaiting-acceptance', attemptNumber: 3,
+    overrides: { downstreamMarking: markerFields(null, 'Stale active-list owner.') },
+  });
+  const activeResponse = await supertest(app).get('/api/conversations/recovery/active');
+  assert.equal(activeResponse.status, 200, JSON.stringify(activeResponse.body));
+  assert.ok(activeResponse.body.operations.some((item) => item.operationId === activeOperation.operationId));
+  assert.equal(
+    (await RecoveryOperation.findById(activeOperation._id).lean()).downstreamMarking.status,
+    'superseded'
+  );
+
+  const historyOperation = await createPlanAttempt({
+    seeded, recovery, plan, status: 'succeeded', attemptNumber: 4,
+    overrides: {
+      downstreamMarking: markerFields(null, 'Stale history owner.'),
+      postRecoveryEvidence: {
+        knowledgeDraftNeedsReview: {
+          recoveryOperationId: 'stale-history-owner',
+          knowledgeCandidateId: candidate._id,
+        },
+      },
+    },
+  });
+  const historyResponse = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/history`);
+  assert.equal(historyResponse.status, 200, JSON.stringify(historyResponse.body));
+  const historyItem = historyResponse.body.operations.find(
+    (item) => item.operationId === historyOperation.operationId
+  );
+  assert.equal(historyItem.downstreamMarking.status, 'superseded');
+  assert.equal(historyItem.downstreamReviewRequired, false);
+  assert.equal(historyItem.knowledgeDraftNeedsReview, null);
+  assert.equal(await RecoveryOperation.countDocuments({ 'downstreamMarking.status': 'pending' }), 0);
+});
+
 test('accepting after the parked source expires moves the operation to manual review', async () => {
-  providerStub.card = clone(DIFFERENT_CARD);
-  const seeded = await seedConversation({ state: 'rerun', priorCard: ORIGINAL_CARD });
+  const seeded = await seedConversation({ state: 'repersist', priorCard: ORIGINAL_CARD, sourceCard: DIFFERENT_CARD });
   const recovery = await getRecoveryOptions(app, seeded.conversation._id);
   const confirmation = await confirmPlan(app, seeded.conversation._id, recovery, triagePlan(recovery), 'expired-acceptance');
   const operationId = confirmation.body.operation.operationId;
@@ -1273,9 +1885,73 @@ test('accepting after the parked source expires moves the operation to manual re
   assert.deepEqual(clone(unchanged.caseIntake.triageCard), clone(ORIGINAL_CARD));
 });
 
+test('lookup reconciles an expired comparison candidate to manual review and releases its plan lock', async () => {
+  const seeded = await seedConversation({ state: 'repersist', priorCard: ORIGINAL_CARD, sourceCard: DIFFERENT_CARD });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(app, seeded.conversation._id, recovery, triagePlan(recovery), 'expired-lookup');
+  const operationId = confirmation.body.operation.operationId;
+  await waitForOperation(app, seeded.conversation._id, operationId, 'awaiting-acceptance');
+  await RecoveryOperation.updateOne(
+    { operationId },
+    { $set: { acceptExpiresAt: new Date(Date.now() - 60_000) } }
+  );
+
+  const lookup = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/${operationId}`);
+  assert.equal(lookup.status, 200, JSON.stringify(lookup.body));
+  assert.equal(lookup.body.operation.status, 'manual-review');
+  assert.match(lookup.body.operation.errorMessage, /stored result expired before it was accepted; human review is required/i);
+  const durable = await RecoveryOperation.findOne({ operationId }).lean();
+  assert.equal(durable.activePlanId, undefined);
+
+  await TriageResult.updateOne(
+    { _id: seeded.sourceResult._id },
+    {
+      $set: {
+        card: clone(ORIGINAL_CARD),
+        rawOutput: JSON.stringify(ORIGINAL_CARD),
+        'severity.raw': ORIGINAL_CARD.severity,
+        'severity.validated': ORIGINAL_CARD.severity,
+        'severity.displayed': ORIGINAL_CARD.severity,
+        category: ORIGINAL_CARD.category,
+      },
+    }
+  );
+  const retryRecovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const retry = await confirmPlan(
+    app, seeded.conversation._id, retryRecovery, triagePlan(retryRecovery), 'expired-lookup-retry-attempt-2'
+  );
+  assert.equal(retry.status, 202, JSON.stringify(retry.body));
+  assert.notEqual(retry.body.operation.operationId, operationId);
+  assert.equal(retry.body.operation.attemptNumber, 2);
+  const succeeded = await waitForOperation(
+    app, seeded.conversation._id, retry.body.operation.operationId, 'succeeded'
+  );
+  assert.equal(succeeded.attemptNumber, 2);
+});
+
+test('active listing reconciles expired comparison candidates and omits their pending chips', async () => {
+  const seeded = await seedConversation({ state: 'repersist', priorCard: ORIGINAL_CARD, sourceCard: DIFFERENT_CARD });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(app, seeded.conversation._id, recovery, triagePlan(recovery), 'expired-active-list');
+  const operationId = confirmation.body.operation.operationId;
+  await waitForOperation(app, seeded.conversation._id, operationId, 'awaiting-acceptance');
+  await RecoveryOperation.updateOne(
+    { operationId },
+    { $set: { acceptExpiresAt: new Date(Date.now() - 60_000) } }
+  );
+
+  const active = await supertest(app).get('/api/conversations/recovery/active');
+  assert.equal(active.status, 200, JSON.stringify(active.body));
+  assert.equal(active.body.operations.some((item) => item.operationId === operationId), false);
+  const history = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/history`);
+  const reconciled = history.body.operations.find((item) => item.operationId === operationId);
+  assert.equal(reconciled.status, 'manual-review');
+});
+
 test('two racing accepts cannot let the loser hide the winning executor from cancellation', async () => {
-  providerStub.card = clone(DIFFERENT_CARD);
-  const seeded = await seedConversation({ state: 'rerun', priorCard: ORIGINAL_CARD });
+  const seeded = await seedConversation({ state: 'repersist', priorCard: ORIGINAL_CARD, sourceCard: DIFFERENT_CARD });
   const recovery = await getRecoveryOptions(app, seeded.conversation._id);
   const confirmation = await confirmPlan(app, seeded.conversation._id, recovery, triagePlan(recovery), 'accept-cancel-race');
   const operationId = confirmation.body.operation.operationId;
@@ -1517,6 +2193,35 @@ test('cancel before provider handoff makes zero provider calls; cancel after suc
   assert.equal(providerStub.calls.length, 1);
 });
 
+test('abort during a provider call preserves package, trace, and error provenance before cancellation', async () => {
+  providerStub.afterHandoffGate = deferred();
+  providerStub.entered = deferred();
+  providerStub.settled = deferred();
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const confirmation = await confirmPlan(
+    app, seeded.conversation._id, recovery, triagePlan(recovery), 'cancel-mid-provider-call'
+  );
+  const operationId = confirmation.body.operation.operationId;
+  await withTimeout(providerStub.entered.promise, 'Recovery did not enter the provider call.');
+
+  const cancellation = await supertest(app)
+    .post(`/api/conversations/${seeded.conversation._id}/evidence/recovery/${operationId}/cancel`)
+    .send({});
+  assert.equal(cancellation.status, 200, JSON.stringify(cancellation.body));
+  providerStub.afterHandoffGate.resolve();
+  await withTimeout(providerStub.settled.promise, 'Aborted provider call did not settle.');
+  const terminal = await waitForOperation(app, seeded.conversation._id, operationId, 'cancelled');
+  const [contact] = terminal.attempts[0].provenance.contactedProviders;
+  assert.equal(contact.role, 'primary');
+  assert.match(contact.providerPackageIds[0], /^recovery-primary-package-/);
+  assert.deepEqual(contact.traceIds, ['abort-mid-call-trace']);
+  assert.equal(contact.errorCode, 'ABORT_ERR');
+
+  const durable = await RecoveryOperation.findOne({ operationId }).lean();
+  assert.equal(durable.attempts[0].provenance.contactedProviders[0].errorCode, 'ABORT_ERR');
+});
+
 test('cancel-requested operations remain visible in the active operation list', async () => {
   const conversation = await Conversation.create({
     title: 'Active cancellation',
@@ -1596,6 +2301,27 @@ test('GET recovery options uses only cached/no-cost readiness signals and never 
   assert.equal(providerStub.calls.length, 0);
   assert.equal(await TriageResult.countDocuments({}), triageRowsBefore);
   assert.equal(await RecoveryOperation.countDocuments({}), 0);
+});
+
+test('a still-current failed preflight has an explicit failed readiness state and warning', async () => {
+  preflightCacheStub = {
+    ok: false,
+    code: 'PROVIDER_UNAVAILABLE',
+    reason: 'Connection refused.',
+    provider: 'lm-studio',
+    model: 'recovery-test-model',
+    checkedAt: '2026-07-22T14:30:00.000Z',
+    expiresAt: '2026-07-22T14:31:00.000Z',
+    ageMs: 5_000,
+  };
+  const seeded = await seedConversation({ state: 'rerun' });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const plan = triagePlan(recovery);
+
+  assert.equal(plan.readiness.state, 'failed-preflight');
+  assert.equal(plan.readiness.cachedPreflight.ok, false);
+  assert.match(plan.readiness.label, /last connection check.*failed at 2026-07-22T14:30:00.000Z; recovery would likely fail/i);
+  assert.equal(providerStub.calls.length, 0);
 });
 
 test('recovery options are returned as one ordered grouped summary', async () => {
@@ -1747,6 +2473,62 @@ test('post-write evidence recheck failure records an honest succeeded-unverified
   assert.equal(providerStub.calls.length, 1);
 });
 
+test('a failed post-write draft marker is reconciled idempotently from its pending intent', async () => {
+  const seeded = await seedConversation({ state: 'rerun' });
+  const knowledgeCandidate = await KnowledgeCandidate.create({
+    escalationId: new mongoose.Types.ObjectId(),
+    conversationId: seeded.conversation._id,
+    title: 'Draft whose recovery marker is interrupted',
+  });
+  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
+  const realFindOneAndUpdate = KnowledgeCandidate.findOneAndUpdate;
+  let simulatedFailureCount = 0;
+  KnowledgeCandidate.findOneAndUpdate = function failFirstRecoveryMarker(filter, update, options) {
+    if (update?.$set?.needsReviewAfterRecovery && simulatedFailureCount === 0) {
+      simulatedFailureCount += 1;
+      return {
+        select() { return this; },
+        lean() { return Promise.reject(new Error('Simulated crash after the conversation write.')); },
+      };
+    }
+    return realFindOneAndUpdate.call(this, filter, update, options);
+  };
+
+  let operation;
+  try {
+    const confirmation = await confirmPlan(
+      app,
+      seeded.conversation._id,
+      recovery,
+      triagePlan(recovery),
+      'interrupted-downstream-marker'
+    );
+    operation = await waitForOperation(
+      app,
+      seeded.conversation._id,
+      confirmation.body.operation.operationId,
+      'succeeded-unverified'
+    );
+  } finally {
+    KnowledgeCandidate.findOneAndUpdate = realFindOneAndUpdate;
+  }
+
+  assert.equal(simulatedFailureCount, 1);
+  assert.equal(operation.conversationWriteApplied, true);
+  assert.equal(operation.downstreamReviewRequired, true);
+  assert.equal(operation.downstreamMarking.status, 'done');
+  const firstMarker = (await KnowledgeCandidate.findById(knowledgeCandidate._id).lean()).needsReviewAfterRecovery;
+  assert.equal(firstMarker.recoveryOperationId, operation.operationId);
+
+  const repeatedLookup = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery/${operation.operationId}`);
+  assert.equal(repeatedLookup.status, 200);
+  assert.equal(repeatedLookup.body.operation.downstreamMarking.status, 'done');
+  const repeatedMarker = (await KnowledgeCandidate.findById(knowledgeCandidate._id).lean()).needsReviewAfterRecovery;
+  assert.deepEqual(clone(repeatedMarker), clone(firstMarker));
+  assert.equal(providerStub.calls.length, 1);
+});
+
 test('stale reconciliation recognizes a matching conversation receipt as an applied write', async () => {
   const seeded = await seedConversation({ state: 'rerun' });
   const recovery = await getRecoveryOptions(app, seeded.conversation._id);
@@ -1819,7 +2601,7 @@ test('failed, cancelled, and interrupted plans allow one fresh numbered retry wh
   }
 });
 
-test('succeeded, awaiting-acceptance, and manual-review plans remain attached and do not rerun', async () => {
+test('succeeded, awaiting-acceptance, and non-expiry manual-review plans remain attached and do not rerun', async () => {
   for (const status of ['succeeded', 'awaiting-acceptance', 'manual-review']) {
     const seeded = await seedConversation({ state: 'rerun' });
     const recovery = await getRecoveryOptions(app, seeded.conversation._id);
@@ -1932,8 +2714,7 @@ test('executor-start rejection is durably recorded instead of being discarded', 
 });
 
 test('operation status is durable across repeated polls and a fresh service/router load', async () => {
-  providerStub.card = clone(DIFFERENT_CARD);
-  const seeded = await seedConversation({ state: 'rerun', priorCard: ORIGINAL_CARD });
+  const seeded = await seedConversation({ state: 'repersist', priorCard: ORIGINAL_CARD, sourceCard: DIFFERENT_CARD });
   const recovery = await getRecoveryOptions(app, seeded.conversation._id);
   const confirmation = await confirmPlan(app, seeded.conversation._id, recovery, triagePlan(recovery), 'durable-poll');
   const operationId = confirmation.body.operation.operationId;

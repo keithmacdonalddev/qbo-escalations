@@ -32,6 +32,10 @@ function unavailableReason(option) {
   if (readiness?.keyRequired && readiness.keyConfigured === false) {
     return 'The required provider access key is not configured. Add it before starting this recovery choice.';
   }
+  if (readiness?.state === 'failed-preflight' || readiness?.cachedPreflight?.ok === false) {
+    return readiness?.label
+      || 'The last connection check for this provider failed; recovery would likely fail.';
+  }
   if (healthClearlyFailing(readiness?.recentHealth)) {
     return 'Recent checks show that the AI provider may be unavailable. Wait for it to recover or choose another safe option.';
   }
@@ -48,6 +52,48 @@ function runtimeSnapshotFor(option, operation) {
 function providerAndModel(provider, model, fallback = 'not configured') {
   const label = [provider, model].filter(Boolean).join(' · ');
   return label || fallback;
+}
+
+function providerProvenanceRows(option, operation) {
+  const attempt = (Array.isArray(operation?.attempts) ? operation.attempts : [])
+    .find((item) => item?.provenance);
+  const provenance = attempt?.provenance || {};
+  const runtime = runtimeSnapshotFor(option, operation);
+  const planned = providerAndModel(
+    provenance.plannedProvider || runtime.provider,
+    provenance.plannedModel || runtime.model,
+    ''
+  );
+  const contacts = Array.isArray(provenance.contactedProviders) ? provenance.contactedProviders : [];
+  const rows = [];
+  if (planned) rows.push(['Planned provider', planned]);
+  contacts.forEach((contact) => {
+    const provider = providerAndModel(contact?.provider, contact?.model, '');
+    if (!provider) return;
+    const role = contact?.role;
+    const contactLabel = role === 'repair'
+      ? 'Repair attempt contacted'
+      : role === 'fallback'
+        ? 'Fallback contacted'
+        : 'Provider contacted';
+    rows.push([contactLabel, provider]);
+  });
+  if (operation && contacts.length === 0) {
+    const recordedProducer = providerAndModel(runtime.actualProvider, runtime.actualModel, '');
+    if (recordedProducer) rows.push(['Provider contacted', recordedProducer]);
+    else if (operation.providerHandoffAt) rows.push(['Provider contacted', 'Details unavailable']);
+    else rows.push(['No provider handoff recorded', 'No provider call was recorded for this attempt.']);
+  }
+  if (operation) {
+    rows.push(['Cost may have been incurred', provenance.costMayHaveBeenIncurred || operation.providerHandoffAt ? 'Yes' : 'No']);
+    if (Array.isArray(provenance.providerPackageIds) && provenance.providerPackageIds.length > 0) {
+      rows.push(['Provider package IDs', provenance.providerPackageIds.join(', ')]);
+    }
+    if (Array.isArray(provenance.triageResultIds) && provenance.triageResultIds.length > 0) {
+      rows.push(['Triage result IDs', provenance.triageResultIds.join(', ')]);
+    }
+  }
+  return rows;
 }
 
 function failoverProvenance(operation) {
@@ -86,6 +132,7 @@ function providerHandoffStarted(operation) {
 function TechnicalDetails({ option, operation, recovery }) {
   const fingerprint = option?.evidenceFingerprint || recovery?.evidenceFingerprint || {};
   const artifactCodes = option?.artifactCodes || operation?.missingCodes || [];
+  const providerRows = providerProvenanceRows(option, operation);
   return (
     <details className="recovery-technical">
       <summary>Technical details</summary>
@@ -100,6 +147,9 @@ function TechnicalDetails({ option, operation, recovery }) {
         <div><dt>Evidence contract</dt><dd>{fingerprint.contractVersion || 'Unavailable'}</dd></div>
         <div><dt>Evidence updated</dt><dd>{fingerprint.evidenceUpdatedAt || 'Unavailable'}</dd></div>
         <div><dt>Missing artifact codes</dt><dd>{artifactCodes.join(', ') || 'None'}</dd></div>
+        {providerRows.map(([label, value], index) => (
+          <div key={`${label}-${index}`}><dt>{label}</dt><dd>{value}</dd></div>
+        ))}
         {operation?.providerHandoffAt && <div><dt>Provider handoff</dt><dd>{operation.providerHandoffAt}</dd></div>}
         {operation?.commitStartedAt && <div><dt>Saved update started</dt><dd>{operation.commitStartedAt}</dd></div>}
         {operation?.commitCompletedAt && <div><dt>Saved update completed</dt><dd>{operation.commitCompletedAt}</dd></div>}
@@ -309,7 +359,11 @@ function TerminalRecovery({ controller, option }) {
     interrupted: ['Recovery failed', 'Recovery was interrupted and was not restarted automatically. Review the session before trying again.'],
     'manual-review': ['Human review required', operation?.errorMessage || 'Automatic recovery stopped because a person needs to review the evidence.'],
   };
-  const [heading, explanation] = statusCopy[operation?.status] || ['Recovery finished', 'Review the latest evidence before continuing.'];
+  const [defaultHeading, explanation] = statusCopy[operation?.status] || ['Recovery finished', 'Review the latest evidence before continuing.'];
+  const heading = operation?.downstreamReviewRequired
+    && ['succeeded', 'succeeded-unverified'].includes(operation?.status)
+    ? 'Recovered — your knowledge draft needs review'
+    : defaultHeading;
   const expectedWrites = Array.isArray(option?.expectedWrites) ? option.expectedWrites : [];
   const provenance = failoverProvenance(operation);
   const writeApplied = operation?.conversationWriteApplied === true
@@ -327,9 +381,10 @@ function TerminalRecovery({ controller, option }) {
       </div>
       <p className="recovery-lead">{explanation}</p>
       {provenance && <p className="recovery-note">{provenance}</p>}
-      {operation?.knowledgeDraftNeedsReview && (
+      {operation?.downstreamReviewRequired && (
         <p className="recovery-warning" role="status">
-          Your knowledge draft may need review because the accepted recovery changed the triage result meaningfully.
+          {operation?.knowledgeDraftNeedsReview?.reason
+            || 'Your knowledge draft needs review because it could not be confirmed against the recovered triage result.'}
         </p>
       )}
 

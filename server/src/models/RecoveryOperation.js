@@ -5,6 +5,28 @@ const { RETENTION_KEYS, resolveRetentionDays } = require('../lib/retention-confi
 
 const ttlDays = resolveRetentionDays(RETENTION_KEYS.RECOVERY_OPERATION);
 
+const contactedProviderSchema = new mongoose.Schema({
+  attemptIndex: { type: Number, default: 0 },
+  role: { type: String, default: '' },
+  provider: { type: String, default: '' },
+  model: { type: String, default: '' },
+  contactedAt: { type: Date, default: null },
+  providerPackageIds: { type: [String], default: [] },
+  traceIds: { type: [String], default: [] },
+  errorCode: { type: String, default: '' },
+}, { _id: false });
+
+const attemptProvenanceSchema = new mongoose.Schema({
+  plannedProvider: { type: String, default: '' },
+  plannedModel: { type: String, default: '' },
+  providerHandoffAt: { type: Date, default: null },
+  contactedProviders: { type: [contactedProviderSchema], default: [] },
+  providerPackageIds: { type: [String], default: [] },
+  triageResultIds: { type: [String], default: [] },
+  fallbackContacted: { type: Boolean, default: false },
+  costMayHaveBeenIncurred: { type: Boolean, default: false },
+}, { _id: false });
+
 const attemptSchema = new mongoose.Schema({
   attempt: { type: Number, default: 1 },
   strategy: { type: String, enum: ['repersist', 'rerun-stage'], required: true },
@@ -20,6 +42,7 @@ const attemptSchema = new mongoose.Schema({
   triageResultId: { type: String, default: '' },
   errorCode: { type: String, default: '' },
   errorMessage: { type: String, default: '' },
+  provenance: { type: attemptProvenanceSchema, default: null },
 }, { _id: false });
 
 const progressEventSchema = new mongoose.Schema({
@@ -27,6 +50,22 @@ const progressEventSchema = new mongoose.Schema({
   kind: { type: String, default: 'info' },
   message: { type: String, default: '' },
   detail: { type: mongoose.Schema.Types.Mixed, default: null },
+}, { _id: false });
+
+const downstreamMarkingSchema = new mongoose.Schema({
+  status: {
+    type: String,
+    enum: ['pending', 'done', 'superseded', 'none'],
+    default: 'none',
+  },
+  knowledgeCandidateId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'KnowledgeCandidate',
+    default: null,
+  },
+  reason: { type: String, default: '' },
+  markedAt: { type: Date, default: null },
+  completedAt: { type: Date, default: null },
 }, { _id: false });
 
 const recoveryOperationSchema = new mongoose.Schema({
@@ -112,6 +151,7 @@ const recoveryOperationSchema = new mongoose.Schema({
   completedAt: { type: Date, default: null },
   cancellationRequestedAt: { type: Date, default: null },
   cancellationAcknowledgedAt: { type: Date, default: null },
+  downstreamMarking: { type: downstreamMarkingSchema, default: () => ({ status: 'none' }) },
   postRecoveryEvidence: { type: mongoose.Schema.Types.Mixed, default: null },
   errorCode: { type: String, default: '' },
   errorMessage: { type: String, default: '' },

@@ -1129,9 +1129,54 @@ function recoveryStrategyLabel(strategy) {
   return displayEvidenceStageStatus(strategy);
 }
 
+export function recoveryProviderProvenanceLabels(operation) {
+  if (operation?.strategy === 'repersist') {
+    const source = [operation?.runtimeSnapshot?.actualProvider, operation?.runtimeSnapshot?.actualModel]
+      .filter(Boolean)
+      .join(' · ');
+    return [`No new provider call${source ? `; reused a saved result from ${source}` : ''}`];
+  }
+  const attempts = Array.isArray(operation?.attempts) ? operation.attempts : [];
+  const provenance = attempts.find((attempt) => attempt?.provenance)?.provenance || {};
+  const planned = [
+    provenance.plannedProvider || operation?.runtimeSnapshot?.provider,
+    provenance.plannedModel || operation?.runtimeSnapshot?.model,
+  ].filter(Boolean).join(' · ');
+  const contacts = Array.isArray(provenance.contactedProviders) ? provenance.contactedProviders : [];
+  const labels = [];
+  if (planned) labels.push(`Planned provider: ${planned}`);
+  contacts.forEach((contact) => {
+    const provider = [contact?.provider, contact?.model].filter(Boolean).join(' · ');
+    if (!provider) return;
+    const role = contact?.role;
+    const contactLabel = role === 'repair'
+      ? 'Repair attempt contacted'
+      : role === 'fallback'
+        ? 'Fallback contacted'
+        : 'Provider contacted';
+    labels.push(`${contactLabel}: ${provider}`);
+  });
+  if (contacts.length === 0) {
+    const recordedProducer = [operation?.runtimeSnapshot?.actualProvider, operation?.runtimeSnapshot?.actualModel]
+      .filter(Boolean)
+      .join(' · ');
+    if (recordedProducer) labels.push(`Provider contacted: ${recordedProducer}`);
+    else if (operation?.providerHandoffAt) labels.push('Provider contacted: details unavailable');
+    else labels.push('No provider handoff recorded');
+  }
+  return labels;
+}
+
 function RecoveryTimelineTechnical({ operation }) {
   const original = operation?.originalEvidence || {};
   const attempts = Array.isArray(operation?.attempts) ? operation.attempts : [];
+  const provenance = attempts.find((attempt) => attempt?.provenance)?.provenance || {};
+  const providerRows = recoveryProviderProvenanceLabels(operation).map((label) => {
+    const separator = label.indexOf(': ');
+    return separator > -1
+      ? [label.slice(0, separator), label.slice(separator + 2)]
+      : [label, 'No provider call was recorded.'];
+  });
   const ids = [
     ['Operation ID', operation?.operationId],
     ['Plan ID', operation?.planId],
@@ -1139,8 +1184,13 @@ function RecoveryTimelineTechnical({ operation }) {
     ['Original result ID', original.resultId || original.failedRun?.resultId || original.receipt?.resultId],
     ['Original provider package ID', original.packageId || original.failedRun?.packageId || original.receipt?.packageId],
     ['Original trace IDs', Array.isArray(original.traceIds) ? original.traceIds.join(', ') : ''],
-    ['Recovered provider package ID', operation?.runtimeSnapshot?.actualProviderPackageId],
-    ['Recovered result IDs', attempts.map((attempt) => attempt?.triageResultId).filter(Boolean).join(', ')],
+    ...providerRows,
+    ['Provider package IDs', Array.isArray(provenance.providerPackageIds) ? provenance.providerPackageIds.join(', ') : ''],
+    ['Recovered result IDs', [
+      ...(Array.isArray(provenance.triageResultIds) ? provenance.triageResultIds : []),
+      ...attempts.map((attempt) => attempt?.triageResultId).filter(Boolean),
+    ].filter(Boolean).join(', ')],
+    ['Cost may have been incurred', provenance.costMayHaveBeenIncurred || operation?.providerHandoffAt ? 'Yes' : 'No'],
   ].filter(([, value]) => value);
   return (
     <details className="session-evidence-technical">
@@ -1154,7 +1204,7 @@ function RecoveryTimelineTechnical({ operation }) {
   );
 }
 
-function RecoveryTimeline({ historyState, onRefresh }) {
+export function RecoveryTimeline({ historyState, onRefresh }) {
   if (!historyState || historyState.state === 'idle' || historyState.state === 'loading') {
     return (
       <section className="session-evidence-audit">
@@ -1187,16 +1237,7 @@ function RecoveryTimeline({ historyState, onRefresh }) {
         <div className="session-evidence-groups">
           {operations.map((operation) => {
             const original = operation.originalEvidence || {};
-            const attempts = Array.isArray(operation.attempts) ? operation.attempts : [];
-            const actualProvider = operation.runtimeSnapshot?.actualProvider
-              || [...attempts].reverse().find((attempt) => attempt?.provider)?.provider
-              || 'No provider call';
-            const actualModel = operation.runtimeSnapshot?.actualModel
-              || [...attempts].reverse().find((attempt) => attempt?.model)?.model
-              || '';
-            const providerSummary = operation.strategy === 'repersist'
-              ? `No new provider call; reused a saved result from ${actualProvider}${actualModel ? ` · ${actualModel}` : ''}`
-              : `Actual provider: ${actualProvider}${actualModel ? ` · ${actualModel}` : ''}`;
+            const providerSummary = recoveryProviderProvenanceLabels(operation).join(' · ');
             const comparisonNotes = Array.isArray(operation.comparison?.plainSummary)
               ? operation.comparison.plainSummary
               : [];
@@ -1241,7 +1282,7 @@ function RecoveryTimeline({ historyState, onRefresh }) {
                   {operation.knowledgeDraftNeedsReview && (
                     <li>
                       <strong>Knowledge draft</strong>
-                      <span>Your knowledge draft may need review because the accepted triage result changed meaningfully.</span>
+                      <span>{operation.knowledgeDraftNeedsReview.reason || 'This knowledge draft needs review after triage recovery.'}</span>
                     </li>
                   )}
                 </ul>
