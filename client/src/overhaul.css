@@ -7376,6 +7376,12 @@ body,
   border-radius: 6px !important;
 }
 
+.app-header-icon-btn > svg {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+}
+
 .app-header-icon-btn:hover,
 .sidebar-toggle-header:hover,
 .sidebar-nav-item:hover,
@@ -7591,7 +7597,7 @@ a[class*="btn"] {
 }
 
 .btn-icon,
-.app-header-icon-btn,
+button.app-header-icon-btn,
 .compose-action-btn,
 .chat-mini-header-btn,
 .workspace-agent-icon-btn,
