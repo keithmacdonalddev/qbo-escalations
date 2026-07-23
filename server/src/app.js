@@ -11,6 +11,7 @@ const { registerDomainRequestObserver } = require('./services/domain-health');
 const { watchAgentPromptVersions } = require('./lib/agent-prompt-store');
 const requestId = require('./middleware/request-id');
 const responseTimeout = require('./middleware/response-timeout');
+const { attachAppAuth } = require('./middleware/app-auth');
 
 const UPLOADS_DIR = path.join(__dirname, '..', 'uploads');
 const PROTOTYPES_DIR = path.join(__dirname, '..', '..', 'prototypes');
@@ -39,6 +40,8 @@ function createApp() {
   // by ~33%, so the JSON payload can approach ~40MB plus overhead. 50MB matches
   // the documented limit and is the smallest value that covers those caps.
   app.use(express.json({ limit: '50mb' }));
+  app.use(attachAppAuth);
+  app.use('/api/auth', require('./routes/app-auth'));
   app.use('/uploads', express.static(UPLOADS_DIR));
   app.use('/prototypes', express.static(PROTOTYPES_DIR));
   app.use('/api/pipeline-tests/image-fixtures', express.static(PIPELINE_TEST_IMAGE_FIXTURES_DIR));

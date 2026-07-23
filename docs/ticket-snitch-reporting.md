@@ -7,8 +7,9 @@ QBO Escalations includes a native **Send feedback** form for problems, feature r
 - Problem reports map to Ticket Snitch `problem_report` items for human confirmation.
 - Feature requests map to `feature_request`.
 - Feedback maps to `improvement`.
-- The QBO server owns reporter identity and project mapping.
-- A short-lived anti-forgery token and exact-origin check protect the browser endpoint.
+- The report route requires a signed-in QBO server session and derives reporter identity only from that session.
+- The QBO server owns project mapping.
+- A short-lived anti-forgery token bound to the session plus an exact-origin check protects the browser endpoint.
 - A stable report-draft ID makes an explicit retry return the original case instead of creating a duplicate.
 - The user chooses whether basic diagnostics are included.
 - Query strings, URL fragments, cookies, tokens, headers, logs, Gmail content, and arbitrary browser fields are not forwarded.
@@ -16,11 +17,13 @@ QBO Escalations includes a native **Send feedback** form for problems, feature r
 
 Ticket Snitch remains responsible for human review, priority, ownership, evidence, action, verification, and closure. A project credential cannot declare a confirmed bug or make those owner decisions.
 
-## Current identity boundary
+## Signed-in reporting identity
 
-QBO Escalations is currently a local single-user application and does not have an application account/login session. The reporting server therefore uses the configured `TICKET_SNITCH_REPORTER_ID` and `TICKET_SNITCH_REPORTER_NAME` as trusted attribution. Browser input cannot override them.
+QBO Escalations now supports an opt-in first-party password session for identity-bound reporting in its current single-user deployment. The password is stored only as a scrypt hash in the server secret environment. A successful login creates a random opaque session cookie that is HttpOnly, SameSite=Strict, time-bounded, Secure by default in production, and stored only as a hash in server memory. Logout or server restart invalidates it.
 
-This is suitable for the current local single-user deployment. It must not be described as per-account sign-in. Before a remote or multi-user deployment, replace the configured identity with a reporter derived from that deployment's authenticated QBO server session.
+The report route reads the user ID, name, and optional email from the verified server session. Browser-supplied identity, role, project, workspace, owner, priority, severity, and status fields are ignored. When authentication is disabled or misconfigured, QBO remains usable under its existing local deployment boundary, but user report submission is unavailable rather than assigning an invented identity.
+
+This is one first-party identity for the current local single-user deployment. It is not a multi-user account platform and does not claim to retrofit authorization onto every unrelated QBO route. A future hosted or multi-user deployment needs registration/invitations or an external identity provider, durable shared sessions, roles, recovery, and route-by-route authorization review.
 
 Gmail OAuth accounts are connected services, not QBO application identities, and must not be used as a substitute.
 
@@ -28,18 +31,24 @@ Gmail OAuth accounts are connected services, not QBO application identities, and
 
 Do not put live values in source control. Use the placeholders in `server/.env.example`.
 
-1. In Ticket Snitch, confirm the QBO Escalations project and create a project credential with only `work-items:create` scope.
-2. In the approved QBO server secret environment, set:
+1. Run `npm run auth:hash-password` locally. It prompts without echoing the password and prints a scrypt hash. Copy only the resulting hash into the approved secret environment; do not commit it.
+2. Configure the QBO reporting identity:
+   - `QBO_AUTH_MODE=password`
+   - `QBO_AUTH_USER_ID`
+   - `QBO_AUTH_USER_NAME`
+   - optional `QBO_AUTH_USER_EMAIL`
+   - `QBO_AUTH_PASSWORD_HASH`
+   - `QBO_AUTH_ALLOWED_ORIGINS` when the browser origin differs from the API host, such as Vite development
+   - leave secure cookies enabled for HTTPS production
+3. In Ticket Snitch, confirm the QBO Escalations project and create a project credential with only `work-items:create` scope.
+4. In the approved QBO server secret environment, set:
    - `TICKET_SNITCH_API_URL`
    - `TICKET_SNITCH_API_KEY`
    - `TICKET_SNITCH_PROJECT_ID`
-   - `TICKET_SNITCH_REPORTER_ID`
-   - `TICKET_SNITCH_REPORTER_NAME`
-   - optional `TICKET_SNITCH_REPORTER_EMAIL`
    - `TICKET_SNITCH_REPORT_ALLOWED_ORIGINS` for development or any separate web origin
-3. Restart or deploy only the approved QBO environment.
-4. Open **Send feedback**, submit a harmless test report, and verify the returned case in the intended Ticket Snitch project.
-5. Preserve the QBO request ID and Ticket Snitch case key as activation evidence.
+5. Restart or deploy only the approved QBO environment.
+6. Select the QBO account control, sign in, open **Send feedback**, submit a harmless test report, and verify the returned case and reporter in the intended Ticket Snitch project.
+7. Sign out and prove that report bootstrap/submission is refused, then sign in again and preserve the QBO request ID and Ticket Snitch case key as activation evidence.
 
 The connection is not live until this runtime check passes. Credential creation, environment writes, service restarts, database preparation, deployment, and production authentication are intentionally not performed by automated repository tests.
 

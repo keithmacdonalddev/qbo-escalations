@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "nodemon --config nodemon.json --exec \"node --max-old-space-size=512\" src/index.js",
     "start": "node --max-old-space-size=512 src/index.js",
-    "test": "node scripts/run-tests.js"
+    "test": "node scripts/run-tests.js",
+    "auth:hash-password": "node scripts/hash-auth-password.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.206",

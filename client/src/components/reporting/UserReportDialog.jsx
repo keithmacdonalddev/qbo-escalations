@@ -24,13 +24,16 @@ function initialDraft() {
 }
 
 function reportErrorMessage(error) {
+  if (error?.code === 'QBO_AUTH_REQUIRED') {
+    return 'Your QBO session ended. Sign in again to send this saved draft.';
+  }
   if (error?.status === 401 || error?.status === 403) {
     return 'This QBO Escalations installation is not permitted to submit reports. Your draft is still here.';
   }
   return error?.message || 'The report could not be sent. Your draft is still here.';
 }
 
-export default function UserReportDialog({ open, onClose, errorCode = '' }) {
+export default function UserReportDialog({ open, onClose, onAuthenticationRequired, errorCode = '' }) {
   const dialogRef = useRef(null);
   const titleRef = useRef(null);
   const priorFocusRef = useRef(null);
@@ -51,6 +54,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         reason: result.unavailableReason || '',
       });
     } catch (error) {
+      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setBootstrap({
         state: error?.status === 401 || error?.status === 403 ? 'denied' : 'error',
         token: '',
@@ -58,7 +62,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         reason: reportErrorMessage(error),
       });
     }
-  }, []);
+  }, [onAuthenticationRequired]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -162,6 +166,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         requestId: result.requestId || '',
       });
     } catch (error) {
+      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setSubmitState({
         state: 'error',
         ticket: null,

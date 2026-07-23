@@ -11,6 +11,7 @@ const {
   updateWork,
 } = require('../services/ticket-snitch-client');
 const { createRateLimiter } = require('../middleware/rate-limit');
+const { requireReportingUser } = require('../middleware/app-auth');
 
 const router = express.Router();
 const TYPES = new Set(['problem_report', 'feature_request', 'improvement', 'task', 'maintenance', 'incident', 'idea', 'decision', 'question', 'agent_discovered_problem']);
@@ -26,19 +27,6 @@ const reportTokenSecret = crypto.randomBytes(32);
 
 function cleanText(value, max) {
   return String(value || '').trim().slice(0, max);
-}
-
-function configuredReporter(env = process.env) {
-  const actorId = cleanText(env.TICKET_SNITCH_REPORTER_ID, 128);
-  const displayName = cleanText(env.TICKET_SNITCH_REPORTER_NAME, 200);
-  const suppliedEmail = cleanText(env.TICKET_SNITCH_REPORTER_EMAIL, 320);
-  const emailValid = !suppliedEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(suppliedEmail);
-  return {
-    actorId,
-    displayName,
-    email: emailValid ? suppliedEmail : '',
-    configured: Boolean(actorId && displayName && emailValid),
-  };
 }
 
 function allowedReportOrigins(env = process.env) {
@@ -94,21 +82,21 @@ function requireReportOrigin(req, res, next) {
   return next();
 }
 
-function issueReportToken(origin, now = Date.now()) {
+function issueReportToken(origin, sessionKey, now = Date.now()) {
   const expiresAt = now + REPORT_TOKEN_TTL_MS;
   const nonce = crypto.randomBytes(18).toString('base64url');
-  const payload = `${expiresAt}.${nonce}.${origin}`;
+  const payload = `${expiresAt}.${nonce}.${origin}.${sessionKey}`;
   const signature = crypto.createHmac('sha256', reportTokenSecret).update(payload).digest('base64url');
   return `${expiresAt}.${nonce}.${signature}`;
 }
 
-function isValidReportToken(token, origin, now = Date.now()) {
+function isValidReportToken(token, origin, sessionKey, now = Date.now()) {
   const [expiresText, nonce, signature, ...rest] = String(token || '').split('.');
   if (rest.length || !/^\d{13}$/.test(expiresText || '') || !/^[A-Za-z0-9_-]{20,40}$/.test(nonce || '') || !signature) return false;
   const expiresAt = Number(expiresText);
   if (expiresAt < now || expiresAt > now + REPORT_TOKEN_TTL_MS + 5_000) return false;
   const expected = crypto.createHmac('sha256', reportTokenSecret)
-    .update(`${expiresAt}.${nonce}.${origin}`)
+    .update(`${expiresAt}.${nonce}.${origin}.${sessionKey}`)
     .digest('base64url');
   const actualBuffer = Buffer.from(signature);
   const expectedBuffer = Buffer.from(expected);
@@ -116,7 +104,7 @@ function isValidReportToken(token, origin, now = Date.now()) {
 }
 
 function requireReportToken(req, res, next) {
-  if (!isValidReportToken(req.headers['x-qbo-report-token'], req.reportOrigin)) {
+  if (!isValidReportToken(req.headers['x-qbo-report-token'], req.reportOrigin, req.authenticatedUser?.sessionKey || '')) {
     return res.status(403).json({
       ok: false,
       code: 'TICKET_SNITCH_REPORT_TOKEN_INVALID',
@@ -150,31 +138,27 @@ function connectorError(res, error, requestId) {
 
 const userReportRateLimit = createRateLimiter({ name: 'ticket-snitch-user-report', limit: 12, includeRequestId: true });
 
-router.get('/reporting/bootstrap', requireReportOrigin, (req, res) => {
+router.get('/reporting/bootstrap', requireReportOrigin, requireReportingUser, (req, res) => {
   const connector = getConnectorConfig();
-  const reporter = configuredReporter();
-  const available = connector.configured && reporter.configured;
+  const available = connector.configured;
   return res.json({
     ok: true,
     available,
     unavailableReason: available
       ? ''
-      : connector.configured
-        ? 'REPORTER_NOT_CONFIGURED'
-        : 'TICKET_SNITCH_NOT_CONFIGURED',
-    reportToken: available ? issueReportToken(req.reportOrigin) : '',
+      : 'TICKET_SNITCH_NOT_CONFIGURED',
+    reportToken: available ? issueReportToken(req.reportOrigin, req.authenticatedUser.sessionKey) : '',
     expiresInSeconds: available ? Math.floor(REPORT_TOKEN_TTL_MS / 1000) : 0,
     requestId: req.requestId,
   });
 });
 
-router.post('/reporting/reports', requireReportOrigin, userReportRateLimit, requireReportToken, async (req, res) => {
+router.post('/reporting/reports', requireReportOrigin, requireReportingUser, userReportRateLimit, requireReportToken, async (req, res) => {
   const connector = getConnectorConfig();
-  const reporter = configuredReporter();
-  if (!connector.configured || !reporter.configured) {
+  if (!connector.configured) {
     return res.status(503).json({
       ok: false,
-      code: !connector.configured ? 'TICKET_SNITCH_NOT_CONFIGURED' : 'TICKET_SNITCH_REPORTER_NOT_CONFIGURED',
+      code: 'TICKET_SNITCH_NOT_CONFIGURED',
       error: 'Reporting is not connected on this QBO Escalations server.',
       requestId: req.requestId,
     });
@@ -194,6 +178,11 @@ router.post('/reporting/reports', requireReportOrigin, userReportRateLimit, requ
 
   const suppliedContext = input.context && typeof input.context === 'object' ? input.context : {};
   const diagnosticsApproved = input.includeDiagnostics === true;
+  const reporter = {
+    actorId: req.authenticatedUser.id,
+    displayName: req.authenticatedUser.displayName,
+    email: req.authenticatedUser.email || '',
+  };
   const context = {
     pageUrl: safeReportedPageUrl(suppliedContext.pageUrl, req.reportOrigin),
     routeName: cleanText(suppliedContext.routeName, 200).split('?')[0],
@@ -307,7 +296,6 @@ router.post('/work/:identifier/evidence', mutationRateLimit, async (req, res) =>
 
 module.exports = router;
 module.exports.allowedReportOrigins = allowedReportOrigins;
-module.exports.configuredReporter = configuredReporter;
 module.exports.isValidReportToken = isValidReportToken;
 module.exports.requireReportProxySecret = requireReportProxySecret;
 module.exports.requireReportOrigin = requireReportOrigin;

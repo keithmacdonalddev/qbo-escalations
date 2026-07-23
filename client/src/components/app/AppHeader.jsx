@@ -474,6 +474,8 @@ export default function AppHeader({
   agentModalOpen,
   onOpenAgent,
   onOpenUserReport,
+  appAuth,
+  onOpenAppAuth,
   aiManagementAlertCount = 0,
 }) {
   const unreadCount = useUnreadEmailCount();
@@ -971,6 +973,27 @@ export default function AppHeader({
             <path d="M8 13h5" />
           </svg>
         </motion.button>
+        {appAuth?.enabled ? (
+          <motion.button
+            className={`app-header-icon-btn app-header-auth-btn${appAuth.authenticated ? ' is-authenticated' : ''}`}
+            onClick={onOpenAppAuth}
+            type="button"
+            aria-label={appAuth.authenticated ? `QBO account, signed in as ${appAuth.user?.displayName || 'user'}` : 'Sign in to QBO Escalations'}
+            title={appAuth.authenticated ? `Signed in as ${appAuth.user?.displayName || 'QBO user'}` : 'Sign in to QBO Escalations'}
+            whileHover={{ scale: 1.08 }}
+            whileTap={{ scale: 0.92 }}
+          >
+            {appAuth.authenticated ? (
+              <span className="app-header-auth-initial" aria-hidden="true">{appAuth.user?.displayName?.trim()?.charAt(0)?.toUpperCase() || 'Q'}</span>
+            ) : (
+              <svg aria-hidden="true" focusable="false" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 21a8 8 0 0 1 16 0" />
+              </svg>
+            )}
+            <span className={`app-header-auth-status${appAuth.authenticated ? ' is-online' : ''}`} aria-hidden="true" />
+          </motion.button>
+        ) : null}
         {/* Test suite */}
         <motion.button
           className="app-header-icon-btn"

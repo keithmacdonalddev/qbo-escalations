@@ -8,6 +8,7 @@ import AgentHealthBanner from './components/AgentHealthBanner.jsx';
 import HealthToast from './components/HealthToast.jsx';
 import AppHeader from './components/app/AppHeader.jsx';
 import UserReportDialog from './components/reporting/UserReportDialog.jsx';
+import AppAuthDialog from './components/auth/AppAuthDialog.jsx';
 import useTheme from './hooks/useTheme.js';
 import useAiSettings from './hooks/useAiSettings.js';
 import useShellPreferences from './hooks/useShellPreferences.js';
@@ -18,6 +19,7 @@ import { useChat } from './hooks/useChat.js';
 import { WorkspaceMonitorProvider } from './context/WorkspaceMonitorContext.jsx';
 import { AgentRegistryProvider } from './context/AgentRegistryContext.jsx';
 import { useProviderCatalog } from './context/ProviderCatalogContext.jsx';
+import { useAppAuth } from './context/AppAuthContext.jsx';
 import { AgentTestModalProvider } from './components/agent-tests/AgentTestModalProvider.jsx';
 import { useRequestWaterfall } from './hooks/useRequestWaterfall.js';
 import { useRenderFlame } from './hooks/useRenderFlame.js';
@@ -62,6 +64,7 @@ const AGENT_MODAL_TITLES = {
 };
 
 function App() {
+  const appAuth = useAppAuth();
   // Consuming the catalog version makes every mounted provider/model picker
   // re-render immediately after AI Management changes the governed inventory.
   const { catalog: managedAiCatalog } = useProviderCatalog();
@@ -75,6 +78,8 @@ function App() {
   });
   const [agentModalOpen, setAgentModalOpen] = useState(false);
   const [userReportOpen, setUserReportOpen] = useState(false);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const [reportAfterSignIn, setReportAfterSignIn] = useState(false);
   const [devToolsEnabled, setDevToolsEnabled] = useState(() => {
     try { return localStorage.getItem('dev-tools-enabled') === 'true'; } catch { return false; }
   });
@@ -118,6 +123,35 @@ function App() {
     chatConversationId: chat.conversationId,
     onRouteChange,
   });
+
+  const openUserReport = useCallback(() => {
+    if (appAuth.loading || !appAuth.enabled || !appAuth.authenticated) {
+      setReportAfterSignIn(true);
+      setAuthDialogOpen(true);
+      return;
+    }
+    setUserReportOpen(true);
+  }, [appAuth.authenticated, appAuth.enabled, appAuth.loading]);
+
+  const handleSignedIn = useCallback(() => {
+    setAuthDialogOpen(false);
+    if (reportAfterSignIn) {
+      setReportAfterSignIn(false);
+      setUserReportOpen(true);
+    }
+  }, [reportAfterSignIn]);
+
+  const handleReportingAuthRequired = useCallback(() => {
+    appAuth.markSignedOut();
+    setUserReportOpen(false);
+    setReportAfterSignIn(true);
+    setAuthDialogOpen(true);
+  }, [appAuth.markSignedOut]);
+
+  const closeAuthDialog = useCallback(() => {
+    setAuthDialogOpen(false);
+    setReportAfterSignIn(false);
+  }, []);
   const {
     globalDockTab,
     setGlobalDockTab,
@@ -404,7 +438,9 @@ function App() {
         activeAgentTab={globalDockTab}
         agentModalOpen={agentModalOpen}
         onOpenAgent={openAgentModal}
-        onOpenUserReport={() => setUserReportOpen(true)}
+        onOpenUserReport={openUserReport}
+        appAuth={appAuth}
+        onOpenAppAuth={() => setAuthDialogOpen(true)}
         aiManagementAlertCount={aiManagementAlertCount}
       />
 
@@ -528,6 +564,13 @@ function App() {
       <UserReportDialog
         open={userReportOpen}
         onClose={() => setUserReportOpen(false)}
+        onAuthenticationRequired={handleReportingAuthRequired}
+      />
+
+      <AppAuthDialog
+        open={authDialogOpen}
+        onClose={closeAuthDialog}
+        onSignedIn={handleSignedIn}
       />
 
       {/* Network waterfall — edge tab + right sidebar overlay */}

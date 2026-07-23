@@ -129,3 +129,14 @@ it('preserves a valid draft while offline and does not attempt submission', asyn
     else delete Navigator.prototype.onLine;
   }
 });
+
+it('hands an expired QBO session back to the sign-in flow without losing the draft', async () => {
+  reportingMocks.loadReportingBootstrap.mockRejectedValue(Object.assign(new Error('Sign in first.'), {
+    status: 401,
+    code: 'QBO_AUTH_REQUIRED',
+    requestId: 'expired-session-request',
+  }));
+  const onAuthenticationRequired = vi.fn();
+  render(<UserReportDialog open onClose={() => {}} onAuthenticationRequired={onAuthenticationRequired} />);
+  await waitFor(() => expect(onAuthenticationRequired).toHaveBeenCalledOnce());
+});
