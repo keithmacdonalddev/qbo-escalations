@@ -289,6 +289,21 @@
       "lastHumanReviewDate": "2026-07-22"
     },
     {
+      "id": "agent-profile-management",
+      "label": "Agent identity and continuity management",
+      "userOutcome": "The user can understand each AI teammate, shape its identity, review what it remembers, and see its real authority and evidence without starting from provider machinery.",
+      "risk": "high",
+      "owner": "Agent team",
+      "sourcePaths": ["client/src/components/AgentsView.jsx", "client/src/lib/agentProfilePresentation.js", "server/src/services/agent-identity-service.js"],
+      "requiredCheckTypes": ["unit", "server"],
+      "evidence": [
+        { "type": "unit", "groupId": "client-components", "paths": ["client/src/lib/agentProfilePresentation.test.js"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/agent-identity-memory-review.test.js", "server/test/agent-identities-registry.test.js"] }
+      ],
+      "knownGaps": ["The live Agents page was inspected manually in a real browser on 2026-07-23, but its full edit, save, memory-review, and narrow-screen interaction flow does not yet have an automated rendered component or browser journey."],
+      "lastHumanReviewDate": "2026-07-23"
+    },
+    {
       "id": "provider-controls",
       "label": "Provider controls and spending",
       "userOutcome": "The user sees truthful provider handoff and spending state.",

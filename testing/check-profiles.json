@@ -8,7 +8,7 @@
       "cwd": ".",
       "timeoutMs": 120000,
       "why": "Protects visible client behavior without live services.",
-      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "qbo-orchestration", "conversation-persistence", "escalation-lifecycle", "provider-controls", "request-diagnostics"]
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "qbo-orchestration", "conversation-persistence", "escalation-lifecycle", "provider-controls", "request-diagnostics", "agent-profile-management"]
     },
     "server-suite": {
       "label": "Server behavior tests",
@@ -18,7 +18,7 @@
       "cwd": ".",
       "timeoutMs": 1800000,
       "why": "Checks persistence, permissions, evidence, and route contracts.",
-      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle"]
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle", "agent-profile-management"]
     },
     "stress-harness-tests": {
       "label": "Stress harness infrastructure tests",

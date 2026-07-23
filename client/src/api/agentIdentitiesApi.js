@@ -142,6 +142,28 @@ export async function updateAgentIdentity(id, profile, summary) {
   return data.agent;
 }
 
+export async function reviewAgentMemory(id, key, action, content = '') {
+  const data = await apiFetchJson(
+    `${BASE}/${encodeURIComponent(id)}/memory/${encodeURIComponent(key)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, content }),
+    },
+    'Failed to review agent memory',
+  );
+  return data.agent;
+}
+
+export async function forgetAgentMemory(id, key) {
+  const data = await apiFetchJson(
+    `${BASE}/${encodeURIComponent(id)}/memory/${encodeURIComponent(key)}`,
+    { method: 'DELETE', noRetry: true },
+    'Failed to forget agent memory',
+  );
+  return data.agent;
+}
+
 export async function updateAgentRuntime(id, runtime, summary) {
   const data = await apiFetchJson(`${BASE}/${encodeURIComponent(id)}/runtime`, {
     method: 'PATCH',

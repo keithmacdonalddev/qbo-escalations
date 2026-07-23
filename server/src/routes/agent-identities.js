@@ -14,6 +14,7 @@ const {
   recordAgentLifecycleActivity,
   recordAgentLifecycleStep,
   recordAgentReview,
+  reviewAgentMemoryNote,
   updateAgentIdentity,
   updateAgentEnabled,
   updateAgentRuntime,
@@ -394,6 +395,35 @@ router.post('/:id/harness-runs', async (req, res) => {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Agent identity not found' });
   }
   return res.status(201).json({ ok: true, agent, runs: agent.harness?.runs || [] });
+});
+
+router.patch('/:id/memory/:key', async (req, res) => {
+  try {
+    const agent = await reviewAgentMemoryNote(req.params.id, req.params.key, req.body || {}, { actor: 'user' });
+    if (!agent) {
+      return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Agent identity not found' });
+    }
+    return res.json({ ok: true, agent });
+  } catch (err) {
+    return sendServiceError(res, err);
+  }
+});
+
+router.delete('/:id/memory/:key', async (req, res) => {
+  try {
+    const agent = await reviewAgentMemoryNote(
+      req.params.id,
+      req.params.key,
+      { action: 'forget' },
+      { actor: 'user' },
+    );
+    if (!agent) {
+      return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Agent identity not found' });
+    }
+    return res.json({ ok: true, agent });
+  } catch (err) {
+    return sendServiceError(res, err);
+  }
 });
 
 router.patch('/:id/runtime', async (req, res) => {

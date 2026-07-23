@@ -14,6 +14,8 @@ import {
   programmaticCheckImageParserTestResult,
   recordAgentHarnessRun,
   recordAgentReview,
+  reviewAgentMemory,
+  forgetAgentMemory,
   retestImageParserTestResult,
   updateImageParserTestResult,
   updateTriageTestResult,
@@ -81,6 +83,16 @@ import {
   pipelinePosition,
 } from './chat-v5/pipelineRuntime.js';
 import { STAGE_LABELS } from './chat-v5/mockData.js';
+import {
+  formatMemoryReviewStatus,
+  formatMemorySource,
+  getAgentProfileKindLabel,
+  getLatestMemoryNote,
+  getPrimaryProfileSection,
+  getProfileChanges,
+  groupAgentsForDirectory,
+  normalizeProfileRouteTab,
+} from '../lib/agentProfilePresentation.js';
 import './AgentsView.css';
 import './AgentOverviewTab.css';
 
@@ -103,34 +115,54 @@ const PROFILE_FIELDS = [
 ];
 
 const PROFILE_TABS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'configuration', label: 'Configuration' },
-  { id: 'prompt', label: 'Prompt' },
-  { id: 'harness', label: 'Harness' },
-  { id: 'test-assets', label: 'Test Assets' },
-  { id: 'memory', label: 'Memory' },
-  { id: 'monitoring', label: 'Monitoring' },
-  { id: 'workflows', label: 'Workflows' },
-  { id: 'activity', label: 'Activity' },
-  { id: 'versions', label: 'Versions' },
+  { id: 'profile', label: 'Profile' },
+  { id: 'continuity', label: 'Continuity' },
+  { id: 'work', label: 'Work & Authority' },
+  { id: 'review', label: 'Review & Evidence' },
 ];
 
-const IMAGE_PARSER_PROFILE_TABS = [
-  ...PROFILE_TABS.slice(0, 5),
-  { id: 'test-results', label: 'Test Results' },
-  { id: 'event-streams', label: 'Event Streams' },
-  { id: 'chat-sessions', label: 'Chat Sessions' },
-  ...PROFILE_TABS.slice(5),
+const PROFILE_FIELD_GROUPS = [
+  {
+    id: 'identity',
+    title: 'Identity and purpose',
+    description: 'The stable description of who this agent is and why it exists.',
+    fields: ['roleTitle', 'displayName', 'headline', 'soul'],
+  },
+  {
+    id: 'voice',
+    title: 'Voice and personality',
+    description: 'How the agent should sound without changing its professional responsibilities.',
+    fields: ['tone', 'conversationalStyle', 'quirks'],
+  },
+  {
+    id: 'participation',
+    title: 'Participation and community',
+    description: 'When the agent should join, defer, support peers, or stay quiet.',
+    fields: ['initiativeLevel', 'socialStyle', 'communityStyle', 'routingBias'],
+  },
+  {
+    id: 'safety',
+    title: 'Boundaries and development',
+    description: 'What the agent must not do and how it should learn from correction.',
+    fields: ['boundaries', 'selfImprovementStyle'],
+  },
 ];
 
-// Stage 4 Triage Agent gets its own Test Results tab now that there is a
-// dedicated /api/triage-tests/run endpoint persisting each test run for
-// operator review. Same slot position as the parser's test-results tab.
-const TRIAGE_AGENT_PROFILE_TABS = [
-  ...PROFILE_TABS.slice(0, 5),
-  { id: 'triage-test-results', label: 'Test Results' },
-  ...PROFILE_TABS.slice(5),
-];
+const PROFILE_FIELD_HELP = {
+  roleTitle: 'The name people see throughout the application.',
+  displayName: 'A shorter alias for compact surfaces.',
+  headline: 'One sentence describing the agent’s purpose.',
+  soul: 'The enduring character that should remain recognizable across model changes.',
+  tone: 'The emotional quality of the agent’s language.',
+  conversationalStyle: 'How the agent structures and delivers a response.',
+  quirks: 'One recognizable behavior per line.',
+  initiativeLevel: 'How readily the agent joins without being directly tagged.',
+  socialStyle: 'How the agent behaves with you and in conversation.',
+  communityStyle: 'How the agent supports, challenges, or defers to other agents.',
+  routingBias: 'The kinds of situations this agent should be selected for.',
+  boundaries: 'The actions, claims, and behaviors this agent must avoid.',
+  selfImprovementStyle: 'How the agent should respond to feedback and repeated corrections.',
+};
 
 const emptyProfile = PROFILE_FIELDS.reduce((acc, field) => {
   acc[field.key] = '';
@@ -281,7 +313,10 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
   // messages from earlier saves don't pile up in the panel.
   const [runtimeRecheckResult, setRuntimeRecheckResult] = useState(null);
   const runtimeRecheckTimeoutRef = useRef(null);
-  const [activeProfileTab, setActiveProfileTab] = useState(profileTabFromRoute || 'overview');
+  const [activeProfileTab, setActiveProfileTab] = useState(
+    normalizeProfileRouteTab(profileTabFromRoute || 'profile')
+  );
+  const [memoryReviewState, setMemoryReviewState] = useState({ key: '', message: '', error: '' });
   const [registryModalMode, setRegistryModalMode] = useState(null);
   const [registrySaving, setRegistrySaving] = useState(false);
   const [registryMessage, setRegistryMessage] = useState('');
@@ -498,13 +533,13 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
 
   useEffect(() => {
     if (selectedAgentId !== 'escalation-template-parser' && activeProfileTab === 'test-results') {
-      setActiveProfileTab('overview');
+      setActiveProfileTab('profile');
     }
   }, [activeProfileTab, selectedAgentId]);
 
   useEffect(() => {
     if (selectedAgentId !== 'triage-agent' && activeProfileTab === 'triage-test-results') {
-      setActiveProfileTab('overview');
+      setActiveProfileTab('profile');
     }
   }, [activeProfileTab, selectedAgentId]);
 
@@ -513,7 +548,7 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
       selectedAgentId !== 'escalation-template-parser'
       && (activeProfileTab === 'event-streams' || activeProfileTab === 'chat-sessions')
     ) {
-      setActiveProfileTab('overview');
+      setActiveProfileTab('profile');
     }
   }, [activeProfileTab, selectedAgentId]);
 
@@ -569,7 +604,8 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
       clearTimeout(runtimeRecheckTimeoutRef.current);
       runtimeRecheckTimeoutRef.current = null;
     }
-    setActiveProfileTab(profileTabFromRoute || 'overview');
+    setActiveProfileTab(normalizeProfileRouteTab(profileTabFromRoute || 'profile'));
+    setMemoryReviewState({ key: '', message: '', error: '' });
   }, [profileTabFromRoute, selectedAgentId]);
 
   useEffect(() => {
@@ -736,7 +772,8 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
     }
     try {
       setProfileSaving(true);
-      const updated = await updateAgentIdentity(selectedAgent.agentId, profileDraft, profileSummary);
+      const summary = profileSummary.trim() || `Updated ${selectedAgent.profile?.roleTitle || selectedAgent.agentId} identity.`;
+      const updated = await updateAgentIdentity(selectedAgent.agentId, profileDraft, summary);
       if (updated) {
         setCurrentAgent(updated);
         setAgents((previous) =>
@@ -745,6 +782,22 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
         dispatchAgentProfileUpdated(updated);
       }
       setProfileSummary('');
+
+      try {
+        const flagged = await recordAgentReview(selectedAgent.agentId, {
+          surface: 'identity',
+          status: 'needs-follow-up',
+          summary: `Identity changed and needs review: ${summary}`,
+          versionRef: updated?.updatedAt || new Date().toISOString(),
+        });
+        if (flagged) {
+          applyUpdatedAgent(flagged);
+        }
+      } catch (reviewError) {
+        setError(
+          `Identity saved, but its review reminder could not be recorded: ${reviewError.message || 'unknown error'}`
+        );
+      }
     } catch (err) {
       setError(err.message || 'Failed to save profile.');
     } finally {
@@ -1374,7 +1427,30 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
   }
 
   function handleProfileChange(key, value) {
-    setProfileDraft((previous) => ({ ...previous, [key]: value }));
+    setProfileDraft((previous) => ({
+      ...previous,
+      [key]: key === 'quirks'
+        ? String(value || '').split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
+        : value,
+    }));
+  }
+
+  async function handleMemoryReview(note, action, content = '') {
+    if (!selectedAgent?.agentId || !note?.key) return;
+    try {
+      setMemoryReviewState({ key: note.key, message: '', error: '' });
+      const updated = action === 'forget'
+        ? await forgetAgentMemory(selectedAgent.agentId, note.key)
+        : await reviewAgentMemory(selectedAgent.agentId, note.key, action, content);
+      applyUpdatedAgent(updated);
+      setMemoryReviewState({
+        key: '',
+        message: action === 'forget' ? 'Memory removed.' : action === 'correct' ? 'Memory corrected.' : 'Memory confirmed.',
+        error: '',
+      });
+    } catch (err) {
+      setMemoryReviewState({ key: note.key, message: '', error: err.message || 'Failed to review memory.' });
+    }
   }
 
   function handleTabChange(tabId) {
@@ -1450,6 +1526,7 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
     profileDraft,
     profileSummary,
     profileSaving,
+    memoryReviewState,
     runtimeDefinition: selectedRuntimeDefinition,
     runtimeState: selectedRuntimeState,
     runtimeSaveStatus,
@@ -1483,6 +1560,7 @@ function AgentsView({ agentIdFromRoute = null, profileTabFromRoute = null }) {
     onProfileChange: handleProfileChange,
     onProfileSummaryChange: setProfileSummary,
     onProfileSave: handleSaveProfile,
+    onReviewMemory: handleMemoryReview,
     onRuntimeSave: handleSaveRuntime,
     onToggleAgentEnabled: handleToggleAgentEnabled,
     enabledSaving,
@@ -1631,7 +1709,9 @@ function AgentsMissionControlPage({
         <main className="agent-grid-panel">
           <div className="agent-grid-heading">
             <div>
-              <h2>Agent Profiles</h2>
+              <span className="mission-kicker">Persistent AI team</span>
+              <h2>Your AI Team</h2>
+              <p>Understand who each agent is, how they contribute, and what has changed before you rely on them.</p>
             </div>
             <AgentCommandToolbar
               query={query}
@@ -1896,23 +1976,53 @@ function AgentLifecycleRunModal({ run, agentName, requestState, onClose }) {
 }
 
 function AgentMissionGrid({ agents, operationById, registryHealthById, onSelectAgent }) {
+  const groups = groupAgentsForDirectory(agents);
   return (
-    <div className="agent-card-grid">
-      {agents.map((agent, index) => (
-        <AgentMissionCard
-          key={agent.agentId}
-          agent={agent}
-          operation={operationById.get(agent.agentId)}
-          registryHealth={registryHealthById?.[agent.agentId]}
-          rank={index + 1}
-          onSelect={() => onSelectAgent(agent.agentId)}
-        />
-      ))}
+    <div className="agent-v3-directory">
+      <AgentDirectoryGroup
+        title="Core collaborators"
+        description="Persistent agents that carry identity, context, and relationships across conversations and domains."
+        agents={groups.collaborators}
+        operationById={operationById}
+        registryHealthById={registryHealthById}
+        onSelectAgent={onSelectAgent}
+      />
+      <AgentDirectoryGroup
+        title="Workflow specialists"
+        description="Focused agents with narrow responsibilities, strict boundaries, and evidence-based handoffs."
+        agents={groups.specialists}
+        operationById={operationById}
+        registryHealthById={registryHealthById}
+        onSelectAgent={onSelectAgent}
+      />
     </div>
   );
 }
 
-function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) {
+function AgentDirectoryGroup({ title, description, agents, operationById, registryHealthById, onSelectAgent }) {
+  if (!agents.length) return null;
+  return (
+    <section className="agent-v3-directory-group">
+      <header>
+        <div><h3>{title}</h3><p>{description}</p></div>
+        <span>{agents.length} {agents.length === 1 ? 'agent' : 'agents'}</span>
+      </header>
+      <div className="agent-card-grid">
+        {agents.map((agent) => (
+          <AgentMissionCard
+            key={agent.agentId}
+            agent={agent}
+            operation={operationById.get(agent.agentId)}
+            registryHealth={registryHealthById?.[agent.agentId]}
+            onSelect={() => onSelectAgent(agent.agentId)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentMissionCard({ agent, operation, registryHealth, onSelect }) {
   // Build the dot tooltip from the registry's raw status (online/offline/...)
   // and checkedAt timestamp so the user sees "Online · last checked 12s ago".
   // Falls back to the legacy STATUS_LABELS for the operational token when no
@@ -1920,14 +2030,20 @@ function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) 
   const dotTooltip = registryHealth
     ? buildDotTooltip(registryHealth.status, registryHealth.checkedAt)
     : (STATUS_LABELS[operation?.status] || 'Idle');
+  const latestMemory = getLatestMemoryNote(agent);
+  const relationshipCount = Array.isArray(agent?.relationships?.notes)
+    ? agent.relationships.notes.length
+    : 0;
+  const attention = buildIdentityAttention(agent);
   return (
     <a
       href={`#/agents/${encodeURIComponent(agent.agentId)}`}
       className="agent-mission-card"
       onClick={onSelect}
     >
-      <header>
-        <span className="rank-pill">{rank}</span>
+      <header className="agent-v3-card-header">
+        <span className="agent-v3-card-avatar"><AgentAvatar agent={agent} size="small" /></span>
+        <span className="agent-v3-kind">{getAgentProfileKindLabel(agent.agentId)}</span>
         <span
           className={`status-dot status-dot-${operation?.status || 'idle'} agent-row-status-dot`}
           title={dotTooltip}
@@ -1939,21 +2055,21 @@ function AgentMissionCard({ agent, operation, registryHealth, rank, onSelect }) 
       <div className="agent-mission-card-name">
         <strong>{agent.profile?.roleTitle || labelAgent(agent.agentId)}</strong>
       </div>
-      <p>{agent.profile?.headline || operation?.promptSummary?.goals}</p>
-      {/* Real data only: provider/model summary (runtime config) and tool
-          count (agent.tools.available). The fabricated Trust score and
-          Workflow Fit bars (AGENT_OPERATION_META) were removed — agent
-          profiles show real data or honest empty states. Rendered as plain
-          `.agent-chip` spans (not the shared `.agent-badge` Badge) so the
-          list page owns its chip styling without "badge" substring risk. */}
-      <div className="agent-card-chip-row">
-        {operation?.modelLabel ? (
-          <span className="agent-chip agent-chip-model">{operation.modelLabel}</span>
-        ) : null}
-        {operation?.toolSummary ? (
-          <span className="agent-chip">{operation.toolSummary}</span>
-        ) : null}
+      <p className="agent-v3-card-voice">{agent.profile?.soul || agent.profile?.headline || 'Identity still being defined.'}</p>
+      <div className="agent-v3-card-facts">
+        <div>
+          <span>Purpose</span>
+          <strong>{agent.profile?.headline || 'No purpose described yet'}</strong>
+        </div>
+        <div>
+          <span>Recent continuity</span>
+          <strong>{latestMemory?.content || 'No learned context yet'}</strong>
+        </div>
       </div>
+      <footer className="agent-v3-card-footer">
+        <span className={`agent-v3-review-state is-${attention.tone}`}>{attention.text}</span>
+        <span>{relationshipCount} peer {relationshipCount === 1 ? 'relationship' : 'relationships'}</span>
+      </footer>
     </a>
   );
 }
@@ -2065,11 +2181,15 @@ function UnifiedAgentHeader({
               <span className="aph-enable-track" aria-hidden="true">
                 <span className="aph-enable-thumb" />
               </span>
-              {enabled ? 'Enabled' : 'Disabled'}
+              {enabled ? 'Can participate' : 'Cannot participate'}
             </span>
           </label>
           <div className="aph-status-caption">
-            {enabledSaving ? 'Saving...' : enabled ? 'Active in pipeline' : 'Turned off'}
+            {enabledSaving
+              ? 'Saving...'
+              : enabled
+                ? `${getAgentProfileKindLabel(selectedAgent.agentId)} · available when relevant`
+                : 'Excluded from conversations and workflows'}
           </div>
         </div>
 
@@ -2120,11 +2240,7 @@ function AgentProfileDetailPage({
       {selectedAgent ? (
         <main className="profile-detail-shell">
           <AgentProfileTabs
-            tabs={(() => {
-              if (selectedAgent.agentId === 'escalation-template-parser') return IMAGE_PARSER_PROFILE_TABS;
-              if (selectedAgent.agentId === 'triage-agent') return TRIAGE_AGENT_PROFILE_TABS;
-              return PROFILE_TABS;
-            })()}
+            tabs={PROFILE_TABS}
             activeTab={activeProfileTab}
             onChange={onTabChange}
           />
@@ -2278,12 +2394,13 @@ function AgentCommandToolbar({
 }
 
 function AgentProfileTabs({ tabs, activeTab, onChange }) {
+  const activeSection = getPrimaryProfileSection(activeTab);
   return (
     <nav className="agent-profile-tabs" aria-label="Agent profile sections">
       {tabs.map((tab) => (
         <button
           type="button"
-          className={activeTab === tab.id ? 'active' : ''}
+          className={activeSection === tab.id ? 'active' : ''}
           key={tab.id}
           onClick={() => onChange(tab.id)}
         >
@@ -2296,6 +2413,22 @@ function AgentProfileTabs({ tabs, activeTab, onChange }) {
 
 function AgentProfileWorkspace(props) {
   const { activeTab } = props;
+
+  if (activeTab === 'profile') {
+    return <AgentIdentityProfileTab {...props} />;
+  }
+  if (activeTab === 'continuity') {
+    return <AgentMemoryTab {...props} />;
+  }
+  if (activeTab === 'work') {
+    return <AgentWorkAuthorityTab {...props} />;
+  }
+  if (activeTab === 'review') {
+    return <AgentReviewEvidenceTab {...props} />;
+  }
+  if (activeTab === 'technical') {
+    return <AgentTechnicalSetupTab {...props} />;
+  }
 
   if (activeTab === 'configuration') {
     return <AgentConfigurationTab {...props} />;
@@ -2338,6 +2471,221 @@ function AgentProfileWorkspace(props) {
   }
 
   return <AgentOverviewTab {...props} />;
+}
+
+function AgentIdentityProfileTab({
+  agent,
+  profileDraft,
+  profileSummary,
+  profileSaving,
+  onProfileChange,
+  onProfileSummaryChange,
+  onProfileSave,
+}) {
+  const changes = getProfileChanges(agent?.profile || {}, profileDraft || {});
+  const quirksValue = Array.isArray(profileDraft?.quirks)
+    ? profileDraft.quirks.join('\n')
+    : String(profileDraft?.quirks || '');
+
+  return (
+    <section className="agent-tab-content agent-v3-profile-layout">
+      <div className="agent-v3-identity-column">
+        <Panel title="Who I am" actions={<span className="panel-status-text">Stable identity</span>}>
+          <blockquote className="agent-v3-self-description">
+            {agent?.profile?.soul || agent?.profile?.headline || 'This agent has not described its enduring identity yet.'}
+          </blockquote>
+          <div className="agent-v3-identity-facts">
+            <Definition label="Purpose">{agent?.profile?.headline || 'Not described'}</Definition>
+            <Definition label="Voice">{agent?.profile?.tone || 'Not described'}</Definition>
+            <Definition label="Initiative">{agent?.profile?.initiativeLevel || 'Not described'}</Definition>
+            <Definition label="Community role">{agent?.profile?.communityStyle || 'Not described'}</Definition>
+          </div>
+        </Panel>
+
+        <Panel title="How I show up">
+          <div className="agent-v3-behavior-stack">
+            <div><span>Conversation style</span><p>{agent?.profile?.conversationalStyle || 'Not described yet.'}</p></div>
+            <div><span>Social style</span><p>{agent?.profile?.socialStyle || 'Not described yet.'}</p></div>
+            <div className="is-boundary"><span>Firm boundaries</span><p>{agent?.profile?.boundaries || 'No explicit boundaries recorded.'}</p></div>
+          </div>
+        </Panel>
+      </div>
+
+      <Panel
+        title="Shape this identity"
+        actions={<span className={`panel-status-text${changes.length ? ' is-warning' : ''}`}>{changes.length ? `${changes.length} unsaved` : 'No pending changes'}</span>}
+      >
+        <p className="agent-v3-panel-intro">Changes affect how this agent speaks, participates, and coordinates. Saving makes the change active and automatically flags it for human review.</p>
+        <div className="agent-v3-profile-groups">
+          {PROFILE_FIELD_GROUPS.map((group) => (
+            <fieldset key={group.id} className="agent-v3-profile-group">
+              <legend>{group.title}</legend>
+              <p>{group.description}</p>
+              <div className="profile-form-grid">
+                {group.fields.map((key) => {
+                  const field = PROFILE_FIELDS.find((item) => item.key === key);
+                  if (!field) return null;
+                  return (
+                    <label className="agent-v3-guided-field" key={key}>
+                      <span>{field.label}</span>
+                      <small>{PROFILE_FIELD_HELP[key]}</small>
+                      {field.type === 'textarea' ? (
+                        <textarea
+                          value={key === 'quirks' ? quirksValue : (profileDraft?.[key] || '')}
+                          onChange={(event) => onProfileChange(key, event.target.value)}
+                        />
+                      ) : (
+                        <input
+                          value={profileDraft?.[key] || ''}
+                          onChange={(event) => onProfileChange(key, event.target.value)}
+                        />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+          ))}
+        </div>
+        {changes.length > 0 && (
+          <div className="agent-v3-change-preview">
+            <strong>Behavioral areas that will change</strong>
+            <div>{changes.map((key) => <span key={key}>{PROFILE_FIELDS.find((field) => field.key === key)?.label || key}</span>)}</div>
+          </div>
+        )}
+        <FormField
+          label="Why are you making this change?"
+          type="textarea"
+          value={profileSummary}
+          placeholder="Example: Speak sooner when planning becomes unclear, while preserving visual-analysis deference."
+          onChange={onProfileSummaryChange}
+        />
+        <div className="form-action-row">
+          <button type="button" className="primary-action" onClick={onProfileSave} disabled={profileSaving || changes.length === 0}>
+            {profileSaving ? 'Saving...' : 'Save and request review'}
+          </button>
+        </div>
+      </Panel>
+    </section>
+  );
+}
+
+function AgentWorkAuthorityTab({ agent, operation }) {
+  const tools = Array.isArray(agent?.tools?.available) ? agent.tools.available : [];
+  const recentUsage = Array.isArray(agent?.tools?.recentUsage) ? agent.tools.recentUsage : [];
+  const inPipeline = Boolean(agent?.agentId && PIPELINE_TOPOLOGY[agent.agentId]);
+  return (
+    <section className="agent-tab-content agent-v3-work-layout">
+      <Panel title="Role and authority" actions={<span className="panel-status-text">{getAgentProfileKindLabel(agent?.agentId)}</span>}>
+        <div className="agent-v3-role-contract">
+          <Definition label="Responsibility">{agent?.profile?.headline || 'No responsibility recorded.'}</Definition>
+          <Definition label="Must not do">{agent?.profile?.boundaries || 'No explicit boundary recorded.'}</Definition>
+          <Definition label="Participation">{agent?.profile?.initiativeLevel || 'Not specified'}</Definition>
+          <Definition label="Prompt contract">{agent?.promptId || 'No editable prompt contract'}</Definition>
+        </div>
+      </Panel>
+
+      <Panel title="Actual tool access" actions={<span className="panel-status-text">{tools.length} tools</span>}>
+        {tools.length ? (
+          <div className="agent-v3-tool-list">
+            {tools.map((tool, index) => {
+              const name = normalizeToolLabel(tool, index);
+              const latestUse = recentUsage.find((entry) => entry?.tool === name);
+              return (
+                <div key={name}>
+                  <span className={`agent-v3-access-kind is-${tool?.kind || 'read'}`}>{tool?.kind || 'read'}</span>
+                  <strong>{name}</strong>
+                  <p>{tool?.description || 'No tool description recorded.'}</p>
+                  <small>{latestUse ? `Last recorded use: ${formatDate(latestUse.createdAt)} · ${latestUse.status || 'unknown'}` : 'No recent use recorded'}</small>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <EmptyState title="No tool access" copy="This agent works only from its instructions and provided context." />
+        )}
+      </Panel>
+
+      {inPipeline ? (
+        <Panel title="QBO workflow position" actions={<span className="panel-status-text">Live topology</span>}>
+          <PipelineDiagram agentId={agent.agentId} />
+        </Panel>
+      ) : (
+        <Panel title="Participation scope">
+          <p className="agent-v3-panel-intro">This collaborator is not limited to the fixed QBO screenshot pipeline. Its identity, memory, routing rules, and permissions determine when it may participate.</p>
+        </Panel>
+      )}
+    </section>
+  );
+}
+
+function AgentReviewEvidenceTab({ agent, onTabChange, onMarkReviewed, reviewSaving }) {
+  const latestReview = latestAgentReview(agent);
+  const latestHarness = latestAgentHarnessRun(agent);
+  const attention = buildIdentityAttention(agent);
+  const destinations = [
+    { id: 'prompt', title: 'Prompt contract', detail: 'Inspect the exact instructions and previous snapshots.', show: Boolean(agent?.promptId) },
+    { id: 'technical', title: 'Technical setup', detail: 'Review provider, model, backup, reasoning, and service tier.', show: true },
+    { id: 'harness', title: 'Tests and harness', detail: 'Run or inspect behavior checks and their evidence.', show: true },
+    { id: 'test-assets', title: 'Test assets', detail: 'Review the examples used to evaluate this agent.', show: true },
+    { id: agent?.agentId === 'escalation-template-parser' ? 'test-results' : 'triage-test-results', title: 'Specialist results', detail: 'Inspect saved expected-versus-actual results.', show: ['escalation-template-parser', 'triage-agent'].includes(agent?.agentId) },
+    { id: 'monitoring', title: 'Monitoring', detail: 'See availability, latest evidence, and open gaps.', show: true },
+    { id: 'activity', title: 'Activity', detail: 'Review what this agent has recently done.', show: true },
+    { id: 'versions', title: 'Change history', detail: 'Trace identity and prompt changes over time.', show: true },
+  ].filter((item) => item.show);
+
+  return (
+    <section className="agent-tab-content agent-v3-review-layout">
+      <div className={`agent-v3-review-verdict is-${attention.tone}`}>
+        <div><span>Current review state</span><h3>{attention.text}</h3></div>
+        <button
+          type="button"
+          className="secondary-action"
+          disabled={reviewSaving}
+          onClick={() => onMarkReviewed?.({
+            surface: 'identity',
+            status: 'approved',
+            summary: `Reviewed and approved ${agent?.profile?.roleTitle || agent?.agentId} identity.`,
+          })}
+        >
+          {reviewSaving ? 'Saving...' : 'Approve current identity'}
+        </button>
+      </div>
+
+      <div className="agent-v3-evidence-summary">
+        <div><span>Latest identity review</span><strong>{latestReview ? `${latestReview.status} · ${formatDate(latestReview.createdAt)}` : 'No review recorded'}</strong></div>
+        <div><span>Latest behavior test</span><strong>{latestHarness ? `${latestHarness.status} · ${formatDate(latestHarness.completedAt || latestHarness.createdAt)}` : 'No test recorded'}</strong></div>
+        <div><span>Memory continuity</span><strong>{agent?.memory?.notes?.length || 0} notes · {agent?.relationships?.notes?.length || 0} relationships</strong></div>
+      </div>
+
+      <div className="agent-v3-review-grid">
+        {destinations.map((item) => (
+          <button type="button" key={item.id} onClick={() => onTabChange?.(item.id)}>
+            <span>{item.title}</span><p>{item.detail}</p><strong>Open →</strong>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AgentTechnicalSetupTab({ agent, runtimeDefinition, runtimeState, runtimeSaveStatus, runtimeRecheckResult, onRuntimeSave, onTabChange }) {
+  return (
+    <section className="agent-tab-content single-column-layout">
+      <button type="button" className="agent-v3-back-to-review" onClick={() => onTabChange?.('review')}>← Back to Review & Evidence</button>
+      <Panel title="Technical setup" actions={<span className="panel-status-text">Replaceable engine</span>}>
+        <p className="agent-v3-panel-intro">These choices power the agent, but they do not define its identity. Only providers and models approved in AI Management are available here.</p>
+        <RuntimeSettingsPanel
+          agent={agent}
+          definition={runtimeDefinition}
+          runtimeState={runtimeState}
+          saveStatus={runtimeSaveStatus}
+          recheckResult={runtimeRecheckResult}
+          onSave={onRuntimeSave}
+        />
+      </Panel>
+    </section>
+  );
 }
 
 // ===========================================================================
@@ -3198,6 +3546,9 @@ function buildIdentityAttention(agent) {
   const lastReview = latestAgentReview(agent);
   if (lastReview && lastReview.status === 'rejected') {
     return { text: 'Latest review was rejected — changes are blocked.', tone: 'down' };
+  }
+  if (lastReview && lastReview.status === 'needs-follow-up') {
+    return { text: lastReview.summary || 'Identity changes need human review.', tone: 'warn' };
   }
   if (!agent?.promptId && !agent?.agentId?.includes('parser')) {
     return { text: 'No prompt registered yet — not ready for live work.', tone: 'warn' };
@@ -5132,20 +5483,26 @@ function AgentWorkflowsTab({ agent, operation }) {
   );
 }
 
-function AgentMemoryTab({ agent }) {
+function AgentMemoryTab({ agent, memoryReviewState, onReviewMemory }) {
   const notes = agent?.memory?.notes || [];
   const relationships = agent?.relationships?.notes || [];
   return (
-    <section className="agent-tab-content single-column-layout">
-      <Panel title="Agent Memory" actions={<span className="panel-status-text">{notes.length} notes</span>}>
+    <section className="agent-tab-content agent-v3-continuity-layout">
+      <div className="agent-v3-continuity-intro">
+        <div><span className="mission-kicker">Continuity</span><h2>What this agent carries forward</h2></div>
+        <p>Review what the agent remembers, where it came from, and how it relates to the rest of the team. Unconfirmed observations should not be treated like facts.</p>
+      </div>
+      {memoryReviewState?.message && <div className="agent-info-alert">{memoryReviewState.message}</div>}
+      {memoryReviewState?.error && <div className="agent-alert">{memoryReviewState.error}</div>}
+      <Panel title="Memory about you and the work" actions={<span className="panel-status-text">{notes.length} notes</span>}>
         {notes.length ? (
-          <div className="compact-list">
+          <div className="agent-v3-memory-list">
             {notes.map((note) => (
-              <CompactItem
+              <AgentMemoryReviewCard
                 key={note.key || `${note.kind}-${note.updatedAt}`}
-                title={note.kind || 'Memory'}
-                meta={formatDate(note.updatedAt)}
-                detail={note.content}
+                note={note}
+                saving={memoryReviewState?.key === note.key}
+                onReview={onReviewMemory}
               />
             ))}
           </div>
@@ -5153,23 +5510,67 @@ function AgentMemoryTab({ agent }) {
           <EmptyState title="No memory notes yet" copy="Agent-specific learned notes will appear here." />
         )}
       </Panel>
-      <Panel title="Agent Relationships" actions={<span className="panel-status-text">{relationships.length} notes</span>}>
+      <Panel title="Relationships with other agents" actions={<span className="panel-status-text">{relationships.length} signals</span>}>
         {relationships.length ? (
-          <div className="compact-list">
+          <div className="agent-v3-relationship-list">
             {relationships.map((note) => (
-              <CompactItem
-                key={`${note.otherAgentId}-${note.updatedAt}-${note.summary}`}
-                title={note.otherAgentId || 'Related agent'}
-                meta={`${note.strength || 'relationship'} · confidence ${note.confidence ?? 'unknown'}`}
-                detail={note.summary}
-              />
+              <article key={`${note.otherAgentId}-${note.updatedAt}-${note.summary}`}>
+                <div className="agent-v3-relationship-avatar">{labelAgent(note.otherAgentId).slice(0, 1)}</div>
+                <div>
+                  <header><strong>{labelAgent(note.otherAgentId)}</strong><span>{note.kind || 'peer relationship'}</span></header>
+                  <p>{note.summary}</p>
+                  <details>
+                    <summary>Relationship evidence</summary>
+                    <dl>
+                      <div><dt>Strength</dt><dd>{note.strength || 'Emerging'}</dd></div>
+                      <div><dt>Confidence</dt><dd>{note.confidence ?? 'Not recorded'}</dd></div>
+                      <div><dt>Source</dt><dd>{formatMemorySource(note)}</dd></div>
+                      <div><dt>Updated</dt><dd>{formatDate(note.updatedAt)}</dd></div>
+                    </dl>
+                  </details>
+                </div>
+              </article>
             ))}
           </div>
         ) : (
-          <EmptyState title="No relationship notes yet" copy="Agent-to-agent memory and coordination notes will appear here." />
+          <EmptyState title="No relationship signals yet" copy="Collaboration, support, deference, and correction signals will appear here when they are actually observed." />
         )}
       </Panel>
     </section>
+  );
+}
+
+function AgentMemoryReviewCard({ note, saving, onReview }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(note?.content || '');
+  useEffect(() => setDraft(note?.content || ''), [note?.content]);
+  return (
+    <article className="agent-v3-memory-card">
+      <header>
+        <div><span className="agent-v3-memory-kind">{note.kind || 'memory'}</span><strong>{formatMemoryReviewStatus(note)}</strong></div>
+        <time>{formatDate(note.updatedAt)}</time>
+      </header>
+      {editing ? (
+        <textarea value={draft} onChange={(event) => setDraft(event.target.value)} aria-label="Corrected memory" />
+      ) : (
+        <p>{note.content}</p>
+      )}
+      <div className="agent-v3-memory-source">{formatMemorySource(note)}</div>
+      <footer>
+        {editing ? (
+          <>
+            <button type="button" className="text-action" onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+            <button type="button" className="secondary-action" onClick={() => { onReview?.(note, 'correct', draft); setEditing(false); }} disabled={saving || !draft.trim()}>Save correction</button>
+          </>
+        ) : (
+          <>
+            {note.reviewStatus !== 'confirmed' && <button type="button" className="text-action" onClick={() => onReview?.(note, 'confirm')} disabled={saving}>Confirm</button>}
+            <button type="button" className="text-action" onClick={() => setEditing(true)} disabled={saving}>Correct</button>
+            <button type="button" className="text-action is-danger" onClick={() => onReview?.(note, 'forget')} disabled={saving}>Forget</button>
+          </>
+        )}
+      </footer>
+    </article>
   );
 }
 
