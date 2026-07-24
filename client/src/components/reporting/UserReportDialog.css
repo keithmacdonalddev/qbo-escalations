@@ -365,6 +365,8 @@
 }
 
 .user-report-types {
+  display: grid;
+  gap: 7px;
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -380,26 +382,36 @@
   font-weight: 650;
 }
 
+.user-report-types legend { margin: 0; }
+
 .user-report-type-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
 }
 
 .user-report-type {
   position: relative;
   display: flex;
-  min-height: 92px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--ink-secondary);
+  text-align: center;
   cursor: pointer;
 }
 
 .user-report-type.is-selected {
   border-color: var(--accent);
   background: var(--accent-subtle);
+  color: var(--ink);
 }
 
 .user-report-type input {
@@ -409,17 +421,11 @@
 }
 
 .user-report-type span {
-  display: grid;
-  align-content: start;
-  gap: 5px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
 }
 
-.user-report-type strong {
-  color: var(--ink);
-  font-size: 13px;
-}
-
-.user-report-type small,
 .user-report-consent small {
   color: var(--ink-secondary);
   font-size: 11px;
@@ -809,9 +815,8 @@
   .user-report-view-tabs,
   .user-report-receipts,
   .user-report-receipt-detail { padding-right: 16px; padding-left: 16px; }
-  .user-report-type-grid { grid-template-columns: 1fr; }
   .user-report-contact-grid { grid-template-columns: 1fr; }
-  .user-report-type { min-height: 64px; }
+  .user-report-type { min-height: 42px; padding: 6px; }
   .user-report-actions { flex-direction: column-reverse; }
   .user-report-primary,
   .user-report-secondary { width: 100%; }

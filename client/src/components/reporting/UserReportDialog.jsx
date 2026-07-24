@@ -20,9 +20,9 @@ import {
 import './UserReportDialog.css';
 
 const REPORT_CHOICES = [
-  { value: 'problem', label: 'Problem', description: 'Something did not work as expected.' },
-  { value: 'feature', label: 'Feature request', description: 'A new capability would make the app more useful.' },
-  { value: 'feedback', label: 'Feedback', description: 'Share an improvement or general observation.' },
+  { value: 'problem', label: 'Problem' },
+  { value: 'feature', label: 'Feature request' },
+  { value: 'feedback', label: 'Feedback' },
 ];
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -673,7 +673,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         ) : (
           <form onSubmit={handleSubmit} noValidate>
             <fieldset className="user-report-types">
-              <legend>What would you like to share?</legend>
+              <legend>Type</legend>
               <div className="user-report-type-grid" role="radiogroup" aria-label="Report type">
                 {REPORT_CHOICES.map((choice) => (
                   <label key={choice.value} className={`user-report-type${draft.kind === choice.value ? ' is-selected' : ''}`}>
@@ -684,7 +684,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                       checked={draft.kind === choice.value}
                       onChange={() => updateDraft('kind', choice.value)}
                     />
-                    <span><strong>{choice.label}</strong><small>{choice.description}</small></span>
+                    <span>{choice.label}</span>
                   </label>
                 ))}
               </div>

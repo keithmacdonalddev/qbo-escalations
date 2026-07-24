@@ -70,9 +70,11 @@ it('offers the three plain-language choices and validates the short form', async
   render(<UserReportDialog open onClose={() => {}} />);
 
   expect(await screen.findByRole('dialog', { name: 'Send feedback' })).toBeVisible();
+  expect(screen.getByRole('group', { name: 'Type' })).toBeVisible();
   expect(screen.getByRole('radio', { name: /Problem/ })).toBeChecked();
   expect(screen.getByRole('radio', { name: /Feature request/ })).toBeVisible();
   expect(screen.getByRole('radio', { name: /Feedback/ })).toBeVisible();
+  expect(screen.queryByText('Something did not work as expected.')).not.toBeInTheDocument();
 
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   expect(screen.getByText('Enter at least 3 characters.')).toBeVisible();
