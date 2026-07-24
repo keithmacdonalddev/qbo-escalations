@@ -484,6 +484,13 @@ router.get('/status', async (req, res) => {
   res.json({ ok: true, providers, packageStore });
 });
 
+// A focused read/write/readback/delete probe for the durable provider evidence
+// store. This avoids rechecking every external AI provider during fast startup.
+router.post('/package-store-health', async (_req, res) => {
+  const packageStore = await checkProviderPackageStoreHealth();
+  res.status(packageStore.ok ? 200 : 503).json({ ok: packageStore.ok, packageStore });
+});
+
 // ---------------------------------------------------------------------------
 // GET /keys — Check which providers have stored API keys
 // ---------------------------------------------------------------------------

@@ -52,6 +52,12 @@ let _lastProactiveMessage = null; // last proactive AI message (for snapshot on 
 let _running = false;
 let _tickInProgress = false;
 let _lastPolicySkipReason = null;
+let _lastTickStartedAt = 0;
+let _lastTickCompletedAt = 0;
+let _lastTickStatus = 'not-run';
+let _lastTickError = null;
+let _lastGmailCheck = { status: 'not-run', lastAttemptAt: null, lastSuccessAt: null, lastError: null };
+let _lastCalendarCheck = { status: 'not-run', lastAttemptAt: null, lastSuccessAt: null, lastError: null };
 
 // Gmail account resolution — cached primary account email for background work
 let _monitorAccountEmail = null;
@@ -131,6 +137,9 @@ function fingerprint(alert) {
 async function tick() {
   if (_tickInProgress) return; // prevent overlapping ticks
   _tickInProgress = true;
+  _lastTickStartedAt = Date.now();
+  _lastTickStatus = 'running';
+  _lastTickError = null;
 
   try {
     const authority = await getWorkspaceAuthority();
@@ -138,6 +147,7 @@ async function tick() {
       _lastPolicySkipReason = !authority.enabled
         ? 'Workspace Agent is disabled.'
         : 'Proactive work is turned off.';
+      _lastTickStatus = 'skipped';
       return;
     }
     _lastPolicySkipReason = null;
@@ -264,7 +274,11 @@ async function tick() {
     }
   } catch (err) {
     console.error('[workspace-monitor] tick error:', err.message);
+    _lastTickStatus = 'failed';
+    _lastTickError = err.message || 'Workspace monitor tick failed.';
   } finally {
+    if (_lastTickStatus === 'running') _lastTickStatus = 'healthy';
+    _lastTickCompletedAt = Date.now();
     _tickInProgress = false;
   }
 }
@@ -296,16 +310,44 @@ async function executeBackgroundWork(policy = {}) {
 
   // Fetch inbox messages (reused across all work steps)
   let inboxMessages = [];
-  if (accountEmail) {
+  if (accountEmail && policy.emailMonitoring !== false) {
+    const attemptedAt = new Date().toISOString();
+    _lastGmailCheck = {
+      ..._lastGmailCheck,
+      status: 'checking',
+      lastAttemptAt: attemptedAt,
+      lastError: null,
+    };
     try {
       const inboxRes = await gmail.listMessages({ q: 'in:inbox', maxResults: 50, accountEmail });
       if (inboxRes?.ok && Array.isArray(inboxRes.messages)) {
         inboxMessages = inboxRes.messages;
+        _lastGmailCheck = {
+          status: 'healthy',
+          lastAttemptAt: attemptedAt,
+          lastSuccessAt: new Date().toISOString(),
+          lastError: null,
+        };
+      } else {
+        _lastGmailCheck = {
+          ..._lastGmailCheck,
+          status: 'failed',
+          lastAttemptAt: attemptedAt,
+          lastError: inboxRes?.error || 'Gmail inbox check did not return messages.',
+        };
       }
     } catch (err) {
       console.error('[workspace-monitor] inbox fetch error:', err.message);
+      _lastGmailCheck = {
+        ..._lastGmailCheck,
+        status: 'failed',
+        lastAttemptAt: attemptedAt,
+        lastError: err.message || 'Gmail inbox check failed.',
+      };
       // If we can't fetch inbox, we can't do any email work — still try entities
     }
+  } else if (policy.emailMonitoring === false) {
+    _lastGmailCheck = { ..._lastGmailCheck, status: 'disabled', lastError: null };
   }
 
   // Filter out messages the chat agent already handled recently
@@ -431,20 +473,49 @@ async function executeBackgroundWork(policy = {}) {
   try {
     // Get calendar events for entity linking (next 48 hours)
     let todayEvents = [];
-    try {
-      if (policy.calendarMonitoring === false) throw new Error('Calendar monitoring disabled by Workspace Agent policy');
-      const acNow = new Date();
-      const todayEventsRes = await calendar.listEvents({
-        calendarId: 'primary',
-        timeMin: acNow.toISOString(),
-        timeMax: new Date(acNow.getTime() + 48 * 60 * 60 * 1000).toISOString(),
-        maxResults: 20,
-      });
-      if (todayEventsRes?.ok) {
-        todayEvents = todayEventsRes.events || [];
+    if (policy.calendarMonitoring !== false) {
+      const attemptedAt = new Date().toISOString();
+      _lastCalendarCheck = {
+        ..._lastCalendarCheck,
+        status: 'checking',
+        lastAttemptAt: attemptedAt,
+        lastError: null,
+      };
+      try {
+        const acNow = new Date();
+        const todayEventsRes = await calendar.listEvents({
+          calendarId: 'primary',
+          timeMin: acNow.toISOString(),
+          timeMax: new Date(acNow.getTime() + 48 * 60 * 60 * 1000).toISOString(),
+          maxResults: 20,
+        });
+        if (todayEventsRes?.ok) {
+          todayEvents = todayEventsRes.events || [];
+          _lastCalendarCheck = {
+            status: 'healthy',
+            lastAttemptAt: attemptedAt,
+            lastSuccessAt: new Date().toISOString(),
+            lastError: null,
+          };
+        } else {
+          _lastCalendarCheck = {
+            ..._lastCalendarCheck,
+            status: 'failed',
+            lastAttemptAt: attemptedAt,
+            lastError: todayEventsRes?.error || 'Calendar check did not return events.',
+          };
+        }
+      } catch (err) {
+        _lastCalendarCheck = {
+          ..._lastCalendarCheck,
+          status: 'failed',
+          lastAttemptAt: attemptedAt,
+          lastError: err.message || 'Calendar check failed.',
+        };
+        // Calendar not connected or errored — still try entities with just emails
       }
-    } catch {
-      // Calendar not connected or errored — still try entities with just emails
+    } else {
+      _lastCalendarCheck = { ..._lastCalendarCheck, status: 'disabled', lastError: null };
     }
 
     const freshEntities = detectEntities(inboxMessages, todayEvents);
@@ -588,7 +659,10 @@ function getSnapshot() {
     lastProactiveMessage: _lastProactiveMessage,
     policySkipReason: _lastPolicySkipReason,
     subscriberCount: _subscribers.size,
-    lastTickAt: _lastEmailCheckAt > 0 ? new Date(_lastEmailCheckAt).toISOString() : null,
+    lastTickAt: _lastTickCompletedAt > 0 ? new Date(_lastTickCompletedAt).toISOString() : null,
+    lastTickStatus: _lastTickStatus,
+    gmail: { ..._lastGmailCheck },
+    calendar: { ..._lastCalendarCheck },
   };
 }
 
@@ -692,6 +766,14 @@ function stopMonitor() {
   _lastWorkSummary = null;
   _lastProactiveMessage = null;
   _tickInProgress = false;
+  _lastTickStartedAt = 0;
+  _lastTickCompletedAt = 0;
+  _lastTickStatus = 'not-run';
+  _lastTickError = null;
+  _lastGmailCheck = { status: 'not-run', lastAttemptAt: null, lastSuccessAt: null, lastError: null };
+  _lastCalendarCheck = { status: 'not-run', lastAttemptAt: null, lastSuccessAt: null, lastError: null };
+  _lastEmailCheckAt = 0;
+  _lastPolicySkipReason = null;
   _monitorAccountEmail = null;
   _monitorAccountCheckedAt = 0;
 
@@ -712,7 +794,14 @@ function getStatus() {
     subscriberCount: _subscribers.size,
     alertCount: _lastAlerts.size,
     nudgeCount: _lastNudges.length,
+    tickInProgress: _tickInProgress,
+    lastTickStartedAt: _lastTickStartedAt > 0 ? new Date(_lastTickStartedAt).toISOString() : null,
+    lastTickCompletedAt: _lastTickCompletedAt > 0 ? new Date(_lastTickCompletedAt).toISOString() : null,
+    lastTickStatus: _lastTickStatus,
+    lastTickError: _lastTickError,
     lastEmailCheckAt: _lastEmailCheckAt > 0 ? new Date(_lastEmailCheckAt).toISOString() : null,
+    gmail: { ..._lastGmailCheck },
+    calendar: { ..._lastCalendarCheck },
     lastWorkSummary: _lastWorkSummary,
     lastProactiveMessage: _lastProactiveMessage,
   };

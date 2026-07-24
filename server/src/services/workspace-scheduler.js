@@ -36,6 +36,19 @@ const config = {
 
 let intervalId = null;
 let lastRunDate = null;  // YYYY-MM-DD — ensures at most one run per day
+let lastAttemptAt = null;
+let lastSuccessAt = null;
+let lastError = null;
+let lastStatus = 'not-run';
+
+function nextScheduledRunAt(now = new Date()) {
+  const next = new Date(now);
+  next.setHours(config.briefingHour, config.briefingMinute, 0, 0);
+  if (lastRunDate === localDateStr(now) || next.getTime() <= now.getTime()) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next.toISOString();
+}
 
 /** Return YYYY-MM-DD in local timezone (avoids UTC drift from toISOString) */
 function localDateStr(d = new Date()) {
@@ -600,14 +613,29 @@ async function tick() {
 
   const todayStr = localDateStr();
   lastRunDate = todayStr; // Mark immediately to prevent double-runs
+  lastAttemptAt = new Date().toISOString();
+  lastStatus = 'running';
+  lastError = null;
 
-  generateBriefing(authority.policy).catch((err) => {
-    console.error('[workspace-scheduler] Briefing generation failed:', err.message);
-    // Reset lastRunDate on failure so it retries next tick
-    if (lastRunDate === todayStr) {
-      lastRunDate = null;
-    }
-  });
+  generateBriefing(authority.policy)
+    .then((briefing) => {
+      if (!briefing) {
+        lastStatus = 'skipped';
+        if (lastRunDate === todayStr) lastRunDate = null;
+        return;
+      }
+      lastStatus = 'healthy';
+      lastSuccessAt = new Date().toISOString();
+    })
+    .catch((err) => {
+      console.error('[workspace-scheduler] Briefing generation failed:', err.message);
+      lastStatus = 'failed';
+      lastError = err.message || 'Workspace briefing failed.';
+      // Reset lastRunDate on failure so it retries next tick
+      if (lastRunDate === todayStr) {
+        lastRunDate = null;
+      }
+    });
 }
 
 function startScheduler() {
@@ -641,5 +669,11 @@ module.exports = {
     briefingHour: config.briefingHour,
     briefingMinute: config.briefingMinute,
     lastRunDate,
+    lastAttemptAt,
+    lastSuccessAt,
+    lastStatus,
+    lastError,
+    nextRunAt: nextScheduledRunAt(),
   }),
+  nextScheduledRunAt,
 };

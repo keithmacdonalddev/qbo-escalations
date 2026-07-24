@@ -354,3 +354,10 @@ Model: Codex GPT-5.6 Sol (xhigh)
 Is duplicate?: no
 Complexity: high
 Special Feature: Proactive Agent Run Assurance - Define an expected heartbeat and completion window for every background agent, such as email monitoring, calendar monitoring, daily briefings, and knowledge review, then create durable evidence when a run is missed, late, duplicated, or overlapping. Show the operator whether proactive work is actually continuing—not merely whether a scheduler printed “started”—with safe recovery guidance and an acknowledgement trail; this is distinct from Workflow Readiness Gate because it governs recurring automation after startup rather than readiness before one workflow.
+
+Date: 2026-07-23
+Time: 22:22 ADT
+Model: Codex GPT-5.6 Sol (xhigh)
+Is duplicate?: no
+Complexity: high
+Special Feature: Dependency-Aware Agent Containment - When a required service becomes unhealthy during active agent work, automatically pause only the affected capabilities, preserve completed evidence, and let unrelated work continue under a clearly reduced permission set. Show which dependency changed, which planned actions were blocked or rerouted, what evidence remains trustworthy, and what human approval is needed to resume; this is distinct from Workflow Readiness Gate and Proactive Agent Run Assurance because it governs safe behavior after a mid-run dependency failure rather than preflight readiness or missed schedules.

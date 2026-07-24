@@ -60,4 +60,9 @@ module.exports = {
   startScheduler,
   stopScheduler,
   tick,
+  getStatus: () => ({
+    running: Boolean(timer),
+    checkInProgress: running,
+    intervalMs: TICK_INTERVAL_MS,
+  }),
 };

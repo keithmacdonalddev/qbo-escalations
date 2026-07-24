@@ -1175,10 +1175,23 @@ function stopAgentHealthMonitor() {
   healthTimer = null;
 }
 
+function getAgentHealthMonitorStatus() {
+  const agents = [...healthByAgentId.values()];
+  return {
+    running: Boolean(healthTimer),
+    refreshInProgress: Boolean(inFlightRefresh),
+    lastCheckedAt,
+    checkedAgents: agents.length,
+    onlineAgents: agents.filter((agent) => agent?.status === 'online' || agent?.active === true).length,
+    offlineAgents: agents.filter((agent) => agent?.status === 'offline').length,
+  };
+}
+
 module.exports = {
   checkProviderStrategyHealth,
   getAgentHealthSnapshot,
   refreshAgentHealth,
+  getAgentHealthMonitorStatus,
   startAgentHealthMonitor,
   stopAgentHealthMonitor,
 };

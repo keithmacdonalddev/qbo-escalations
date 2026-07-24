@@ -41,10 +41,10 @@
     "dev-startup": {
       "label": "Friendly development startup contracts",
       "command": "node",
-      "args": ["--test", "scripts/dev-launcher.test.js", "server/test/startup-console.test.js"],
+      "args": ["--test", "scripts/dev-launcher.test.js", "server/test/startup-console.test.js", "server/test/service-health-status.test.js", "server/test/knowledgebase-agent-scheduler.test.js"],
       "cwd": ".",
       "timeoutMs": 30000,
-      "why": "Checks startup messaging, port safety, readiness ordering, Windows process handling, provider summaries, and timeout cleanup without controlling persistent services.",
+      "why": "Checks startup messaging, port safety, readiness ordering, WebSocket and event-stream health, background-service status, evidence-store reporting, Windows process handling, provider summaries, and timeout cleanup without controlling persistent services.",
       "capabilities": ["development-startup-safety"]
     },
     "client-build": {

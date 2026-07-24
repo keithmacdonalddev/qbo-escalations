@@ -8,7 +8,7 @@ The app can already prove a useful amount about chat and image-parser work. It s
 
 The 2026-07-21 settings update adds a smaller but important evidence path. AI Management now saves the automatic-check schedule, last/next check times, provider-connection results, genuinely-new model alerts, overdue official-review alerts, and whether each alert was reviewed. Connected Accounts now saves the last successful Gmail and Calendar API access for each Google account and translates the granted Google permissions into plain-English status. These records survive a terminal close, but they are operational state—not a complete actor-aware Audit Trail.
 
-The 2026-07-23 development launcher makes the current startup easier to understand. It checks required ports before starting, waits for the API before starting Vite, translates expected restarts into one plain-English message, and stops only the process trees it started. This prevents common duplicate-process and startup-order confusion, but the output is still temporary: it does not save a durable incident record or historical process-owner snapshot.
+The 2026-07-23 development launcher makes the current startup easier to understand. It checks required ports before starting, waits for the API before starting Vite, verifies the browser-facing realtime WebSocket and Workspace event stream, checks for stuck work, verifies the provider evidence store, and summarizes background agents plus saved Gmail/Calendar access. Its opt-in deep mode can make controlled live Gmail, Calendar, AI-canary, ElevenLabs, gateway, local-model, storage, and disk checks. This prevents common duplicate-process and startup-order confusion, but the launcher summary is still temporary: it does not save a complete incident record or historical process-owner snapshot.
 
 The app cannot yet prove, in one reliable place:
 
@@ -112,6 +112,9 @@ The server exposes:
 - `/api/agent-identities/health` and `/api/agent-identities/health/stream` for agent/provider reachability;
 - `/api/agent-identities/provider-strategy/health` for provider heartbeat/readiness/canary checks; and
 - `/api/agent-identities/provider-strategy/health/logs` for stored provider-health snapshots.
+- `/api/workspace/status` for Workspace sessions, background tasks/services, shared realtime status, and Live Call socket status;
+- `/api/workspace/profile` for Workspace readiness, connected-account access history, monitor/scheduler results, Knowledge review status, AI-management scheduling, and agent-health timing; and
+- `POST /api/image-parser/package-store-health` for an explicit ephemeral write/read/delete proof that provider evidence can be saved.
 
 The client already shows request health in the top health banner, agent health in the agent banner, provider status in agent/provider areas, and runtime/request information in the request waterfall and workflow panels.
 
@@ -119,7 +122,7 @@ Settings > AI Management now adds an operator-run “Test all connections” che
 
 These checks prove current or recently recorded health. They do not provide a complete historical snapshot of all processes on the machine, such as whether a separate gateway or LM Studio process was running, which process owned a port, or whether an orphan process was safe to preserve.
 
-For local development, `npm run dev` now performs a preflight check and waits for `/api/health` before starting the client. This reduces false alarms and duplicate starts; it does not replace the broader saved runtime snapshot described below.
+For local development, `npm run dev` now performs the fast checks above through the browser-facing Vite proxy. `npm run dev:check -- --deep` deliberately runs the slower external-service and small paid-model checks. The normal path does not spend model tokens, while deep mode states that it will use one small Workspace-provider canary. These checks reduce false alarms and duplicate starts; they do not replace the broader saved runtime snapshot described below.
 
 ## 8. What client-side errors are captured
 
@@ -207,7 +210,7 @@ Recommended missing or incomplete paths:
 3. **P0 — Persist and display errors.** Turn the current server ring buffer and client capture plan into a durable, client-visible Diagnostics/Logs path. Wire the existing client capture hook before adding more client logging.
 4. **P1 — Make prompt/response capture explicit.** Record capture enabled/skipped/expired/redacted status and prompt/version hashes for every AI attempt. Decide deliberately which full payloads may be retained.
 5. **P1 — Finish provider-package storage cleanup.** Remove externalized payloads according to the same retention policy as their Mongo record, with dry-run and failure reporting.
-6. **P1 — Extend startup checks into the runtime-doctor workflow.** Keep the app’s health endpoints focused on app health; build on the friendly launcher with a read-only diagnostic skill that can inspect and save the multi-process local layout while preserving healthy instances by default.
+6. **P1 — Save an operator-approved runtime-doctor snapshot.** The launcher now checks HTTP, WebSocket, event-stream, background-agent, connected-service, evidence-storage, optional local-service, and selected external-service health. The remaining step is an operator-approved durable incident snapshot that preserves process ownership and recent results without silently collecting sensitive account data.
 7. **P2 — Improve visual QA of diagnostic surfaces.** Verify that traces, errors, runtime state, and audit information are understandable and useful in the UI, rather than merely exposing raw JSON.
 
 ## 15. Verification checklist

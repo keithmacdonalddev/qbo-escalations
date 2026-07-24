@@ -62,6 +62,7 @@ test('module loads and exports the expected scheduler API', () => {
     assert.equal(typeof scheduler.stopScheduler, 'function');
     assert.equal(typeof scheduler.runScan, 'function');
     assert.equal(typeof scheduler.shouldRunNow, 'function');
+    assert.equal(typeof scheduler.getStatus, 'function');
     assert.ok(scheduler.config && typeof scheduler.config === 'object');
   } finally {
     restore();
@@ -111,6 +112,10 @@ test('runScan calls scanKnowledgebaseAgent read-only when Mongo is connected', a
     assert.equal(scanCalls[0].persistAttention, true);
     assert.equal(scanCalls[0].persistActivity, true);
     assert.equal(result.status, 'review-needed');
+    const status = scheduler.getStatus();
+    assert.equal(status.lastStatus, 'review-needed');
+    assert.ok(status.lastSuccessAt);
+    assert.equal(status.lastResult.proposals, 3);
   } finally {
     Object.defineProperty(mongoose.connection, 'readyState', {
       value: realReadyState,

@@ -5,6 +5,9 @@ const actionLog = require('../../services/workspace-action-log');
 const {
   getWorkspaceRuntimeHealth,
 } = require('../../services/workspace-runtime');
+const { getBackgroundRuntimeHealth } = require('../../services/background-runtime');
+const { getRealtimeStatus } = require('../../services/realtime-server');
+const { getLiveCallAssistStatus } = require('../../services/live-call-assist-server');
 const workspaceActivityRouter = require('./activity');
 const workspaceAiRouter = require('./ai');
 const workspaceAlertsRouter = require('./alerts');
@@ -41,6 +44,9 @@ router.get('/status', (req, res) => {
   res.json({
     ok: true,
     workspace: getWorkspaceRuntimeHealth(),
+    background: getBackgroundRuntimeHealth(),
+    realtime: getRealtimeStatus(),
+    liveCall: getLiveCallAssistStatus(),
   });
 });
 

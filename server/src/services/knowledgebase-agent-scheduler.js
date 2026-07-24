@@ -38,6 +38,11 @@ const config = {
 let intervalId = null;
 let lastRunDate = null; // YYYY-MM-DD — ensures at most one scan per day
 let running = false; // re-entrancy guard so overlapping ticks cannot stack
+let lastAttemptAt = null;
+let lastSuccessAt = null;
+let lastStatus = 'not-run';
+let lastError = null;
+let lastResult = null;
 
 /** Return YYYY-MM-DD in local timezone (avoids UTC drift from toISOString) */
 function localDateStr(d = new Date()) {
@@ -51,11 +56,16 @@ function localDateStr(d = new Date()) {
  */
 async function runScan() {
   const started = Date.now();
+  lastAttemptAt = new Date(started).toISOString();
+  lastStatus = 'running';
+  lastError = null;
 
   // Guard: check MongoDB is connected (matches workspace-scheduler.js).
   const mongoose = require('mongoose');
   if (mongoose.connection.readyState !== 1) {
     console.log('[kb-agent-scheduler] Skipping scan — MongoDB not connected');
+    lastStatus = 'skipped';
+    lastError = 'MongoDB is not connected.';
     return null;
   }
 
@@ -74,9 +84,14 @@ async function runScan() {
     console.log(
       `[kb-agent-scheduler] Scan ${scan?.status || 'done'} — ${proposals} item(s) flagged, ${opened} attention item(s) opened (${durationMs}ms)`
     );
+    lastStatus = scan?.status || 'healthy';
+    lastSuccessAt = new Date().toISOString();
+    lastResult = { status: scan?.status || 'done', proposals, attentionOpened: opened, durationMs };
     return scan;
   } catch (err) {
     console.error('[kb-agent-scheduler] Scan failed:', err.message);
+    lastStatus = 'failed';
+    lastError = err.message || 'Knowledge review failed.';
     return null;
   }
 }
@@ -148,6 +163,23 @@ module.exports = {
   runScan,
   shouldRunNow,
   config,
+  getStatus: () => ({
+    running: Boolean(intervalId),
+    scanInProgress: running,
+    enabled: config.enabled,
+    lastRunDate,
+    lastAttemptAt,
+    lastSuccessAt,
+    lastStatus,
+    lastError,
+    lastResult,
+    nextEligibleDate: (() => {
+      if (lastRunDate !== localDateStr()) return localDateStr();
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      return localDateStr(tomorrow);
+    })(),
+  }),
   // exposed for tests
   _setLastRunDate(value) { lastRunDate = value; },
   _getLastRunDate() { return lastRunDate; },

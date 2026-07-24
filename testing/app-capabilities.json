@@ -425,7 +425,7 @@
     {
       "id": "development-startup-safety",
       "label": "Friendly and safe local development startup",
-      "userOutcome": "Starting the local app gives the owner a concise readiness summary, refuses unsafe duplicate ports, avoids expected proxy noise, and stops only processes created by that launcher.",
+      "userOutcome": "Starting or checking the local app gives the owner a concise core, realtime, background-agent, connected-service, and evidence-storage summary; deep external checks remain explicit, and the launcher refuses unsafe duplicate ports or unrelated process cleanup.",
       "risk": "normal",
       "owner": "Development runtime",
       "sourcePaths": [
@@ -433,14 +433,22 @@
         "client/vite.config.js",
         "server/nodemon.json",
         "server/src/lib/cli-version-probe.js",
-        "server/src/lib/startup-console.js"
+        "server/src/lib/startup-console.js",
+        "server/src/services/workspace-monitor.js",
+        "server/src/services/workspace-scheduler.js",
+        "server/src/services/knowledgebase-agent-scheduler.js",
+        "server/src/services/ai-management-scheduler.js",
+        "server/src/services/agent-health-service.js",
+        "server/src/routes/workspace/index.js",
+        "server/src/routes/workspace/profile.js",
+        "server/src/routes/image-parser.js"
       ],
       "requiredCheckTypes": ["unit"],
       "evidence": [
-        { "type": "unit", "groupId": "dev-startup", "paths": ["scripts/dev-launcher.test.js", "server/test/startup-console.test.js"] }
+        { "type": "unit", "groupId": "dev-startup", "paths": ["scripts/dev-launcher.test.js", "server/test/startup-console.test.js", "server/test/service-health-status.test.js", "server/test/knowledgebase-agent-scheduler.test.js"] }
       ],
       "knownGaps": [
-        "The deterministic preview, read-only live status check, Windows npm invocation, timeout cleanup, and focused configuration contracts are verified. The new launcher has not replaced the user's current already-running legacy dev process, so its complete next-start and Ctrl+C lifecycle still needs one operator-observed run."
+        "The deterministic fast checks, read-only status path, deep-check boundaries, Windows npm invocation, timeout cleanup, and focused server status contracts are covered. Paid/external deep checks intentionally do not run in the automated suite; they require an operator-invoked controlled account check. The user completed an operator-observed friendly launcher start on 2026-07-23, while the newly added service-health lines still need their next operator-visible startup confirmation."
       ],
       "lastHumanReviewDate": "2026-07-23"
     },

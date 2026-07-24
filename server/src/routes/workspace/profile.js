@@ -21,6 +21,10 @@ const { executeWorkspaceActions } = require('../../services/workspace-request-he
 const { createWorkspaceExecutionState } = require('../../services/workspace-tools/execution-state');
 const workspaceMonitor = require('../../services/workspace-monitor');
 const workspaceScheduler = require('../../services/workspace-scheduler');
+const knowledgeReviewScheduler = require('../../services/knowledgebase-agent-scheduler');
+const aiManagementScheduler = require('../../services/ai-management-scheduler');
+const { getAgentHealthMonitorStatus } = require('../../services/agent-health-service');
+const { buildPermissionStatus } = require('../../services/gmail');
 
 const router = express.Router();
 
@@ -35,11 +39,17 @@ async function safeCount(Model, query = {}) {
 async function getConnectedAccounts() {
   try {
     const accounts = await GmailAuth.getAll();
-    return (accounts || []).map((account) => ({
-      email: account.email,
-      primary: Boolean(account.isPrimary),
-      connected: true,
-    }));
+    return (accounts || []).map((account) => {
+      const permissionStatus = buildPermissionStatus(account.scope);
+      return {
+        email: account.email,
+        primary: Boolean(account.isPrimary),
+        connected: true,
+        lastGmailAccessAt: account.lastGmailAccessAt || null,
+        lastCalendarAccessAt: account.lastCalendarAccessAt || null,
+        missingPermissions: permissionStatus.missingPermissions,
+      };
+    });
   } catch {
     return [];
   }
@@ -84,6 +94,9 @@ router.get('/profile', async (_req, res) => {
   ]);
   const monitor = workspaceMonitor.getStatus();
   const scheduler = workspaceScheduler.getStatus();
+  const knowledgeReview = knowledgeReviewScheduler.getStatus();
+  const aiManagement = aiManagementScheduler.getStatus();
+  const agentHealth = getAgentHealthMonitorStatus();
   const checks = [
     { id: 'enabled', label: 'Agent enabled', ok: authority.enabled, detail: authority.enabled ? 'Live requests are allowed.' : 'Live and background work is blocked.' },
     { id: 'accounts', label: 'Google account connected', ok: accounts.length > 0, detail: accounts.length > 0 ? `${accounts.length} connected account${accounts.length === 1 ? '' : 's'}.` : 'Connect Gmail/Google Calendar before the agent can inspect them.' },
@@ -102,7 +115,7 @@ router.get('/profile', async (_req, res) => {
       policy: authority.policy,
       runtime: authority.runtime,
       connections: { googleAccounts: accounts },
-      background: { monitor, scheduler },
+      background: { monitor, scheduler, knowledgeReview, aiManagement, agentHealth },
       counts: { memory: memoryCount, activeRules: ruleCount, conversations: conversationCount, actions: actionCount },
       permissions: buildPermissionGroups(authority.policy),
       recentActions,

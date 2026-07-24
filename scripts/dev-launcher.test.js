@@ -1,8 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('fs');
 const net = require('net');
+const os = require('os');
 const path = require('path');
 const { PassThrough } = require('node:stream');
 const test = require('node:test');
@@ -11,12 +13,20 @@ const {
   buildNpmInvocation,
   buildTreeKillInvocation,
   canConnect,
+  checkLiveCallProvider,
+  checkWebSocket,
+  checkWorkspaceEventStream,
+  checkWritableDirectory,
+  collectServiceHealth,
+  connectionSummary,
   createOutput,
+  emitServiceHealth,
   formatPortConflict,
   parseArgs,
   parseEnvValue,
   parsePort,
   renderPreview,
+  runDeepServiceHealth,
   translateChildLine,
   waitForHttp,
 } = require('./dev-launcher');
@@ -55,7 +65,190 @@ test('environment parsing handles comments, export, and quoted values', () => {
 
 test('check mode is explicit and never implied by preview mode', () => {
   assert.equal(parseArgs(['--check', '--no-color']).check, true);
+  assert.equal(parseArgs(['--check', '--deep']).deep, true);
   assert.equal(parseArgs(['--preview']).check, false);
+});
+
+test('WebSocket health requires the application hello and ping/pong contract', async () => {
+  class FakeWebSocket extends EventEmitter {
+    constructor() {
+      super();
+      process.nextTick(() => this.emit('message', JSON.stringify({ type: 'hello' })));
+    }
+    send(raw) {
+      const message = JSON.parse(raw);
+      if (message.type === 'ping') process.nextTick(() => this.emit('message', JSON.stringify({ type: 'pong' })));
+    }
+    close() {}
+  }
+
+  const result = await checkWebSocket('ws://example.test/api/realtime', {
+    WebSocketImpl: FakeWebSocket,
+    timeoutMs: 100,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.hello, true);
+  assert.equal(result.pong, true);
+});
+
+test('deep Live Call health fails clearly when the provider closes before readiness', async () => {
+  class ClosingWebSocket extends EventEmitter {
+    constructor() {
+      super();
+      process.nextTick(() => this.emit('message', JSON.stringify({ type: 'hello' })));
+    }
+    send(raw) {
+      const message = JSON.parse(raw);
+      if (message.type === 'start') {
+        process.nextTick(() => this.emit('message', JSON.stringify({
+          type: 'source_closed',
+          code: 1011,
+          reason: 'upstream unavailable',
+        })));
+      }
+    }
+    close() {}
+  }
+
+  const result = await checkLiveCallProvider('ws://example.test/api/live-call-assist/stream', {
+    WebSocketImpl: ClosingWebSocket,
+    timeoutMs: 100,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'upstream unavailable');
+});
+
+test('Workspace event-stream health waits for a real snapshot', async (t) => {
+  const server = require('node:http').createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('event: snapshot\n');
+    res.write('data: {"ok":true}\n\n');
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const result = await checkWorkspaceEventStream(`http://127.0.0.1:${server.address().port}/events`, { timeoutMs: 500 });
+  assert.equal(result.ok, true);
+  assert.equal(result.snapshot, true);
+});
+
+test('service-health summary keeps account identities private and reports useful ages', () => {
+  const summary = connectionSummary({
+    connections: {
+      googleAccounts: [
+        { email: 'private@example.test', lastGmailAccessAt: '2026-07-23T20:00:00.000Z', missingPermissions: [] },
+        { email: 'other@example.test', lastCalendarAccessAt: '2026-07-23T21:00:00.000Z', missingPermissions: ['Calendar'] },
+      ],
+    },
+  });
+  assert.equal(summary.count, 2);
+  assert.equal(summary.lastGmailAccessAt, '2026-07-23T20:00:00.000Z');
+  assert.equal(summary.lastCalendarAccessAt, '2026-07-23T21:00:00.000Z');
+  assert.equal(summary.missingPermissionAccounts, 1);
+  assert.doesNotMatch(JSON.stringify(summary), /private@example/);
+});
+
+test('friendly service-health output distinguishes local sockets from external providers', () => {
+  const capture = captureOutput();
+  emitServiceHealth(capture.output, {
+    realtime: { ok: true, latencyMs: 12 },
+    eventStream: { ok: true, latencyMs: 8 },
+    liveCall: { ok: true, latencyMs: 4 },
+    runtime: { requests: { staleCount: 0 }, ai: { byKind: {} } },
+    workspaceStatus: {
+      workspace: { staleCount: 0 },
+      background: { staleCount: 0, services: [] },
+      liveCall: { configured: true },
+    },
+    packageStore: { packageStore: { ok: true, latencyMs: 5 } },
+    profile: {
+      connections: { googleAccounts: [] },
+      background: {
+        monitor: { running: true, lastTickStatus: 'healthy' },
+        scheduler: { running: true, lastStatus: 'healthy' },
+        knowledgeReview: { running: true, lastStatus: 'healthy' },
+        agentHealth: { running: true, lastCheckedAt: new Date().toISOString() },
+      },
+    },
+  });
+  const text = capture.read();
+  assert.match(text, /Realtime socket healthy through web proxy/);
+  assert.match(text, /ElevenLabs configured, external call not tested/);
+  assert.match(text, /No stuck requests/);
+  assert.match(text, /Provider evidence storage is writable and readable/);
+  assert.doesNotMatch(text, /undefined|null/);
+});
+
+test('one failed health dependency is reported without aborting the other checks', async () => {
+  const requestFn = async (url, options) => {
+    if (url.includes('/runtime/health')) throw new Error('runtime temporarily unavailable');
+    if (url.includes('/package-store-health')) {
+      assert.equal(options.method, 'POST');
+      return { ok: false, status: 503, body: '{"ok":false}' };
+    }
+    if (url.includes('/workspace/profile')) return { ok: true, status: 200, body: '{"profile":{}}' };
+    return { ok: true, status: 200, body: '{"ok":true}' };
+  };
+
+  const health = await collectServiceHealth({ api: 4000, client: 5174 }, {
+    requestFn,
+    websocketFn: async () => ({ ok: true }),
+    eventStreamFn: async () => ({ ok: true }),
+  });
+
+  assert.equal(health.realtime.ok, true);
+  assert.equal(health.runtime.ok, false);
+  assert.match(health.runtime.error, /temporarily unavailable/);
+});
+
+test('deep folder check writes, reads, and removes only its own temporary file', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'qbo-dev-health-'));
+  t.after(() => {
+    assert.ok(directory.startsWith(os.tmpdir()));
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const result = await checkWritableDirectory(directory);
+  assert.equal(result.ok, true);
+  assert.deepEqual(fs.readdirSync(directory), []);
+});
+
+test('deep health is explicit and covers connected, AI, optional, storage, and disk checks', async () => {
+  const capture = captureOutput();
+  const requested = [];
+  const requestFn = async (url) => {
+    requested.push(url);
+    if (url.includes('/gmail/profile')) return { ok: true, status: 200, body: '{"ok":true}' };
+    if (url.includes('/calendar/calendars')) return { ok: true, status: 200, body: '{"ok":true,"calendars":[]}' };
+    if (url.includes('/provider-strategy/health')) return { ok: true, status: 200, body: '{"ok":true,"canary":{"ok":true,"providerUsed":"codex"}}' };
+    if (url.includes('/image-parser/status')) return {
+      ok: true,
+      status: 200,
+      body: '{"ok":true,"providers":{"llm-gateway":{"available":false},"lm-studio":{"available":true}}}',
+    };
+    throw new Error(`Unexpected deep-check URL: ${url}`);
+  };
+  const fsPromises = {
+    writeFile: async () => {},
+    readFile: async () => 'qbo-health-check',
+    unlink: async () => {},
+  };
+
+  const result = await runDeepServiceHealth({ api: 4000, client: 5174 }, capture.output, {
+    profile: { runtime: { provider: 'codex', model: 'gpt-test', fallbackProvider: 'kimi', fallbackModel: 'kimi-test' } },
+    requestFn,
+    liveCallProviderFn: async () => ({ ok: true, latencyMs: 9 }),
+    fsPromises,
+    statfs: async () => ({ bavail: 4 * 1024 * 1024, bsize: 1024 }),
+  });
+
+  assert.equal(requested.length, 4);
+  assert.equal(result.elevenLabs.ok, true);
+  assert.match(capture.read(), /Gmail live read passed/);
+  assert.match(capture.read(), /Workspace AI canary passed on codex/);
+  assert.match(capture.read(), /LM Studio reachable/);
+  assert.match(capture.read(), /Data and upload folders passed write\/read\/delete checks/);
 });
 
 test('expected proxy errors collapse to one retry message during API restarts', () => {
