@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   createSubmissionId,
   loadReportingBootstrap,
@@ -14,29 +15,57 @@ import './UserReportDialog.css';
 const REPORT_CHOICES = [
   {
     value: 'problem',
-    tagline: 'Found a bug?',
-    label: 'Report a Problem',
+    tagline: 'Something isn’t working',
+    label: 'Report a problem',
     titlePlaceholder: 'Example: Escalation notes do not save',
     explanationLabel: 'What happened?',
     explanationPlaceholder: 'Describe what happened, what you expected, and any steps that help us reproduce it.',
   },
   {
     value: 'feature',
-    tagline: 'Have an idea?',
-    label: 'Request a Feature',
+    tagline: 'There’s something you need',
+    label: 'Request a feature',
     titlePlaceholder: 'Example: Add a faster review shortcut',
     explanationLabel: 'What would help?',
     explanationPlaceholder: 'Describe the capability you need and why it would make the app more useful.',
   },
   {
     value: 'feedback',
-    tagline: 'Want to chat?',
-    label: 'Submit Feedback',
+    tagline: 'Tell us what could be better',
+    label: 'Share feedback',
     titlePlaceholder: 'Example: Make filters easier to scan',
     explanationLabel: 'What should we improve?',
     explanationPlaceholder: 'Share your observation and what would make the experience better.',
   },
 ];
+
+function ReportChoiceIcon({ kind }) {
+  if (kind === 'problem') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="8.25" />
+        <path d="M12 7.5v5" />
+        <path d="M12 16.25h.01" />
+      </svg>
+    );
+  }
+  if (kind === 'feature') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 17.5h6" />
+        <path d="M10 21h4" />
+        <path d="M8.2 14.2a6 6 0 1 1 7.6 0c-1.1.8-1.8 1.7-1.8 2.8h-4c0-1.1-.7-2-1.8-2.8Z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 14a4 4 0 0 1-4 4H9l-5 3v-7a8 8 0 1 1 16 0Z" />
+      <path d="M8.5 11.5h7" />
+      <path d="M8.5 14.5h4.5" />
+    </svg>
+  );
+}
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -306,7 +335,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
   const canSubmit = bootstrap.state === 'ready' && online && !busy;
   const selectedChoice = REPORT_CHOICES.find((choice) => choice.value === draft.kind);
 
-  return (
+  return createPortal((
     <div
       className="user-report-backdrop"
       onMouseDown={(event) => {
@@ -315,18 +344,14 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
     >
       <section
         ref={dialogRef}
-        className="user-report-dialog"
+        className={`user-report-dialog${selectedChoice ? ' is-expanded' : ' is-chooser'}`}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-labelledby="user-report-title"
-        aria-describedby="user-report-intro"
       >
         <header className="user-report-header">
-          <div>
-            <h2 id="user-report-title">Send feedback</h2>
-            <p id="user-report-intro">Tell us what happened or what would make QBO Escalations better.</p>
-          </div>
+          <h2 id="user-report-title">Help us make QBO better</h2>
           <button type="button" className="user-report-close" onClick={onClose} disabled={busy} aria-label="Close reporting form">×</button>
         </header>
 
@@ -383,7 +408,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
             <fieldset className="user-report-types" aria-label="Choose what to send">
               <div className="user-report-type-grid">
                 {REPORT_CHOICES.map((choice) => (
-                  <label key={choice.value} className={`user-report-type${draft.kind === choice.value ? ' is-selected' : ''}`}>
+                  <label key={choice.value} data-kind={choice.value} className={`user-report-type${draft.kind === choice.value ? ' is-selected' : ''}`}>
                     <input
                       type="radio"
                       name="report-kind"
@@ -393,8 +418,14 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                       checked={draft.kind === choice.value}
                       onChange={() => chooseReportKind(choice.value)}
                     />
-                    <span id={`user-report-type-tagline-${choice.value}`} className="user-report-type-tagline">{choice.tagline}</span>
-                    <strong className="user-report-type-label">{choice.label}</strong>
+                    <span className="user-report-type-icon" aria-hidden="true"><ReportChoiceIcon kind={choice.value} /></span>
+                    <span className="user-report-type-copy">
+                      <strong className="user-report-type-label">{choice.label}</strong>
+                      <span id={`user-report-type-tagline-${choice.value}`} className="user-report-type-tagline">{choice.tagline}</span>
+                    </span>
+                    <span className="user-report-type-chevron" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
+                    </span>
                   </label>
                 ))}
               </div>
@@ -555,5 +586,5 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         )}
       </section>
     </div>
-  );
+  ), document.body);
 }
