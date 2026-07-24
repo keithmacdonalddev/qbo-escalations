@@ -1148,32 +1148,6 @@ a:hover {
   border-color: transparent;
 }
 
-.app-header-auth-btn.is-authenticated {
-  color: var(--accent);
-  background: var(--accent-subtle);
-}
-
-.app-header-auth-initial {
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 1;
-}
-
-.app-header-auth-status {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  width: 7px;
-  height: 7px;
-  border: 2px solid var(--bg-sidebar);
-  border-radius: 50%;
-  background: var(--ink-tertiary);
-}
-
-.app-header-auth-status.is-online {
-  background: var(--success);
-}
-
 /* Mail inbox header icon */
 .app-header-mail-btn {
   position: relative;

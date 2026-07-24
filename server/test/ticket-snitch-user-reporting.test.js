@@ -5,23 +5,13 @@ const test = require('node:test');
 const request = require('supertest');
 const sharp = require('sharp');
 const { createApp } = require('../src/app');
-const { clearSessions, hashPassword } = require('../src/services/app-auth');
 const { reportWork } = require('../src/services/ticket-snitch-client');
-
-const PASSWORD = 'reporting integration password';
-let passwordHash;
 
 function reportEnvironment() {
   return {
     NODE_ENV: 'test',
-    QBO_AUTH_MODE: 'password',
-    QBO_AUTH_USER_ID: 'qbo-local-user',
-    QBO_AUTH_USER_NAME: 'QBO local user',
-    QBO_AUTH_USER_EMAIL: 'reporter@example.test',
-    QBO_AUTH_PASSWORD_HASH: passwordHash,
-    QBO_AUTH_ALLOWED_ORIGINS: 'http://qbo.example.test',
-    QBO_AUTH_COOKIE_SECURE: '0',
     QBO_REPORTING_SECRET: 'reporting-test-secret-at-least-32-characters-long',
+    QBO_REPORTING_COOKIE_SECURE: '0',
     TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1',
     TICKET_SNITCH_API_KEY: 'ts_test.secret',
     TICKET_SNITCH_EVIDENCE_API_KEY: 'ts_evidence.secret',
@@ -52,36 +42,6 @@ function ticketResponse(body, status = 201) {
   };
 }
 
-async function signedInAgent(app, { userId, userName, userEmail } = {}) {
-  const overrides = {
-    ...(userId ? { QBO_AUTH_USER_ID: userId } : {}),
-    ...(userName ? { QBO_AUTH_USER_NAME: userName } : {}),
-    ...(userEmail ? { QBO_AUTH_USER_EMAIL: userEmail } : {}),
-  };
-  const previous = Object.fromEntries(Object.keys(overrides).map((key) => [key, process.env[key]]));
-  Object.assign(process.env, overrides);
-  try {
-    const agent = request.agent(app);
-    await agent
-      .post('/api/auth/login')
-      .set('Origin', 'http://qbo.example.test')
-      .send({ password: PASSWORD })
-      .expect(200);
-    return agent;
-  } finally {
-    for (const [key, value] of Object.entries(previous)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
-}
-
-test.before(async () => {
-  passwordHash = await hashPassword(PASSWORD, Buffer.from('ticket-report-auth-test-salt'));
-});
-
-test.beforeEach(() => clearSessions());
-
 test('browser reporting denies requests without an approved exact origin', async () => withEnvironment(reportEnvironment(), async () => {
   const response = await request(createApp()).get('/api/ticket-snitch/reporting/bootstrap');
   assert.equal(response.status, 403);
@@ -89,31 +49,19 @@ test('browser reporting denies requests without an approved exact origin', async
   assert.ok(response.body.requestId);
 }));
 
-test('browser reporting requires an authenticated QBO server session', async () => withEnvironment(reportEnvironment(), async () => {
-  const response = await request(createApp())
-    .get('/api/ticket-snitch/reporting/bootstrap')
-    .set('Origin', 'http://qbo.example.test');
-  assert.equal(response.status, 401);
-  assert.equal(response.body.code, 'QBO_AUTH_REQUIRED');
-  assert.ok(response.body.requestId);
-}));
-
 test('browser reporting requires a stable server-side continuity secret', async () => withEnvironment({
   ...reportEnvironment(),
   QBO_REPORTING_SECRET: '',
 }, async () => {
-  const app = createApp();
-  const agent = await signedInAgent(app);
-  const response = await agent
+  const response = await request(createApp())
     .get('/api/ticket-snitch/reporting/bootstrap')
     .set('Origin', 'http://qbo.example.test');
-  assert.equal(response.status, 200);
-  assert.equal(response.body.available, false);
-  assert.equal(response.body.unavailableReason, 'QBO_REPORTING_SECRET_NOT_CONFIGURED');
+  assert.equal(response.status, 503);
+  assert.equal(response.body.code, 'QBO_REPORTING_SECRET_NOT_CONFIGURED');
   assert.ok(response.body.requestId);
 }));
 
-test('browser report derives identity from the authenticated QBO session, filters context, and safely replays one case', async () => withEnvironment(reportEnvironment(), async () => {
+test('browser report derives anonymous identity from a signed cookie, filters context, and safely replays one case', async () => withEnvironment(reportEnvironment(), async () => {
   const originalFetch = global.fetch;
   const calls = [];
   global.fetch = async (url, options) => {
@@ -127,7 +75,7 @@ test('browser report derives identity from the authenticated QBO session, filter
   };
   try {
     const app = createApp();
-    const agent = await signedInAgent(app);
+    const agent = request.agent(app);
     const bootstrap = await agent
       .get('/api/ticket-snitch/reporting/bootstrap')
       .set('Origin', 'http://qbo.example.test')
@@ -135,7 +83,10 @@ test('browser report derives identity from the authenticated QBO session, filter
     assert.equal(bootstrap.body.available, true);
     assert.ok(bootstrap.body.reportToken);
     assert.equal(bootstrap.body.dataUseUrl, 'https://tickets.example.test/api/v1/data-use');
-    assert.match(bootstrap.body.reporterScope, /^qru_[A-Za-z0-9_-]{32}$/);
+    assert.match(bootstrap.body.reporterScope, /^qrv_[A-Za-z0-9_-]{32}$/);
+    assert.match(bootstrap.headers['set-cookie']?.[0] || '', /qbo_reporting_visitor=/);
+    assert.match(bootstrap.headers['set-cookie']?.[0] || '', /HttpOnly/);
+    assert.match(bootstrap.headers['set-cookie']?.[0] || '', /SameSite=Strict/);
 
     const payload = {
       submissionId: 'submission-user-report-001',
@@ -175,9 +126,9 @@ test('browser report derives identity from the authenticated QBO session, filter
     assert.equal(calls[0].body.type, 'problem_report');
     assert.equal(calls[0].body.priority, 'none');
     assert.equal(calls[0].body.severity, 'none');
-    assert.equal(calls[0].body.reporter.actorId, 'qbo-local-user');
-    assert.equal(calls[0].body.reporter.displayName, 'QBO local user');
-    assert.equal(calls[0].body.reporter.email, 'reporter@example.test');
+    assert.match(calls[0].body.reporter.actorId, /^qbo-visitor:[0-9a-f-]{36}$/);
+    assert.equal(calls[0].body.reporter.displayName, 'Anonymous QBO reporter');
+    assert.equal(calls[0].body.reporter.email, '');
     assert.equal(calls[0].body.reporter.wantsReply, true);
     assert.equal(calls[0].body.details.consent.reply, true);
     assert.equal(calls[0].body.source.url, 'http://qbo.example.test/escalations');
@@ -203,7 +154,7 @@ test('optional self-reported contact is normalized while invalid contact is reje
     return ticketResponse({ ok: true, data: { id: 'work-contact-1', key: 'QBO-44' } });
   };
   try {
-    const agent = await signedInAgent(createApp());
+    const agent = request.agent(createApp());
     const bootstrap = await agent
       .get('/api/ticket-snitch/reporting/bootstrap')
       .set('Origin', 'http://qbo.example.test')
@@ -222,7 +173,7 @@ test('optional self-reported contact is normalized while invalid contact is reje
       })
       .expect(201);
     assert.equal(calls.length, 1);
-    assert.equal(calls[0].reporter.actorId, 'qbo-local-user');
+    assert.match(calls[0].reporter.actorId, /^qbo-visitor:[0-9a-f-]{36}$/);
     assert.equal(calls[0].reporter.displayName, 'Ada Lovelace');
     assert.equal(calls[0].reporter.email, 'ada@example.test');
 
@@ -293,7 +244,7 @@ test('feedback maps to improvement and mandatory diagnostics cannot be disabled 
   };
   try {
     const app = createApp();
-    const agent = await signedInAgent(app);
+    const agent = request.agent(app);
     const bootstrap = await agent
       .get('/api/ticket-snitch/reporting/bootstrap')
       .set('Origin', 'http://qbo.example.test')
@@ -349,7 +300,7 @@ test('an approved screenshot is normalized and attached with a separate retry-sa
   };
   try {
     const app = createApp();
-    const agent = await signedInAgent(app);
+    const agent = request.agent(app);
     const bootstrap = await agent.get('/api/ticket-snitch/reporting/bootstrap').set('Origin', 'http://qbo.example.test').expect(200);
     assert.equal(bootstrap.body.screenshotAvailable, true);
     const response = await agent
@@ -400,7 +351,7 @@ test('a failed screenshot attachment preserves the case and retries without dupl
   };
   try {
     const app = createApp();
-    const agent = await signedInAgent(app);
+    const agent = request.agent(app);
     const bootstrap = await agent.get('/api/ticket-snitch/reporting/bootstrap').set('Origin', 'http://qbo.example.test').expect(200);
     const payload = {
       submissionId: 'submission-screenshot-retry-001',
@@ -431,7 +382,7 @@ test('invalid screenshot bytes are rejected before a case is created', async () 
   global.fetch = async () => { forwarded = true; return ticketResponse({ ok: true, data: {} }); };
   try {
     const app = createApp();
-    const agent = await signedInAgent(app);
+    const agent = request.agent(app);
     const bootstrap = await agent.get('/api/ticket-snitch/reporting/bootstrap').set('Origin', 'http://qbo.example.test').expect(200);
     const response = await agent
       .post('/api/ticket-snitch/reporting/reports')
@@ -456,7 +407,7 @@ test('browser reporting rejects an invalid anti-forgery token before forwarding'
   let forwarded = false;
   global.fetch = async () => { forwarded = true; return ticketResponse({ ok: true, data: {} }); };
   try {
-    const agent = await signedInAgent(createApp());
+    const agent = request.agent(createApp());
     const response = await agent
       .post('/api/ticket-snitch/reporting/reports')
       .set('Origin', 'http://qbo.example.test')
@@ -468,7 +419,7 @@ test('browser reporting rejects an invalid anti-forgery token before forwarding'
   } finally { global.fetch = originalFetch; }
 }));
 
-test('customer follow-up keeps the raw Ticket Snitch receipt server-side behind a signed-in-user-bound encrypted handle', async () => withEnvironment(reportEnvironment(), async () => {
+test('customer follow-up keeps the raw Ticket Snitch receipt server-side behind an anonymous-browser-bound encrypted handle', async () => withEnvironment(reportEnvironment(), async () => {
   const originalFetch = global.fetch;
   const rawReceipt = `tsr_11111111-1111-4111-8111-111111111111.${'a'.repeat(43)}`;
   const calls = [];
@@ -498,7 +449,7 @@ test('customer follow-up keeps the raw Ticket Snitch receipt server-side behind 
   };
   try {
     const app = createApp();
-    const agent = await signedInAgent(app);
+    const agent = request.agent(app);
     const bootstrap = await agent
       .get('/api/ticket-snitch/reporting/bootstrap')
       .set('Origin', 'http://qbo.example.test')
@@ -536,37 +487,31 @@ test('customer follow-up keeps the raw Ticket Snitch receipt server-side behind 
       .expect(401);
     assert.equal(calls.length, forwardedBeforeTamper);
 
-    await withEnvironment({
-      QBO_AUTH_USER_ID: 'qbo-other-user',
-      QBO_AUTH_USER_NAME: 'Other QBO user',
-      QBO_AUTH_USER_EMAIL: 'other@example.test',
-    }, async () => {
-      const otherUser = await signedInAgent(app);
-      const otherBootstrap = await otherUser
-        .get('/api/ticket-snitch/reporting/bootstrap')
-        .set('Origin', 'http://qbo.example.test')
-        .expect(200);
-      await otherUser
-        .get('/api/ticket-snitch/reporting/receipt')
-        .set('Origin', 'http://qbo.example.test')
-        .set('X-QBO-Report-Token', otherBootstrap.body.reportToken)
-        .set('X-QBO-Ticket-Receipt', report.body.customerReceipt.handle)
-        .expect(401);
-    });
+    const otherBrowser = request.agent(app);
+    const otherBootstrap = await otherBrowser
+      .get('/api/ticket-snitch/reporting/bootstrap')
+      .set('Origin', 'http://qbo.example.test')
+      .expect(200);
+    await otherBrowser
+      .get('/api/ticket-snitch/reporting/receipt')
+      .set('Origin', 'http://qbo.example.test')
+      .set('X-QBO-Report-Token', otherBootstrap.body.reportToken)
+      .set('X-QBO-Ticket-Receipt', report.body.customerReceipt.handle)
+      .expect(401);
     assert.equal(calls.length, forwardedBeforeTamper);
   } finally {
     global.fetch = originalFetch;
   }
 }));
 
-test('a reporting token cannot be replayed from a different authenticated session', async () => withEnvironment(reportEnvironment(), async () => {
+test('a reporting token cannot be replayed from a different anonymous browser identity', async () => withEnvironment(reportEnvironment(), async () => {
   const originalFetch = global.fetch;
   let forwarded = false;
   global.fetch = async () => { forwarded = true; return ticketResponse({ ok: true, data: {} }); };
   try {
     const app = createApp();
-    const firstAgent = await signedInAgent(app);
-    const secondAgent = await signedInAgent(app);
+    const firstAgent = request.agent(app);
+    const secondAgent = request.agent(app);
     const bootstrap = await firstAgent
       .get('/api/ticket-snitch/reporting/bootstrap')
       .set('Origin', 'http://qbo.example.test')
