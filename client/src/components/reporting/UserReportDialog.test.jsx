@@ -67,7 +67,7 @@ beforeEach(() => {
 });
 
 async function chooseType(user, name = 'Report a Problem') {
-  await screen.findByRole('group', { name: 'Type' });
+  await screen.findByRole('group', { name: 'Choose what to send' });
   await user.click(screen.getByRole('radio', { name }));
   await screen.findByRole('button', { name: 'Send report' });
 }
@@ -77,7 +77,8 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   render(<UserReportDialog open onClose={() => {}} />);
 
   expect(await screen.findByRole('dialog', { name: 'Send feedback' })).toBeVisible();
-  expect(await screen.findByRole('group', { name: 'Type' })).toBeVisible();
+  expect(await screen.findByRole('group', { name: 'Choose what to send' })).toBeVisible();
+  expect(screen.queryByText('Type', { exact: true })).not.toBeInTheDocument();
   expect(screen.getByRole('radio', { name: 'Report a Problem' })).not.toBeChecked();
   expect(screen.getByRole('radio', { name: 'Request a Feature' })).not.toBeChecked();
   expect(screen.getByRole('radio', { name: 'Submit Feedback' })).not.toBeChecked();

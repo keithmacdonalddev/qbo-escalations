@@ -380,9 +380,8 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
           </div>
         ) : (
           <form onSubmit={handleSubmit} noValidate>
-            <fieldset className="user-report-types">
-              <legend>Type</legend>
-              <div className="user-report-type-grid" role="radiogroup" aria-label="Report type">
+            <fieldset className="user-report-types" aria-label="Choose what to send">
+              <div className="user-report-type-grid">
                 {REPORT_CHOICES.map((choice) => (
                   <label key={choice.value} className={`user-report-type${draft.kind === choice.value ? ' is-selected' : ''}`}>
                     <input
