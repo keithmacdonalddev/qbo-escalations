@@ -101,8 +101,9 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   expect(screen.getByLabelText(/^Name/)).toBeVisible();
   expect(screen.getByLabelText(/^Email/)).toBeVisible();
   expect(screen.getByRole('heading', { name: /^Add a screenshot/ })).toBeVisible();
-  expect(screen.queryByText('Show us exactly what you see.')).not.toBeInTheDocument();
+  expect(screen.getByText('Best for visual or hard-to-reproduce issues.')).toBeVisible();
   expect(screen.getByRole('heading', { name: /^Contact/ })).toBeVisible();
+  expect(screen.getByText('Add your email if you’d like a reply.')).toBeVisible();
   expect(screen.queryByText(/Used only for this report and future follow-up/)).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox', { name: /diagnostics/i })).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'How report data is used' })).toHaveAttribute('href', 'https://tickets.example.test/api/v1/data-use');

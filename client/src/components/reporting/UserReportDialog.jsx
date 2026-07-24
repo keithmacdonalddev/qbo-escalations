@@ -527,8 +527,11 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                 <div className="user-report-support-grid">
                   <section className="user-report-screenshot" aria-labelledby="user-report-screenshot-title">
                     <div className="user-report-support-heading">
-                      <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="screenshot" /></span>
-                      <h3 id="user-report-screenshot-title">Add a screenshot <small>Optional</small></h3>
+                      <span className="user-report-support-icon" aria-hidden="true"><ReportUtilityIcon kind="screenshot" /></span>
+                      <div className="user-report-support-copy">
+                        <h3 id="user-report-screenshot-title">Add a screenshot <small>Optional</small></h3>
+                        <p>Best for visual or hard-to-reproduce issues.</p>
+                      </div>
                     </div>
                     {bootstrap.screenshotAvailable ? (
                       <>
@@ -577,8 +580,11 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
 
                   <section className="user-report-contact" aria-labelledby="user-report-contact-title">
                     <div className="user-report-support-heading">
-                      <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="contact" /></span>
-                      <h3 id="user-report-contact-title">Contact <small>Optional</small></h3>
+                      <span className="user-report-support-icon" aria-hidden="true"><ReportUtilityIcon kind="contact" /></span>
+                      <div className="user-report-support-copy">
+                        <h3 id="user-report-contact-title">Contact <small>Optional</small></h3>
+                        <p>Add your email if you’d like a reply.</p>
+                      </div>
                     </div>
                     <div className="user-report-contact-grid">
                       <div className="user-report-field">
