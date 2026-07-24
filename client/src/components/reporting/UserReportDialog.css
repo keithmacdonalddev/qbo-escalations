@@ -402,12 +402,33 @@
 }
 
 .user-report-types legend,
-.user-report-field > label {
+.user-report-field > label,
+.user-report-field-heading label {
   display: block;
-  margin: 0 0 8px;
+  margin: 0;
   color: var(--ink);
   font-size: 13px;
   font-weight: 650;
+}
+
+.user-report-field > label {
+  margin-bottom: 8px;
+}
+
+.user-report-field-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.user-report-field-heading small {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  font-style: italic;
+  font-weight: 450;
+  line-height: 1.35;
 }
 
 .user-report-types legend {
@@ -428,10 +449,12 @@
 .user-report-type {
   position: relative;
   display: flex;
-  min-height: 38px;
+  min-height: 54px;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 7px 10px;
+  gap: 3px;
+  padding: 6px 10px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   color: var(--ink-secondary);
@@ -473,10 +496,19 @@
   pointer-events: none;
 }
 
-.user-report-type span {
-  font-size: 12px;
-  font-weight: 650;
-  line-height: 1.2;
+.user-report-type-tagline {
+  color: var(--ink-tertiary);
+  font-size: 9.5px;
+  font-style: italic;
+  font-weight: 450;
+  line-height: 1.1;
+}
+
+.user-report-type-label {
+  color: inherit;
+  font-size: 11.5px;
+  font-weight: 680;
+  line-height: 1.15;
 }
 
 .user-report-type:has(input:focus-visible),
@@ -551,11 +583,8 @@
   margin-left: 5px;
   color: var(--ink-tertiary);
   font-size: 10px;
+  font-style: italic;
   font-weight: 500;
-}
-
-.user-report-contact .user-report-help {
-  margin: 9px 0 0;
 }
 
 .user-report-screenshot {
@@ -567,10 +596,14 @@
 }
 
 .user-report-screenshot-heading {
-  display: block;
+  display: flex;
+  align-items: baseline;
+  gap: 4px 10px;
+  flex-wrap: wrap;
 }
 
 .user-report-screenshot-heading h3,
+.user-report-screenshot-heading p,
 .user-report-screenshot-unavailable {
   margin: 0;
 }
@@ -578,6 +611,13 @@
 .user-report-screenshot-heading h3 {
   color: var(--ink);
   font-size: 13px;
+}
+
+.user-report-screenshot-heading p {
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1.35;
 }
 
 .user-report-screenshot-unavailable {
@@ -690,10 +730,12 @@
 }
 
 .user-report-data-use {
-  margin: -2px 0 0;
+  margin: -10px 0 0;
   color: var(--ink-tertiary);
   font-size: 10px;
+  font-style: italic;
   line-height: 1.45;
+  text-align: center;
 }
 
 .user-report-data-use a {
@@ -850,7 +892,7 @@
   .user-report-header,
   .user-report-dialog form { padding-right: 16px; padding-left: 16px; }
   .user-report-contact-grid { grid-template-columns: 1fr; }
-  .user-report-type { min-height: 42px; padding: 6px; }
+  .user-report-type { min-height: 56px; padding: 6px; }
   .user-report-actions { flex-direction: column-reverse; }
   .user-report-primary,
   .user-report-secondary { width: 100%; }

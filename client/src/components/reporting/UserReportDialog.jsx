@@ -14,21 +14,24 @@ import './UserReportDialog.css';
 const REPORT_CHOICES = [
   {
     value: 'problem',
-    label: 'Problem',
+    tagline: 'Found a bug?',
+    label: 'Report a Problem',
     titlePlaceholder: 'Example: Escalation notes do not save',
     explanationLabel: 'What happened?',
     explanationPlaceholder: 'Describe what happened, what you expected, and any steps that help us reproduce it.',
   },
   {
     value: 'feature',
-    label: 'Feature request',
+    tagline: 'Have an idea?',
+    label: 'Request a Feature',
     titlePlaceholder: 'Example: Add a faster review shortcut',
     explanationLabel: 'What would help?',
     explanationPlaceholder: 'Describe the capability you need and why it would make the app more useful.',
   },
   {
     value: 'feedback',
-    label: 'Feedback',
+    tagline: 'Want to chat?',
+    label: 'Submit Feedback',
     titlePlaceholder: 'Example: Make filters easier to scan',
     explanationLabel: 'What should we improve?',
     explanationPlaceholder: 'Share your observation and what would make the experience better.',
@@ -386,10 +389,13 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                       type="radio"
                       name="report-kind"
                       value={choice.value}
+                      aria-label={choice.label}
+                      aria-describedby={`user-report-type-tagline-${choice.value}`}
                       checked={draft.kind === choice.value}
                       onChange={() => chooseReportKind(choice.value)}
                     />
-                    <span>{choice.label}</span>
+                    <span id={`user-report-type-tagline-${choice.value}`} className="user-report-type-tagline">{choice.tagline}</span>
+                    <strong className="user-report-type-label">{choice.label}</strong>
                   </label>
                 ))}
               </div>
@@ -398,7 +404,10 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
             {selectedChoice ? (
               <div className="user-report-form-details" key={selectedChoice.value}>
             <div className="user-report-field">
-              <label htmlFor="user-report-summary">Short title</label>
+              <div className="user-report-field-heading">
+                <label htmlFor="user-report-summary">Short title</label>
+                <small id="user-report-summary-help">Make it easy to recognize in a work queue.</small>
+              </div>
               <input
                 ref={titleRef}
                 id="user-report-summary"
@@ -409,12 +418,14 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                 aria-describedby={errors.title ? 'user-report-summary-error' : 'user-report-summary-help'}
                 placeholder={selectedChoice.titlePlaceholder}
               />
-              <span id="user-report-summary-help" className="user-report-help">Make it easy to recognize in a work queue.</span>
               {errors.title ? <span id="user-report-summary-error" className="user-report-field-error" role="alert">{errors.title}</span> : null}
             </div>
 
             <div className="user-report-field">
-              <label htmlFor="user-report-explanation">{selectedChoice.explanationLabel}</label>
+              <div className="user-report-field-heading">
+                <label htmlFor="user-report-explanation">{selectedChoice.explanationLabel}</label>
+                <small id="user-report-explanation-help">Do not include passwords, payment information, access tokens, or customer secrets.</small>
+              </div>
               <textarea
                 id="user-report-explanation"
                 value={draft.explanation}
@@ -425,43 +436,8 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                 aria-describedby={errors.explanation ? 'user-report-explanation-error' : 'user-report-explanation-help'}
                 placeholder={selectedChoice.explanationPlaceholder}
               />
-              <span id="user-report-explanation-help" className="user-report-help">Do not include passwords, payment information, access tokens, or customer secrets.</span>
               {errors.explanation ? <span id="user-report-explanation-error" className="user-report-field-error" role="alert">{errors.explanation}</span> : null}
             </div>
-
-            <section className="user-report-contact" aria-label="Optional contact details">
-              <div className="user-report-contact-grid">
-                <div className="user-report-field">
-                  <label htmlFor="user-report-name">Name <small>Optional</small></label>
-                  <input
-                    id="user-report-name"
-                    autoComplete="name"
-                    value={draft.reporterName}
-                    onChange={(event) => updateDraft('reporterName', event.target.value)}
-                    maxLength={120}
-                    aria-invalid={Boolean(errors.reporterName)}
-                    aria-describedby={errors.reporterName ? 'user-report-name-error' : 'user-report-contact-help'}
-                  />
-                  {errors.reporterName ? <span id="user-report-name-error" className="user-report-field-error" role="alert">{errors.reporterName}</span> : null}
-                </div>
-                <div className="user-report-field">
-                  <label htmlFor="user-report-email">Email <small>Optional</small></label>
-                  <input
-                    id="user-report-email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    value={draft.reporterEmail}
-                    onChange={(event) => updateDraft('reporterEmail', event.target.value)}
-                    maxLength={320}
-                    aria-invalid={Boolean(errors.reporterEmail)}
-                    aria-describedby={errors.reporterEmail ? 'user-report-email-error' : 'user-report-contact-help'}
-                  />
-                  {errors.reporterEmail ? <span id="user-report-email-error" className="user-report-field-error" role="alert">{errors.reporterEmail}</span> : null}
-                </div>
-              </div>
-              <p id="user-report-contact-help" className="user-report-help">Used only for this report and future follow-up. These self-reported details do not create an account or prove identity.</p>
-            </section>
 
             <section
               className="user-report-screenshot"
@@ -469,6 +445,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
             >
               <div className="user-report-screenshot-heading">
                 <h3 id="user-report-screenshot-title">Add a screenshot <small>Optional</small></h3>
+                <p>A screenshot helps us understand your report and respond more effectively.</p>
               </div>
               {bootstrap.screenshotAvailable ? (
                 <>
@@ -515,14 +492,38 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
               )}
             </section>
 
-            <p className="user-report-data-use">
-              See how Ticket Snitch uses and stores report data{' '}
-              {bootstrap.dataUseUrl ? (
-                <a href={bootstrap.dataUseUrl} target="_blank" rel="noopener noreferrer">here</a>
-              ) : (
-                <span>in the Ticket Snitch data-use notice</span>
-              )}.
-            </p>
+            <section className="user-report-contact" aria-label="Optional contact details">
+              <div className="user-report-contact-grid">
+                <div className="user-report-field">
+                  <label htmlFor="user-report-name">Name <small>Optional</small></label>
+                  <input
+                    id="user-report-name"
+                    autoComplete="name"
+                    value={draft.reporterName}
+                    onChange={(event) => updateDraft('reporterName', event.target.value)}
+                    maxLength={120}
+                    aria-invalid={Boolean(errors.reporterName)}
+                    aria-describedby={errors.reporterName ? 'user-report-name-error' : undefined}
+                  />
+                  {errors.reporterName ? <span id="user-report-name-error" className="user-report-field-error" role="alert">{errors.reporterName}</span> : null}
+                </div>
+                <div className="user-report-field">
+                  <label htmlFor="user-report-email">Email <small>Optional</small></label>
+                  <input
+                    id="user-report-email"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    value={draft.reporterEmail}
+                    onChange={(event) => updateDraft('reporterEmail', event.target.value)}
+                    maxLength={320}
+                    aria-invalid={Boolean(errors.reporterEmail)}
+                    aria-describedby={errors.reporterEmail ? 'user-report-email-error' : undefined}
+                  />
+                  {errors.reporterEmail ? <span id="user-report-email-error" className="user-report-field-error" role="alert">{errors.reporterEmail}</span> : null}
+                </div>
+              </div>
+            </section>
 
             {!online ? (
               <div className="user-report-inline-error" role="alert">You are offline. Your draft is preserved and can be sent when the connection returns.</div>
@@ -540,6 +541,15 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                 {submitState.state === 'submitting' ? 'Sending…' : 'Send report'}
               </button>
             </div>
+
+            <p className="user-report-data-use">
+              See how Ticket Snitch uses and stores report data{' '}
+              {bootstrap.dataUseUrl ? (
+                <a href={bootstrap.dataUseUrl} target="_blank" rel="noopener noreferrer">here</a>
+              ) : (
+                <span>in the Ticket Snitch data-use notice</span>
+              )}.
+            </p>
               </div>
             ) : null}
           </form>
