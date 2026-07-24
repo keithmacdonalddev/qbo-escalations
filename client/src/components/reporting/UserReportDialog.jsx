@@ -94,6 +94,7 @@ function ReportUtilityIcon({ kind }) {
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PRIVACY_REMINDER = 'Leave out passwords, payment information, access tokens, and customer secrets.';
 
 function initialDraft() {
   return {
@@ -467,21 +468,15 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
 
             {selectedChoice ? (
               <div className="user-report-form-details" key={selectedChoice.value}>
-                <section className="user-report-writing" aria-labelledby="user-report-writing-title">
-                  <div className="user-report-writing-heading">
-                    <div>
-                      <h3 id="user-report-writing-title">Share the details</h3>
-                      <p>A clear title and a little context help us act faster.</p>
-                    </div>
-                    <span className="user-report-required-key">Required</span>
-                  </div>
-
+                <div className="user-report-writing">
                   <div className="user-report-field">
                     <div className="user-report-field-heading">
-                      <label htmlFor="user-report-summary">Short title</label>
+                      <span className="user-report-field-label-copy">
+                        <label htmlFor="user-report-summary">Short title</label>
+                        <small id="user-report-summary-help">Make it easy to recognize in a work queue.</small>
+                      </span>
                       <span className="user-report-character-count" aria-hidden="true">{draft.title.length}/240</span>
                     </div>
-                    <small id="user-report-summary-help" className="user-report-field-help">Make it easy to recognize in a work queue.</small>
                     <input
                       ref={titleRef}
                       id="user-report-summary"
@@ -498,7 +493,20 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
 
                   <div className="user-report-field">
                     <div className="user-report-field-heading">
-                      <label htmlFor="user-report-explanation">{selectedChoice.explanationLabel}</label>
+                      <span className="user-report-field-label-copy">
+                        <label htmlFor="user-report-explanation">{selectedChoice.explanationLabel}</label>
+                        <span
+                          id="user-report-privacy-note"
+                          className="user-report-privacy-tip"
+                          role="note"
+                          tabIndex={0}
+                          aria-label={`Privacy reminder: ${PRIVACY_REMINDER}`}
+                          data-tooltip={PRIVACY_REMINDER}
+                        >
+                          <ReportUtilityIcon kind="privacy" />
+                          <span className="user-report-visually-hidden">{PRIVACY_REMINDER}</span>
+                        </span>
+                      </span>
                       <span className="user-report-character-count" aria-hidden="true">{draft.explanation.length.toLocaleString()}/40,000</span>
                     </div>
                     <textarea
@@ -514,21 +522,13 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                     />
                     {errors.explanation ? <span id="user-report-explanation-error" className="user-report-field-error" role="alert">{errors.explanation}</span> : null}
                   </div>
-
-                  <div id="user-report-privacy-note" className="user-report-privacy-note">
-                    <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="privacy" /></span>
-                    <span>Leave out passwords, payment information, access tokens, and customer secrets.</span>
-                  </div>
-                </section>
+                </div>
 
                 <div className="user-report-support-grid">
                   <section className="user-report-screenshot" aria-labelledby="user-report-screenshot-title">
                     <div className="user-report-support-heading">
                       <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="screenshot" /></span>
-                      <div>
-                        <h3 id="user-report-screenshot-title">Add a screenshot <small>Optional</small></h3>
-                        <p>Show us exactly what you see.</p>
-                      </div>
+                      <h3 id="user-report-screenshot-title">Add a screenshot <small>Optional</small></h3>
                     </div>
                     {bootstrap.screenshotAvailable ? (
                       <>
@@ -575,13 +575,10 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                     )}
                   </section>
 
-                  <section className="user-report-contact" aria-label="Optional contact details">
+                  <section className="user-report-contact" aria-labelledby="user-report-contact-title">
                     <div className="user-report-support-heading">
                       <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="contact" /></span>
-                      <div>
-                        <h3>Want a reply? <small>Optional</small></h3>
-                        <p>Leave your details so we can follow up.</p>
-                      </div>
+                      <h3 id="user-report-contact-title">Contact <small>Optional</small></h3>
                     </div>
                     <div className="user-report-contact-grid">
                       <div className="user-report-field">

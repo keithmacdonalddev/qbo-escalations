@@ -95,20 +95,20 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
 
   await user.click(screen.getByRole('radio', { name: 'Request a Feature' }));
   expect(screen.getByLabelText('What would help?')).toHaveAttribute('placeholder', expect.stringMatching(/capability/i));
-  expect(screen.getByRole('heading', { name: 'Share the details' })).toBeVisible();
-  expect(screen.getByText('Make it easy to recognize in a work queue.').closest('.user-report-field')).toContainElement(screen.getByText('Short title'));
-  expect(screen.getByText(/Leave out passwords/)).toBeVisible();
+  expect(screen.queryByRole('heading', { name: 'Share the details' })).not.toBeInTheDocument();
+  expect(screen.getByText('Make it easy to recognize in a work queue.').closest('.user-report-field-heading')).toContainElement(screen.getByText('Short title'));
+  expect(screen.getByRole('note', { name: /Privacy reminder: Leave out passwords/ })).toBeVisible();
   expect(screen.getByLabelText(/^Name/)).toBeVisible();
   expect(screen.getByLabelText(/^Email/)).toBeVisible();
   expect(screen.getByRole('heading', { name: /^Add a screenshot/ })).toBeVisible();
-  expect(screen.getByText('Show us exactly what you see.')).toBeVisible();
-  expect(screen.getByRole('heading', { name: /^Want a reply/ })).toBeVisible();
+  expect(screen.queryByText('Show us exactly what you see.')).not.toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: /^Contact/ })).toBeVisible();
   expect(screen.queryByText(/Used only for this report and future follow-up/)).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox', { name: /diagnostics/i })).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'How report data is used' })).toHaveAttribute('href', 'https://tickets.example.test/api/v1/data-use');
   expect(screen.getByRole('link', { name: 'How report data is used' })).toHaveAttribute('target', '_blank');
   const screenshotSection = screen.getByRole('heading', { name: /^Add a screenshot/ }).closest('section');
-  const contactSection = screen.getByRole('region', { name: 'Optional contact details' });
+  const contactSection = screen.getByRole('region', { name: /^Contact/ });
   const dataUse = screen.getByRole('link', { name: 'How report data is used' }).closest('p');
   const actions = screen.getByRole('button', { name: 'Cancel' }).parentElement;
   expect(screenshotSection.compareDocumentPosition(contactSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
