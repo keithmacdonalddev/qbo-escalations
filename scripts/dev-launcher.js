@@ -598,12 +598,18 @@ function emitServiceHealth(output, health) {
   const monitor = background.monitor || {};
   const briefing = background.scheduler || {};
   const knowledge = background.knowledgeReview || {};
+  const aiManagement = background.aiManagement || {};
   const agentHealth = background.agentHealth || {};
-  const servicesRunning = monitor.running && briefing.running && knowledge.running && agentHealth.running;
+  const servicesRunning = monitor.running
+    && briefing.running
+    && knowledge.running
+    && aiManagement.running
+    && agentHealth.running;
   const detail = [
     `monitor ${monitor.lastTickStatus || (monitor.running ? 'scheduled' : 'stopped')}`,
     `briefing ${briefing.lastStatus || (briefing.running ? 'scheduled' : 'stopped')}`,
     `knowledge ${knowledge.lastStatus || (knowledge.running ? 'scheduled' : 'stopped')}`,
+    `AI catalog ${aiManagement.running ? 'scheduled' : 'stopped'}`,
     agentHealth.lastCheckedAt ? `agents checked ${formatAge(agentHealth.lastCheckedAt)}` : 'agents not checked yet',
   ].join(' · ');
   output.line(servicesRunning ? 'success' : 'warning', `${servicesRunning ? '✅' : '⚠️'} Background systems: ${detail}`, 'jobs');
@@ -810,7 +816,7 @@ function renderPreview(output, ports = { api: DEFAULT_API_PORT, client: DEFAULT_
   output.success('✅ No stuck requests, AI operations, Workspace sessions, or background tasks', 'jobs');
   output.success('✅ Provider evidence storage is writable and readable (12 ms)', 'data');
   output.success('✅ Connected services: Gmail just now · Calendar 2m ago', 'work');
-  output.success('✅ Background systems: monitor healthy · briefing healthy · knowledge review-needed · agents checked just now', 'jobs');
+  output.success('✅ Background systems: monitor healthy · briefing healthy · knowledge review-needed · AI catalog scheduled · agents checked just now', 'jobs');
   output.blank();
   output.heading('✨ Core app ready');
   output.write(`   App: ${colorize('36;4', `http://localhost:${ports.client}`, output.color)}`);

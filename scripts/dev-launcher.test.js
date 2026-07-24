@@ -169,6 +169,7 @@ test('friendly service-health output distinguishes local sockets from external p
         monitor: { running: true, lastTickStatus: 'healthy' },
         scheduler: { running: true, lastStatus: 'healthy' },
         knowledgeReview: { running: true, lastStatus: 'healthy' },
+        aiManagement: { running: true },
         agentHealth: { running: true, lastCheckedAt: new Date().toISOString() },
       },
     },
@@ -178,6 +179,7 @@ test('friendly service-health output distinguishes local sockets from external p
   assert.match(text, /ElevenLabs configured, external call not tested/);
   assert.match(text, /No stuck requests/);
   assert.match(text, /Provider evidence storage is writable and readable/);
+  assert.match(text, /AI catalog scheduled/);
   assert.doesNotMatch(text, /undefined|null/);
 });
 
