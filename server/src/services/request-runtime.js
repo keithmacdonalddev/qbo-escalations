@@ -4,7 +4,8 @@ const activeRequests = new Map();
 
 function observableRequestPath(req) {
   const raw = String(req.originalUrl || req.url || '');
-  return raw;
+  const sensitiveSuffix = raw.search(/[?#]/);
+  return sensitiveSuffix >= 0 ? raw.slice(0, sensitiveSuffix) : raw;
 }
 
 function cloneRequest(entry) {
@@ -107,6 +108,7 @@ function registerRequestRuntime(req, res, next) {
 }
 
 module.exports = {
+  observableRequestPath,
   registerRequestRuntime,
   listActiveRequests,
   getRequestRuntimeHealth,

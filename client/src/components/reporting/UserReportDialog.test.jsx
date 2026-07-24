@@ -86,8 +86,8 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   expect(screen.getByRole('radio', { name: 'Submit Feedback' })).toHaveAccessibleDescription('Want to chat?');
   expect(screen.queryByLabelText('Short title')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Send report' })).not.toBeInTheDocument();
-  expect(screen.queryByText('New report')).not.toBeInTheDocument();
-  expect(screen.queryByText('My reports')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'New report' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('button', { name: 'My reports' })).toBeVisible();
 
   await user.click(screen.getByRole('radio', { name: 'Request a Feature' }));
   expect(screen.getByLabelText('What would help?')).toHaveAttribute('placeholder', expect.stringMatching(/capability/i));
@@ -337,7 +337,7 @@ it('keeps text reporting usable when the separate screenshot credential is unava
   expect(screen.queryByRole('button', { name: 'Capture screenshot' })).not.toBeInTheDocument();
 });
 
-it('always opens as a new report and does not expose report-history navigation', async () => {
+it('saves a private receipt and supports status, reply, and reporter validation follow-up', async () => {
   const receiptHandle = `qtr_${'a'.repeat(16)}.${'b'.repeat(112)}.${'c'.repeat(22)}`;
   reportingMocks.submitUserReport.mockResolvedValue({
     ok: true,
@@ -357,7 +357,81 @@ it('always opens as a new report and does not expose report-history navigation',
   await user.type(screen.getByLabelText('What happened?'), 'I need to return and confirm whether the repair works.');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   expect(await screen.findByText('QBO-71')).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'View report status' })).not.toBeInTheDocument();
-  expect(screen.queryByText('My reports')).not.toBeInTheDocument();
-  expect(reportingMocks.loadCustomerReceipt).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'View report status' }));
+  expect(await screen.findByText('The repair is ready for confirmation.')).toBeVisible();
+  expect(reportingMocks.loadCustomerReceipt).toHaveBeenCalledWith({
+    reportToken: 'report-token',
+    receiptHandle,
+  });
+  await user.type(screen.getByLabelText('Add information or ask a question'), 'I can verify this on the same page.');
+  await user.click(screen.getByRole('button', { name: 'Send reply' }));
+  await waitFor(() => expect(reportingMocks.replyToCustomerReceipt).toHaveBeenCalledWith(expect.objectContaining({
+    reportToken: 'report-token',
+    receiptHandle,
+    body: 'I can verify this on the same page.',
+  })));
+  await user.type(screen.getByLabelText('Optional note'), 'The repaired path now works.');
+  await user.click(screen.getByRole('button', { name: 'Fixed' }));
+  await waitFor(() => expect(reportingMocks.validateCustomerReceipt).toHaveBeenCalledWith(expect.objectContaining({
+    reportToken: 'report-token',
+    receiptHandle,
+    workItemVersion: 4,
+    outcome: 'fixed',
+    note: 'The repaired path now works.',
+  })));
+});
+
+it('renews an expired report token and retries the saved receipt once', async () => {
+  const receiptHandle = `qtr_${'a'.repeat(16)}.${'b'.repeat(112)}.${'c'.repeat(22)}`;
+  reportingMocks.loadReportingBootstrap
+    .mockResolvedValueOnce({
+      ok: true,
+      available: true,
+      reportToken: 'expired-report-token',
+      reporterScope: 'qrv_test-browser-scope',
+      requestId: 'bootstrap-expired',
+      screenshotAvailable: true,
+      dataUseUrl: 'https://tickets.example.test/api/v1/data-use',
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      available: true,
+      reportToken: 'renewed-report-token',
+      reporterScope: 'qrv_test-browser-scope',
+      requestId: 'bootstrap-renewed',
+      screenshotAvailable: true,
+      dataUseUrl: 'https://tickets.example.test/api/v1/data-use',
+    });
+  reportingMocks.submitUserReport.mockResolvedValue({
+    ok: true,
+    ticket: { id: 'work-receipt', key: 'QBO-71' },
+    customerReceipt: { receiptHandle, handle: receiptHandle, expiresAt: '2027-07-23T03:00:00.000Z' },
+    idempotentReplay: false,
+    requestId: 'report-with-expiring-token',
+    evidence: { requested: false, status: 'not_requested' },
+  });
+  reportingMocks.loadCustomerReceipt
+    .mockRejectedValueOnce(Object.assign(new Error('The reporting form expired.'), {
+      status: 401,
+      code: 'TICKET_SNITCH_REPORT_TOKEN_INVALID',
+      requestId: 'receipt-expired-token',
+    }));
+
+  const user = userEvent.setup();
+  render(<UserReportDialog open onClose={() => {}} />);
+  await chooseType(user);
+  await user.type(screen.getByLabelText('Short title'), 'Long-running report status check');
+  await user.type(screen.getByLabelText('What happened?'), 'The saved receipt should recover after its short-lived report token expires.');
+  await user.click(screen.getByRole('button', { name: 'Send report' }));
+  await user.click(await screen.findByRole('button', { name: 'View report status' }));
+
+  expect(await screen.findByText('The repair is ready for confirmation.')).toBeVisible();
+  expect(reportingMocks.loadCustomerReceipt).toHaveBeenNthCalledWith(1, {
+    reportToken: 'expired-report-token',
+    receiptHandle,
+  });
+  expect(reportingMocks.loadCustomerReceipt).toHaveBeenNthCalledWith(2, {
+    reportToken: 'renewed-report-token',
+    receiptHandle,
+  });
 });

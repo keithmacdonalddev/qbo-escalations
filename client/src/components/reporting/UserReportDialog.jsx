@@ -1,14 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createSubmissionId,
+  loadCustomerReceipt,
   loadReportingBootstrap,
+  replyToCustomerReceipt,
   submitUserReport,
+  validateCustomerReceipt,
 } from '../../api/ticketSnitchReporting.js';
 import {
   captureScreenFrame,
   screenCaptureSupported,
   validateScreenshotFile,
 } from './screenshotCapture.js';
+import {
+  loadSavedReceipts,
+  removeSavedReceipt,
+  saveReceipt,
+} from './customerReceipts.js';
 import './UserReportDialog.css';
 
 const REPORT_CHOICES = [
@@ -53,6 +61,9 @@ function initialDraft() {
 }
 
 function reportErrorMessage(error) {
+  if (error?.code === 'QBO_AUTH_REQUIRED') {
+    return 'Your QBO session ended. Sign in again to send this saved draft.';
+  }
   if (error?.status === 401 || error?.status === 403) {
     return 'This QBO Escalations installation is not permitted to submit reports. Your draft is still here.';
   }
@@ -64,7 +75,7 @@ function fileSizeLabel(size) {
   return `${Math.ceil(size / 1024)} KB`;
 }
 
-export default function UserReportDialog({ open, onClose, errorCode = '' }) {
+export default function UserReportDialog({ open, onClose, onAuthenticationRequired, errorCode = '' }) {
   const dialogRef = useRef(null);
   const titleRef = useRef(null);
   const screenshotInputRef = useRef(null);
@@ -77,6 +88,12 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
   const [screenshot, setScreenshot] = useState(null);
   const [screenshotPreview, setScreenshotPreview] = useState('');
   const [captureState, setCaptureState] = useState({ state: 'idle', message: '' });
+  const [view, setView] = useState('form');
+  const [savedReceipts, setSavedReceipts] = useState([]);
+  const [selectedReceipt, setSelectedReceipt] = useState(null);
+  const [receiptState, setReceiptState] = useState({ state: 'idle', data: null, message: '', requestId: '' });
+  const [replyDraft, setReplyDraft] = useState({ body: '', actionId: createSubmissionId() });
+  const [validationDraft, setValidationDraft] = useState({ outcome: '', note: '', actionId: createSubmissionId() });
 
   const loadAvailability = useCallback(async () => {
     setBootstrap({ state: 'loading', token: '', reporterScope: '', requestId: '', reason: '', screenshotAvailable: false, dataUseUrl: '' });
@@ -92,6 +109,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         dataUseUrl: result.dataUseUrl || '',
       });
     } catch (error) {
+      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setBootstrap({
         state: error?.status === 401 || error?.status === 403 ? 'denied' : 'error',
         token: '',
@@ -102,7 +120,38 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         dataUseUrl: '',
       });
     }
+  }, [onAuthenticationRequired]);
+
+  const refreshReportToken = useCallback(async () => {
+    const refreshed = await loadReportingBootstrap();
+    setBootstrap({
+      state: refreshed.available ? 'ready' : 'unavailable',
+      token: refreshed.reportToken || '',
+      reporterScope: refreshed.reporterScope || '',
+      requestId: refreshed.requestId || '',
+      reason: refreshed.unavailableReason || '',
+      screenshotAvailable: refreshed.screenshotAvailable !== false,
+      dataUseUrl: refreshed.dataUseUrl || '',
+    });
+    if (!refreshed.available || !refreshed.reportToken) {
+      const error = new Error('Reporting is not currently available.');
+      error.code = refreshed.unavailableReason || 'TICKET_SNITCH_NOT_CONFIGURED';
+      error.status = 503;
+      error.requestId = refreshed.requestId || '';
+      throw error;
+    }
+    return refreshed.reportToken;
   }, []);
+
+  const runWithReportToken = useCallback(async (operation) => {
+    const currentToken = bootstrap.token || await refreshReportToken();
+    try {
+      return await operation(currentToken);
+    } catch (error) {
+      if (error?.code !== 'TICKET_SNITCH_REPORT_TOKEN_INVALID') throw error;
+      return operation(await refreshReportToken());
+    }
+  }, [bootstrap.token, refreshReportToken]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -114,6 +163,57 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
       priorFocusRef.current?.focus?.();
     };
   }, [loadAvailability, open]);
+
+  useEffect(() => {
+    if (!open || !bootstrap.reporterScope) return;
+    setSavedReceipts(loadSavedReceipts(bootstrap.reporterScope));
+  }, [bootstrap.reporterScope, open]);
+
+  const rememberReceipt = useCallback((result) => {
+    if (!bootstrap.reporterScope || !result?.customerReceipt?.handle || !result?.ticket?.key) return null;
+    const stored = {
+      key: result.ticket.key,
+      title: draft.title.trim(),
+      handle: result.customerReceipt.handle,
+      expiresAt: result.customerReceipt.expiresAt,
+      createdAt: new Date().toISOString(),
+    };
+    setSavedReceipts(saveReceipt(bootstrap.reporterScope, stored));
+    setSelectedReceipt(stored);
+    return stored;
+  }, [bootstrap.reporterScope, draft.title]);
+
+  const openReceipt = useCallback(async (receipt) => {
+    setSelectedReceipt(receipt);
+    setView('receipt');
+    if (!online) {
+      setReceiptState({
+        state: 'error',
+        data: null,
+        message: 'You are offline. Reconnect to load the latest report status.',
+        requestId: '',
+      });
+      return;
+    }
+    setReceiptState({ state: 'loading', data: null, message: '', requestId: '' });
+    try {
+      const result = await runWithReportToken((reportToken) => loadCustomerReceipt({
+        reportToken,
+        receiptHandle: receipt.handle,
+      }));
+      setReceiptState({ state: 'ready', data: result.data, message: '', requestId: result.requestId || '' });
+    } catch (error) {
+      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
+      setReceiptState({
+        state: error?.status === 401 || error?.status === 403 ? 'expired' : 'error',
+        data: null,
+        message: error?.code === 'QBO_AUTH_REQUIRED'
+          ? 'Your QBO session ended. Sign in again to view this report.'
+          : error?.message || 'The report status could not be loaded.',
+        requestId: error?.requestId || '',
+      });
+    }
+  }, [onAuthenticationRequired, online, runWithReportToken]);
 
 
   useEffect(() => {
@@ -246,8 +346,8 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
       requestId: '',
     }));
     try {
-      const result = await submitUserReport({
-        reportToken: bootstrap.token,
+      const result = await runWithReportToken((reportToken) => submitUserReport({
+        reportToken,
         submissionId: draft.submissionId,
         observedAt: draft.observedAt,
         kind: draft.kind,
@@ -257,7 +357,8 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         reporterEmail: draft.reporterEmail.trim(),
         errorCode,
         screenshot,
-      });
+      }));
+      const storedReceipt = rememberReceipt(result);
       if (result.evidence?.status === 'failed') {
         setSubmitState({
           state: 'partial',
@@ -265,6 +366,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
           replay: Boolean(result.idempotentReplay),
           message: result.evidence.message || 'The report was received, but its screenshot could not be attached.',
           requestId: result.evidence.requestId || result.requestId || '',
+          receipt: storedReceipt,
         });
         return;
       }
@@ -275,8 +377,10 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
         message: '',
         requestId: result.requestId || '',
         evidenceAttached: result.evidence?.status === 'attached',
+        receipt: storedReceipt,
       });
     } catch (error) {
+      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
       setSubmitState((current) => ({
         state: retryEvidence ? 'partial' : 'error',
         ticket: retryEvidence ? current.ticket : null,
@@ -292,17 +396,93 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
     await sendDraft();
   };
 
+  const sendReceiptReply = async (event) => {
+    event.preventDefault();
+    const body = replyDraft.body.trim();
+    if (!body || !selectedReceipt || receiptState.state !== 'ready') return;
+    if (!online) {
+      setReceiptState((current) => ({ ...current, message: 'You are offline. Your reply is still here.' }));
+      return;
+    }
+    setReceiptState((current) => ({ ...current, state: 'replying', message: '', requestId: '' }));
+    try {
+      await runWithReportToken((reportToken) => replyToCustomerReceipt({
+        reportToken,
+        receiptHandle: selectedReceipt.handle,
+        actionId: replyDraft.actionId,
+        body,
+      }));
+      setReplyDraft({ body: '', actionId: createSubmissionId() });
+      await openReceipt(selectedReceipt);
+    } catch (error) {
+      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
+      setReceiptState((current) => ({
+        ...current,
+        state: 'ready',
+        message: error?.code === 'QBO_AUTH_REQUIRED'
+          ? 'Your QBO session ended. Sign in again to send this saved reply.'
+          : error?.message || 'Your reply could not be sent. It is still here.',
+        requestId: error?.requestId || '',
+      }));
+    }
+  };
+
+  const sendReceiptValidation = async (outcome) => {
+    if (!selectedReceipt || receiptState.state !== 'ready') return;
+    if (!online) {
+      setReceiptState((current) => ({ ...current, message: 'You are offline. Reconnect before confirming the outcome.' }));
+      return;
+    }
+    setReceiptState((current) => ({ ...current, state: 'validating', message: '', requestId: '' }));
+    try {
+      await runWithReportToken((reportToken) => validateCustomerReceipt({
+        reportToken,
+        receiptHandle: selectedReceipt.handle,
+        actionId: validationDraft.actionId,
+        workItemVersion: receiptState.data.version,
+        outcome,
+        note: validationDraft.note.trim(),
+      }));
+      setValidationDraft({ outcome, note: '', actionId: createSubmissionId() });
+      await openReceipt(selectedReceipt);
+    } catch (error) {
+      if (error?.code === 'QBO_AUTH_REQUIRED') onAuthenticationRequired?.();
+      setReceiptState((current) => ({
+        ...current,
+        state: 'ready',
+        message: error?.code === 'QBO_AUTH_REQUIRED'
+          ? 'Your QBO session ended. Sign in again before confirming the outcome.'
+          : error?.message || 'Your outcome confirmation could not be saved.',
+        requestId: error?.requestId || '',
+      }));
+    }
+  };
+
+  const forgetReceipt = () => {
+    if (!selectedReceipt || !bootstrap.reporterScope) return;
+    setSavedReceipts(removeSavedReceipt(bootstrap.reporterScope, selectedReceipt.key));
+    setSelectedReceipt(null);
+    setReceiptState({ state: 'idle', data: null, message: '', requestId: '' });
+    setView('receipts');
+  };
+
   const startAnother = () => {
     setDraft(initialDraft());
     setErrors({});
     setSubmitState({ state: 'idle', ticket: null, replay: false, message: '', requestId: '' });
     setScreenshot(null);
     setCaptureState({ state: 'idle', message: '' });
+    setView('form');
     loadAvailability();
     requestAnimationFrame(() => titleRef.current?.focus());
   };
 
-  const busy = bootstrap.state === 'loading' || submitState.state === 'submitting' || submitState.state === 'retrying' || captureState.state === 'capturing';
+  const busy = bootstrap.state === 'loading'
+    || submitState.state === 'submitting'
+    || submitState.state === 'retrying'
+    || captureState.state === 'capturing'
+    || receiptState.state === 'replying'
+    || receiptState.state === 'validating';
   const canSubmit = bootstrap.state === 'ready' && online && !busy;
   const selectedChoice = REPORT_CHOICES.find((choice) => choice.value === draft.kind);
 
@@ -330,7 +510,176 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
           <button type="button" className="user-report-close" onClick={onClose} disabled={busy} aria-label="Close reporting form">×</button>
         </header>
 
-        {bootstrap.state === 'loading' ? (
+        <nav className="user-report-view-tabs" aria-label="Feedback and report status">
+          <button
+            type="button"
+            className={view === 'form' ? 'is-active' : ''}
+            aria-current={view === 'form' ? 'page' : undefined}
+            onClick={() => setView('form')}
+          >
+            New report
+          </button>
+          <button
+            type="button"
+            className={view !== 'form' ? 'is-active' : ''}
+            aria-current={view !== 'form' ? 'page' : undefined}
+            onClick={() => setView('receipts')}
+          >
+            My reports{savedReceipts.length ? ` (${savedReceipts.length})` : ''}
+          </button>
+        </nav>
+
+        {view === 'receipts' ? (
+          <div className="user-report-receipts" aria-live="polite">
+            <div className="user-report-section-heading">
+              <div>
+                <h3>My reports</h3>
+                <p>Private receipts saved for this signed-in QBO user in this browser.</p>
+              </div>
+            </div>
+            {savedReceipts.length ? (
+              <div className="user-report-receipt-list">
+                {savedReceipts.map((receipt) => {
+                  const expired = new Date(receipt.expiresAt).getTime() <= Date.now();
+                  return (
+                    <button
+                      type="button"
+                      key={receipt.key}
+                      className="user-report-receipt-row"
+                      onClick={() => openReceipt(receipt)}
+                    >
+                      <span>
+                        <strong>{receipt.key}</strong>
+                        <small>{receipt.title || 'Submitted feedback'}</small>
+                      </span>
+                      <span className={expired ? 'is-expired' : ''}>
+                        {expired ? 'Receipt expired' : 'View status'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="user-report-state">
+                <strong>No saved report receipts yet.</strong>
+                <span>When you send feedback, its private receipt will appear here so you can return, reply, and confirm the outcome.</span>
+                <button type="button" className="user-report-primary" onClick={() => setView('form')}>Send feedback</button>
+              </div>
+            )}
+          </div>
+        ) : view === 'receipt' ? (
+          <div className="user-report-receipt-detail" aria-live="polite">
+            <button type="button" className="user-report-back-link" onClick={() => setView('receipts')}>← Back to my reports</button>
+            {receiptState.state === 'loading' ? (
+              <div className="user-report-state" role="status">Loading the latest report status…</div>
+            ) : receiptState.state === 'expired' ? (
+              <div className="user-report-state is-warning" role="alert">
+                <strong>This private receipt is invalid, expired, revoked, or belongs to another QBO user.</strong>
+                <span>{receiptState.message}</span>
+                {receiptState.requestId ? <small>Request ID: {receiptState.requestId}</small> : null}
+                <button type="button" className="user-report-secondary" onClick={forgetReceipt}>Remove saved receipt</button>
+              </div>
+            ) : receiptState.state === 'error' ? (
+              <div className="user-report-state is-error" role="alert">
+                <strong>The report status could not be loaded.</strong>
+                <span>{receiptState.message}</span>
+                {receiptState.requestId ? <small>Request ID: {receiptState.requestId}</small> : null}
+                <button type="button" className="user-report-secondary" disabled={!online} onClick={() => openReceipt(selectedReceipt)}>Try again</button>
+              </div>
+            ) : receiptState.data ? (
+              <>
+                <section className="user-report-public-status">
+                  <div className="user-report-public-status-heading">
+                    <div>
+                      <span className="user-report-case-key">{receiptState.data.key}</span>
+                      <h3>{receiptState.data.title}</h3>
+                    </div>
+                    <span className={`user-report-status-pill status-${receiptState.data.status}`}>{receiptState.data.statusLabel}</span>
+                  </div>
+                  <p>{receiptState.data.publicSummary}</p>
+                  {receiptState.data.needsReporterReply ? (
+                    <div className="user-report-inline-notice">The team is waiting for more information from you.</div>
+                  ) : null}
+                  <small>Updated {new Date(receiptState.data.updatedAt).toLocaleString()}</small>
+                </section>
+
+                <section className="user-report-public-updates">
+                  <h4>Conversation</h4>
+                  {receiptState.data.updates?.length ? (
+                    <div className="user-report-update-list">
+                      {receiptState.data.updates.map((update) => (
+                        <article key={update.id} className={`is-${update.direction}`}>
+                          <div>
+                            <strong>{update.authorLabel}</strong>
+                            <time dateTime={update.createdAt}>{new Date(update.createdAt).toLocaleString()}</time>
+                          </div>
+                          <p>{update.body}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="user-report-empty-copy">No public updates yet. Internal notes and evidence are never shown here.</p>
+                  )}
+                  <form onSubmit={sendReceiptReply} className="user-report-reply-form">
+                    <label htmlFor="user-report-reply">Add information or ask a question</label>
+                    <textarea
+                      id="user-report-reply"
+                      value={replyDraft.body}
+                      onChange={(event) => setReplyDraft((current) => ({ ...current, body: event.target.value }))}
+                      maxLength={10_000}
+                      disabled={receiptState.state === 'replying' || receiptState.state === 'validating'}
+                    />
+                    <button
+                      type="submit"
+                      className="user-report-primary"
+                      disabled={!online || !replyDraft.body.trim() || receiptState.state === 'replying' || receiptState.state === 'validating'}
+                    >
+                      {receiptState.state === 'replying' ? 'Sending reply…' : 'Send reply'}
+                    </button>
+                  </form>
+                </section>
+
+                {receiptState.data.canValidate ? (
+                  <section className="user-report-validation">
+                    <h4>Did this solve the problem?</h4>
+                    <p>Your answer helps the owner decide the next step. It never closes or reopens the case automatically.</p>
+                    {receiptState.data.reporterValidation?.outcome ? (
+                      <div className="user-report-inline-notice">
+                        Latest answer: <strong>{receiptState.data.reporterValidation.outcome === 'fixed' ? 'Fixed' : 'Not fixed'}</strong>
+                      </div>
+                    ) : null}
+                    <label htmlFor="user-report-validation-note">Optional note</label>
+                    <textarea
+                      id="user-report-validation-note"
+                      value={validationDraft.note}
+                      onChange={(event) => setValidationDraft((current) => ({ ...current, note: event.target.value }))}
+                      maxLength={5000}
+                      disabled={receiptState.state === 'replying' || receiptState.state === 'validating'}
+                    />
+                    <div className="user-report-validation-actions">
+                      <button type="button" className="user-report-secondary" disabled={!online || receiptState.state === 'validating'} onClick={() => sendReceiptValidation('not_fixed')}>Not fixed</button>
+                      <button type="button" className="user-report-primary" disabled={!online || receiptState.state === 'validating'} onClick={() => sendReceiptValidation('fixed')}>Fixed</button>
+                    </div>
+                  </section>
+                ) : null}
+
+                {receiptState.message ? (
+                  <div className="user-report-inline-error" role="alert">
+                    <span>{receiptState.message}</span>
+                    {receiptState.requestId ? <small>Request ID: {receiptState.requestId}</small> : null}
+                  </div>
+                ) : null}
+
+                <div className="user-report-actions">
+                  <button type="button" className="user-report-secondary" onClick={forgetReceipt}>Remove from this browser</button>
+                  <button type="button" className="user-report-secondary" disabled={!online} onClick={() => openReceipt(selectedReceipt)}>Refresh status</button>
+                </div>
+              </>
+            ) : (
+              <div className="user-report-state">Choose a saved report to continue.</div>
+            )}
+          </div>
+        ) : bootstrap.state === 'loading' ? (
           <div className="user-report-state" role="status" aria-live="polite">Checking reporting availability…</div>
         ) : bootstrap.state === 'unavailable' ? (
           <div className="user-report-state is-warning" role="status">
@@ -360,6 +709,9 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
             {!online ? <p className="user-report-replay">You are offline. The screenshot is still in this form.</p> : null}
             <div className="user-report-actions">
               <button type="button" className="user-report-secondary" onClick={onClose} disabled={busy}>Close</button>
+              {submitState.receipt ? (
+                <button type="button" className="user-report-secondary" onClick={() => openReceipt(submitState.receipt)} disabled={busy}>View report status</button>
+              ) : null}
               <button type="button" className="user-report-primary" onClick={() => sendDraft({ retryEvidence: true })} disabled={!online || busy || !screenshot}>
                 {submitState.state === 'retrying' ? 'Retrying screenshot…' : 'Retry screenshot'}
               </button>
@@ -375,6 +727,9 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
             <p className="user-report-next">The team can now review, prioritize, assign, act on, verify, and close it.</p>
             <div className="user-report-actions">
               <button type="button" className="user-report-secondary" onClick={onClose}>Close</button>
+              {submitState.receipt ? (
+                <button type="button" className="user-report-secondary" onClick={() => openReceipt(submitState.receipt)}>View report status</button>
+              ) : null}
               <button type="button" className="user-report-primary" onClick={startAnother}>Send another</button>
             </div>
           </div>

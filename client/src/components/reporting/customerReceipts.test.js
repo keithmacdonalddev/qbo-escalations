@@ -15,7 +15,7 @@ function memoryStorage() {
   };
 }
 
-it('stores only an opaque QBO handle under the anonymous reporter scope', () => {
+it('stores only an opaque QBO handle under the signed-in reporter scope', () => {
   const storage = memoryStorage();
   const saved = saveReceipt('qrv-browser-1', {
     key: 'QBO-71',

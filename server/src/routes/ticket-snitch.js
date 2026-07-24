@@ -20,9 +20,10 @@ const {
   prepareScreenshotEvidence,
 } = require('../services/ticket-snitch-screenshot');
 const { createRateLimiter } = require('../middleware/rate-limit');
+const { requireReportingUser } = require('../middleware/app-auth');
 const {
   deriveReportingKey,
-  ensureReportingVisitor,
+  reportingScopeForUser,
 } = require('../services/reporting-session');
 
 const router = express.Router();
@@ -43,8 +44,10 @@ function receiptHandleKey() {
 
 function sealReceiptToken(receiptToken, userId) {
   if (!/^tsr_[0-9a-f-]{36}\.[A-Za-z0-9_-]{40,64}$/.test(String(receiptToken || ''))) return '';
+  const key = receiptHandleKey();
+  if (!key) return '';
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', receiptHandleKey(), iv);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
   cipher.setAAD(Buffer.from(`qbo-ticket-receipt-v1:${cleanText(userId, 128)}`));
   const encrypted = Buffer.concat([cipher.update(receiptToken, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
@@ -55,9 +58,11 @@ function openReceiptHandle(handle, userId) {
   const match = /^qtr_([A-Za-z0-9_-]{16})\.([A-Za-z0-9_-]{80,220})\.([A-Za-z0-9_-]{22})$/.exec(String(handle || ''));
   if (!match) return '';
   try {
+    const key = receiptHandleKey();
+    if (!key) return '';
     const decipher = crypto.createDecipheriv(
       'aes-256-gcm',
-      receiptHandleKey(),
+      key,
       Buffer.from(match[1], 'base64url'),
     );
     decipher.setAAD(Buffer.from(`qbo-ticket-receipt-v1:${cleanText(userId, 128)}`));
@@ -157,7 +162,7 @@ function isValidReportToken(token, origin, sessionKey, now = Date.now()) {
 }
 
 function requireReportToken(req, res, next) {
-  if (!isValidReportToken(req.headers['x-qbo-report-token'], req.reportOrigin, req.reportingVisitor?.id || '')) {
+  if (!isValidReportToken(req.headers['x-qbo-report-token'], req.reportOrigin, req.authenticatedUser?.sessionKey || '')) {
     return res.status(403).json({
       ok: false,
       code: 'TICKET_SNITCH_REPORT_TOKEN_INVALID',
@@ -191,17 +196,20 @@ function connectorError(res, error, requestId) {
 
 const userReportRateLimit = createRateLimiter({ name: 'ticket-snitch-user-report', limit: 12, includeRequestId: true });
 
-router.get('/reporting/bootstrap', requireReportOrigin, ensureReportingVisitor, (req, res) => {
+router.get('/reporting/bootstrap', requireReportOrigin, requireReportingUser, (req, res) => {
   const connector = getConnectorConfig();
-  const available = connector.configured;
+  const reportingSecurityConfigured = Boolean(receiptHandleKey());
+  const available = connector.configured && reportingSecurityConfigured;
   return res.json({
     ok: true,
     available,
     unavailableReason: available
       ? ''
-      : 'TICKET_SNITCH_NOT_CONFIGURED',
-    reportToken: available ? issueReportToken(req.reportOrigin, req.reportingVisitor.id) : '',
-    reporterScope: req.reportingVisitor.scope,
+      : connector.configured
+        ? 'QBO_REPORTING_SECRET_NOT_CONFIGURED'
+        : 'TICKET_SNITCH_NOT_CONFIGURED',
+    reportToken: available ? issueReportToken(req.reportOrigin, req.authenticatedUser.sessionKey) : '',
+    reporterScope: reportingScopeForUser(req.authenticatedUser.id),
     screenshotAvailable: available && connector.evidenceConfigured,
     dataUseUrl: available ? connector.dataUseUrl : '',
     expiresInSeconds: available ? Math.floor(REPORT_TOKEN_TTL_MS / 1000) : 0,
@@ -209,13 +217,15 @@ router.get('/reporting/bootstrap', requireReportOrigin, ensureReportingVisitor, 
   });
 });
 
-router.post('/reporting/reports', requireReportOrigin, ensureReportingVisitor, userReportRateLimit, requireReportToken, async (req, res) => {
+router.post('/reporting/reports', requireReportOrigin, requireReportingUser, userReportRateLimit, requireReportToken, async (req, res) => {
   const connector = getConnectorConfig();
-  if (!connector.configured) {
+  if (!connector.configured || !receiptHandleKey()) {
     return res.status(503).json({
       ok: false,
-      code: 'TICKET_SNITCH_NOT_CONFIGURED',
-      error: 'Reporting is not connected on this QBO Escalations server.',
+      code: connector.configured ? 'QBO_REPORTING_SECRET_NOT_CONFIGURED' : 'TICKET_SNITCH_NOT_CONFIGURED',
+      error: connector.configured
+        ? 'Private report receipts are not configured on this QBO Escalations server.'
+        : 'Reporting is not connected on this QBO Escalations server.',
       requestId: req.requestId,
     });
   }
@@ -267,9 +277,9 @@ router.post('/reporting/reports', requireReportOrigin, ensureReportingVisitor, u
 
   const suppliedContext = input.context && typeof input.context === 'object' ? input.context : {};
   const reporter = {
-    actorId: req.reportingVisitor.id,
-    displayName: reporterName || (reporterEmail ? 'QBO reporter' : 'Anonymous QBO reporter'),
-    email: reporterEmail,
+    actorId: req.authenticatedUser.id,
+    displayName: reporterName || req.authenticatedUser.displayName,
+    email: reporterEmail || req.authenticatedUser.email,
   };
   const context = {
     pageUrl: safeReportedPageUrl(suppliedContext.pageUrl, req.reportOrigin),
@@ -335,7 +345,7 @@ router.post('/reporting/reports', requireReportOrigin, ensureReportingVisitor, u
         ? {
             handle: sealReceiptToken(
               result.customerReceipt.token,
-              req.reportingVisitor.id,
+              req.authenticatedUser.id,
             ),
             expiresAt: result.customerReceipt.expiresAt,
           }
@@ -357,7 +367,7 @@ const customerFollowUpRateLimit = createRateLimiter({
 
 function privateReceiptToken(req) {
   const handle = cleanText(req.headers['x-qbo-ticket-receipt'], 512);
-  return openReceiptHandle(handle, req.reportingVisitor?.id);
+  return openReceiptHandle(handle, req.authenticatedUser?.id);
 }
 
 function followUpActionId(value) {
@@ -368,7 +378,7 @@ function followUpActionId(value) {
 router.get(
   '/reporting/receipt',
   requireReportOrigin,
-  ensureReportingVisitor,
+  requireReportingUser,
   customerFollowUpRateLimit,
   requireReportToken,
   async (req, res) => {
@@ -393,7 +403,7 @@ router.get(
 router.post(
   '/reporting/receipt/replies',
   requireReportOrigin,
-  ensureReportingVisitor,
+  requireReportingUser,
   customerFollowUpRateLimit,
   requireReportToken,
   async (req, res) => {
@@ -430,7 +440,7 @@ router.post(
 router.post(
   '/reporting/receipt/validation',
   requireReportOrigin,
-  ensureReportingVisitor,
+  requireReportingUser,
   customerFollowUpRateLimit,
   requireReportToken,
   async (req, res) => {

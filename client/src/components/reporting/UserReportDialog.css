@@ -123,7 +123,11 @@
 .user-report-receipts,
 .user-report-receipt-detail {
   display: grid;
+  min-height: 0;
+  flex: 1;
   gap: 16px;
+  align-content: start;
+  overflow-y: auto;
   padding: 20px 24px 24px;
 }
 
@@ -497,15 +501,15 @@
 }
 
 .user-report-type-tagline {
-  color: var(--ink-tertiary);
-  font-size: 9.5px;
+  color: var(--ink-secondary);
+  font-size: 10px;
   font-style: italic;
   font-weight: 450;
   line-height: 1.1;
 }
 
 .user-report-type-label {
-  color: inherit;
+  color: var(--ink);
   font-size: 11.5px;
   font-weight: 680;
   line-height: 1.15;
@@ -891,6 +895,9 @@
 
   .user-report-header,
   .user-report-dialog form { padding-right: 16px; padding-left: 16px; }
+  .user-report-view-tabs { padding-right: 16px; padding-left: 16px; }
+  .user-report-receipts,
+  .user-report-receipt-detail { padding: 16px; }
   .user-report-contact-grid { grid-template-columns: 1fr; }
   .user-report-type { min-height: 56px; padding: 6px; }
   .user-report-actions { flex-direction: column-reverse; }

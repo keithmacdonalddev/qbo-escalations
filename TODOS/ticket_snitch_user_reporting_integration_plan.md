@@ -1,6 +1,6 @@
 # Ticket Snitch user reporting integration plan
 
-Status: code-complete and verified in isolated tests on 2026-07-23; live activation remains human-owned
+Status: implemented, approved local-development activation completed and dogfood-verified on 2026-07-24
 
 Repositories in scope:
 
@@ -11,13 +11,13 @@ All other applications are out of scope.
 
 ## 1. User outcome
 
-A QBO Escalations user can open a short reporting form from the global application header, choose **Problem**, **Feature request**, or **Feedback**, enter a useful title and explanation, optionally approve a small allow-listed diagnostics bundle, and submit without knowing anything about Ticket Snitch.
+A signed-in QBO Escalations user can open a compact reporting form from the global application header, choose **Problem**, **Feature request**, or **Feedback**, enter a useful title and explanation, optionally attach one reviewed screenshot, and submit without knowing anything about Ticket Snitch.
 
-On success, the user sees the Ticket Snitch case key. Ticket Snitch receives a project-scoped work item in the QBO Escalations project and keeps the normal human-controlled workflow for review, priority, ownership, evidence, action, verification, and closure.
+On success, the user sees the Ticket Snitch case key and receives a private receipt under **My reports**. The user can return to public-safe status, reply, and confirm **Fixed** or **Not fixed** while Ticket Snitch keeps the human-controlled workflow for review, priority, ownership, evidence, action, verification, and closure.
 
 ## 2. Current evidence and gap
 
-The two repositories already contain most of the integration foundation:
+The two repositories contain the complete integration foundation:
 
 - QBO Escalations has a dependency-free Ticket Snitch connector in `server/src/services/ticket-snitch-client.js`.
 - QBO Escalations has a protected automation proxy in `server/src/routes/ticket-snitch.js`.
@@ -26,12 +26,15 @@ The two repositories already contain most of the integration foundation:
 - Ticket Snitch already prevents project credentials from declaring confirmed bugs, priority, severity, owner, target date, public summary, or decision outcome.
 - Ticket Snitch already records append-only creation events and audit history inside a transaction.
 
-The first implementation supplied the UI, forwarding, privacy, idempotency, and acceptance coverage. The completion audit found one remaining authority defect:
+The earlier completion audit found that anonymous browser continuity did not satisfy the explicit authenticated-server-context requirement, and a later compact-modal redesign removed the working **My reports** surface. The current implementation corrects both issues:
 
-- QBO Escalations currently has no application login, account session, or authenticated `req.user`. It is a local single-user service bound to loopback by default. Gmail OAuth connections are not QBO application identities and must not be repurposed as one.
-- The implemented report route uses `TICKET_SNITCH_REPORTER_*` environment values directly. Although these values are server-owned, they do not prove which QBO user submitted a report and therefore do not satisfy the explicit authenticated-server-context requirement.
+- an opt-in, first-party QBO password session owns the authenticated user ID/name/email and is the only source of reporter identity;
+- reporting tokens are bound to the exact origin and current QBO session;
+- opaque receipt handles are encrypted for the signed-in user and stored under a per-user, per-project browser scope;
+- **My reports** restores public-safe status, replies, and reporter validation without exposing owner-only notes or authority;
+- disabled authentication preserves unrelated local development behavior but keeps user reporting unavailable rather than inventing identity.
 
-The correction will add an opt-in, first-party QBO password session for identity-bound reporting in the current single-user deployment. When enabled, the server session owns the user ID/name/email and the report route requires that authenticated session. Existing local application workflows remain under their current loopback/deployment boundary; this change does not pretend to retrofit authorization across every unrelated QBO route. When authentication is disabled, existing local development behavior remains available but user reporting must remain unavailable because no authenticated reporter exists. This avoids both a breaking default and a false identity claim.
+The approved local-development runtime gate is complete. Index preparation and controlled restarts passed; live case `QBO-3` proved signed-in submission, screenshot evidence, user-bound My Reports, public reply, waiting/follow-up, inert proposal and owner approval, acknowledged handoff and owner application, both reporter outcomes, and owner-only closure. Browser review found and closed expired-token retry and stale closed-next-action defects. Future environments still require their own approved configuration and runtime proof.
 
 ## 3. Product workflow
 
@@ -43,16 +46,16 @@ The correction will add an opt-in, first-party QBO password session for identity
    - Feature request -> Ticket Snitch `feature_request`
    - Feedback -> Ticket Snitch `improvement`
 5. The user enters a title and explanation.
-6. An optional checkbox explains and controls the approved diagnostics bundle.
+6. The user may explicitly capture or choose one reviewed screenshot; required basic diagnostics are collected from an allow-list without a misleading opt-out.
 7. QBO generates and retains one stable submission ID for this draft. Retrying the same draft reuses that ID.
 8. The browser sends only user content, the stable submission ID, the session-bound anti-forgery token, and allow-listed context fields to the QBO server.
 9. The QBO server verifies the authenticated session, origin, token, availability, rate limits, and input; derives reporter identity from `req.authenticatedUser`; derives project authority from private connector configuration; strips URL query/hash data; then calls the existing Ticket Snitch connector server-to-server.
-10. Ticket Snitch enforces credential scope, validates the versioned contract, deduplicates by idempotency key, creates the case and append-only history transactionally, and returns a safe confirmation.
-11. QBO shows the case key and whether a retry found the already-created case.
+10. Ticket Snitch enforces credential scope, validates the versioned contract, deduplicates by idempotency key, creates the case and append-only history transactionally, and returns a safe confirmation plus private receipt.
+11. QBO shows the case key, saves only the opaque user-bound receipt handle, and exposes public-safe follow-up under **My reports**.
 
 ## 4. Human and agent responsibility
 
-- The reporting user supplies the observation and chooses whether approved diagnostics are included.
+- The reporting user supplies the observation, explicitly chooses any screenshot, replies when asked, and provides outcome validation as evidence.
 - The QBO server owns reporter attribution, Ticket Snitch project mapping, credential custody, safe context filtering, request correlation, and retry identity.
 - The Ticket Snitch credential may create reports only. It does not give the browser or reporting user Ticket Snitch access.
 - A Ticket Snitch human owner confirms whether a problem is a bug and decides priority, severity, ownership, relationships, risky actions, verification, and closure.
@@ -116,7 +119,8 @@ The report and its consent flags become durable Ticket Snitch evidence. Request 
 - Add a focused `UserReportDialog` with:
   - three clear report choices
   - title and explanation labels, limits, and validation
-  - optional diagnostics consent with an exact disclosure
+  - optional reviewed screenshot capture and a low-emphasis data-use disclosure
+  - **My reports** receipt list, public-safe status/conversation, reply, and fixed/not-fixed validation
   - loading, disabled/unconfigured, permission, offline, submitting, success, duplicate replay, validation, timeout/network, and server-error states
   - focus management, Escape/close behavior, keyboard use, live status, and mobile layout
 - Add a discoverable **Send feedback** header control that opens the dialog without adding another main navigation destination.
@@ -166,7 +170,7 @@ The report and its consent flags become durable Ticket Snitch evidence. Request 
 9. Are request IDs present in QBO errors/confirmations and forwarded to Ticket Snitch? **Yes**.
 10. Does optional context require visible user consent? **Yes**.
 11. Are loading, unavailable, permission, validation, offline, submitting, success, replay, server-error, and narrow-screen states implemented? **Yes**, component tests plus build/browser acceptance where safely available.
-12. Can Ticket Snitch owners review and progress the resulting case using the existing lifecycle? **Yes**, isolated API acceptance verifies creation and the existing suite covers lifecycle authority.
+12. Can Ticket Snitch owners review and progress the resulting case using the existing lifecycle? **Yes**, isolated acceptance and live local case `QBO-3` prove the full owner-controlled lifecycle.
 13. Does the report route derive reporter identity from a verified QBO server session rather than environment values at submission time? **Yes**, enforced and tested.
 14. When reporting authentication is enabled, can an unauthenticated browser obtain a reporting token or submit a report? **No**.
 15. Does disabled authentication preserve existing local development while refusing to invent an authenticated reporter? **Yes**.
@@ -191,6 +195,6 @@ The report and its consent flags become durable Ticket Snitch evidence. Request 
 - No public anonymous internet reporting endpoint.
 - No automatic bug confirmation, triage decision, assignment, priority, severity, resolution, or closure.
 - This first-phase exclusion is superseded only for the explicit, user-reviewed screenshot workflow in `C:\Projects\ticket-snitch\04_QBO_SCREENSHOT_EVIDENCE_AND_CASEWORK_IMPLEMENTATION_PLAN.md`. Raw logs, Gmail data, AI transcript capture, and automatic/background screenshot collection remain out of scope.
-- This first-phase operations exclusion was superseded for the explicitly authorized local development activation on 2026-07-23. Production/staging credentials, database operations, deployment, backup, restore, and customer-data actions remain out of scope.
+- This first-phase operations exclusion was superseded for the explicitly authorized local development activation on 2026-07-24. Production/staging credentials, database operations, deployment, backup, restore, and customer-data actions remain out of scope.
 
-The local development checkout is now activated with separate create-only reporting, evidence-only screenshot forwarding, and least-privilege Codex agent credentials stored only in ignored server configuration. The QBO server was restarted and the local project connection, case/evidence flow, owner preview, and both starting cases were verified. Any future environment still requires its own approved password/origin/credential setup and real sign-in plus harmless report/screenshot proof before it can be called live.
+The local development checkout has separate create-only reporting, evidence-only screenshot forwarding, and least-privilege Codex agent credentials stored only in ignored server configuration. The signed-in receipt/accountability activation is complete for this approved local environment, with database preparation, controlled restart, authenticated report/receipt/reply/validation, owner workflow, privacy/isolation checks, and browser evidence recorded. Any future environment requires its own approved password/origin/credential setup and the same runtime proof before it can be called activated.

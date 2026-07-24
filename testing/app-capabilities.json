@@ -358,20 +358,26 @@
         "client/src/components/reporting/UserReportDialog.jsx",
         "client/src/components/reporting/customerReceipts.js",
         "client/src/components/reporting/screenshotCapture.js",
+        "client/src/components/auth/AppAuthDialog.jsx",
+        "client/src/context/AppAuthContext.jsx",
+        "client/src/api/appAuth.js",
         "client/src/api/ticketSnitchReporting.js",
         "server/src/routes/ticket-snitch.js",
+        "server/src/routes/app-auth.js",
+        "server/src/middleware/app-auth.js",
+        "server/src/services/app-auth.js",
         "server/src/services/reporting-session.js",
         "server/src/services/ticket-snitch-client.js",
         "server/src/services/ticket-snitch-screenshot.js"
       ],
       "requiredCheckTypes": ["unit", "component", "server"],
       "evidence": [
-        { "type": "unit", "groupId": "client-components", "paths": ["client/src/api/ticketSnitchReporting.test.js", "client/src/components/reporting/customerReceipts.test.js", "client/src/components/reporting/screenshotCapture.test.js"] },
-        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/reporting/UserReportDialog.test.jsx"] },
-        { "type": "server", "groupId": "server-suite", "paths": ["server/test/reporting-session.test.js", "server/test/ticket-snitch-client.test.js", "server/test/ticket-snitch-screenshot.test.js", "server/test/ticket-snitch-user-reporting.test.js", "server/test/rate-limit.test.js"] }
+        { "type": "unit", "groupId": "client-components", "paths": ["client/src/api/appAuth.test.js", "client/src/api/ticketSnitchReporting.test.js", "client/src/components/reporting/customerReceipts.test.js", "client/src/components/reporting/screenshotCapture.test.js"] },
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/auth/AppAuthDialog.test.jsx", "client/src/components/reporting/UserReportDialog.test.jsx"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/app-auth.test.js", "server/test/reporting-session.test.js", "server/test/request-runtime-privacy.test.js", "server/test/ticket-snitch-client.test.js", "server/test/ticket-snitch-screenshot.test.js", "server/test/ticket-snitch-user-reporting.test.js", "server/test/rate-limit.test.js"] }
       ],
-      "knownGaps": ["The sibling Ticket Snitch repository owns isolated real-HTTP QBO-sign-in-to-case and Chromium production-build acceptance checks; QBO Escalations' app-check profiles do not invoke those cross-repository checks. The original local intake/screenshot runtime was verified on 2026-07-23. Customer receipts and accountability remain runtime-pending until the approved Ticket Snitch index preparation, service restart, and authenticated receipt/reply/validation proof are completed for that environment."],
-      "lastHumanReviewDate": "2026-07-23"
+      "knownGaps": ["The sibling Ticket Snitch repository owns the isolated real-HTTP QBO-sign-in-to-case and 390x844 Chromium production-build acceptance checks; QBO Escalations' app-check profiles intentionally do not invoke those cross-repository checks. The approved local-development environment completed index preparation, controlled restarts, signed-in receipt/reply/validation, owner workflow, privacy/isolation, and browser proof on 2026-07-24; future environments require their own activation evidence."],
+      "lastHumanReviewDate": "2026-07-24"
     },
     {
       "id": "workspace-primary-operations-agent",
