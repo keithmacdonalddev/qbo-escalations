@@ -24,6 +24,7 @@ const { stopPruning: stopWorkspacePruning } = require('./services/workspace-runt
 const { stopPruning: stopAgentSessionPruning } = require('./services/agent-session-runtime');
 const { stopChainCleanup: stopUsageChainCleanup } = require('./lib/usage-writer');
 const { resolveStartupControls } = require('./lib/startup-controls');
+const { formatProviderAvailabilitySummary } = require('./lib/startup-console');
 const {
   startAgentHealthMonitor,
   stopAgentHealthMonitor,
@@ -299,8 +300,12 @@ async function start(options = {}) {
 
           if (startupControls.imageParserStartupCheck) {
             checkProviderAvailability({ forceRefresh: true }).then((providers) => {
-              const lines = Object.entries(providers).map(([name, info]) => formatImageParserProviderLogLine(name, info));
-              console.log(`[image-parser] Provider availability:\n${lines.join('\n')}`);
+              if (process.env.QBO_DEV_VERBOSE === '1') {
+                const lines = Object.entries(providers).map(([name, info]) => formatImageParserProviderLogLine(name, info));
+                console.log(`[image-parser] Provider availability:\n${lines.join('\n')}`);
+              } else {
+                console.log(formatProviderAvailabilitySummary(providers).join('\n'));
+              }
             }).catch((err) => {
               console.warn('[image-parser] Startup self-check failed:', err.message);
             });

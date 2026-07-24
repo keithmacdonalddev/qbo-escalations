@@ -38,6 +38,15 @@
       "why": "Proves passed, failed, and incomplete cannot be confused.",
       "capabilities": ["evidence-completeness"]
     },
+    "dev-startup": {
+      "label": "Friendly development startup contracts",
+      "command": "node",
+      "args": ["--test", "scripts/dev-launcher.test.js", "server/test/startup-console.test.js"],
+      "cwd": ".",
+      "timeoutMs": 30000,
+      "why": "Checks startup messaging, port safety, readiness ordering, Windows process handling, provider summaries, and timeout cleanup without controlling persistent services.",
+      "capabilities": ["development-startup-safety"]
+    },
     "client-build": {
       "label": "Production client build and bundle canary",
       "command": "npm",
@@ -90,8 +99,8 @@
     }
   },
   "profiles": {
-    "core": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "testing-map"],
-    "focused-qbo": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "qbo-stress-slices", "testing-map"],
-    "full": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "client-build", "all-stress-slices", "testing-map"]
+    "core": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "dev-startup", "testing-map"],
+    "focused-qbo": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "dev-startup", "qbo-stress-slices", "testing-map"],
+    "full": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "dev-startup", "client-build", "all-stress-slices", "testing-map"]
   }
 }

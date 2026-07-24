@@ -8,6 +8,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 
 const { extractClaudeUsage } = require('../../lib/usage-extractor');
+const { probeCliVersion } = require('../../lib/cli-version-probe');
 const {
   isProviderCallPackageCaptureEnabled,
   recordCliProviderCallPackageInBackground,
@@ -688,79 +689,12 @@ async function sendClaudeCliPrompt({
   });
 }
 
-function checkClaudeCliAvailability(model = '') {
-  return new Promise((resolve) => {
-    let settled = false;
-    let output = '';
-    let errorOutput = '';
-
-    function finish(payload) {
-      if (settled) return;
-      settled = true;
-      resolve(payload);
-    }
-
-    let child;
-    try {
-      child = spawn('claude', ['--version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
-        ...buildClaudeSpawnOptions(),
-      });
-    } catch (err) {
-      finish({
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: err.message || 'Claude CLI unavailable',
-        model,
-      });
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      finish({
-        available: false,
-        code: 'TIMEOUT',
-        reason: 'Claude CLI availability check timed out',
-        model,
-      });
-    }, 3000);
-
-    child.stdout.on('data', (chunk) => {
-      if (output.length < 1000) output += chunk.toString();
-    });
-    child.stderr.on('data', (chunk) => {
-      if (errorOutput.length < 1000) errorOutput += chunk.toString();
-    });
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      finish({
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: err.message || 'Claude CLI unavailable',
-        model,
-      });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        finish({
-          available: true,
-          code: 'OK',
-          reason: output.trim().split(/\r?\n/)[0] || 'Claude CLI ready',
-          model,
-        });
-        return;
-      }
-      finish({
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: (errorOutput || output || `Claude CLI exited with code ${code}`).trim().slice(0, 240),
-        model,
-      });
-    });
+async function checkClaudeCliAvailability(model = '') {
+  const result = await probeCliVersion('claude', {
+    ...buildClaudeSpawnOptions(),
+    timeoutMs: 3000,
   });
+  return { ...result, model };
 }
 
 module.exports = {

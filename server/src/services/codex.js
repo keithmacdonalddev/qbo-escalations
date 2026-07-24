@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const mongoose = require('mongoose');
 const { extractCodexUsage } = require('../lib/usage-extractor');
+const { probeCliVersion } = require('../lib/cli-version-probe');
 const {
   isStubbed: isProvidersStubbed,
   getProviderStub,
@@ -656,40 +657,12 @@ async function warmUp() {
     if (stub) return stub();
     return;
   }
-  return new Promise((resolve) => {
-    const child = spawn('codex', [
-      'exec',
-      '--json',
-      '--model', DEFAULT_MODEL,
-      ...codexConfigArgs({ reasoningEffort: DEFAULT_REASONING_EFFORT }),
-      '--skip-git-repo-check',
-      '-',
-    ], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true,               // required on Windows where codex may be a .cmd shim
-      env: { ...process.env, CLAUDECODE: undefined },
-    });
-    child.stdin.write('Reply with exactly: ok');
-    child.stdin.end();
-
-    const timeout = setTimeout(() => {
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      console.log('Codex CLI warm-up timed out (30s) -- continuing anyway');
-      resolve();
-    }, 30000);
-
-    child.on('close', () => {
-      clearTimeout(timeout);
-      console.log('Codex CLI warm-up complete');
-      resolve();
-    });
-
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      console.warn('Codex CLI warm-up failed:', err.message);
-      resolve();
-    });
-  });
+  const result = await probeCliVersion('codex', { timeoutMs: 5000 });
+  if (result.available) {
+    console.log(`Codex CLI ready (${result.reason})`);
+  } else {
+    console.warn(`Codex CLI availability check failed: ${result.reason}`);
+  }
 }
 
 /**

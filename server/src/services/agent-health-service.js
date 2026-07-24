@@ -1,7 +1,7 @@
 'use strict';
 
-const { spawn } = require('child_process');
 const { DEFAULT_PROFILES } = require('./room-agents/agent-profiles');
+const { probeCliVersion } = require('../lib/cli-version-probe');
 const {
   listAgentHealthIdentitySnapshots,
   listAgentRuntimeDefaults,
@@ -280,63 +280,14 @@ function sharpenProviderDiagnostic({
 }
 
 function checkCli(command, args = ['--version'], timeoutMs = 3000) {
-  return new Promise((resolve) => {
-    let settled = false;
-    let output = '';
-    let errorOutput = '';
-
-    function finish(payload) {
-      if (settled) return;
-      settled = true;
-      resolve(payload);
-    }
-
-    const child = spawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: true,
-      env: { ...process.env, CLAUDECODE: undefined },
+  if (args.length !== 1 || args[0] !== '--version') {
+    return Promise.resolve({
+      available: false,
+      code: 'CLI_UNAVAILABLE',
+      reason: `${command} health checks only permit --version`,
     });
-
-    const timeout = setTimeout(() => {
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      finish({
-        available: false,
-        code: 'TIMEOUT',
-        reason: `${command} availability check timed out`,
-      });
-    }, timeoutMs);
-
-    child.stdout.on('data', (chunk) => {
-      if (output.length < 1000) output += chunk.toString();
-    });
-    child.stderr.on('data', (chunk) => {
-      if (errorOutput.length < 1000) errorOutput += chunk.toString();
-    });
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      finish({
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: err.message || `${command} unavailable`,
-      });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        finish({
-          available: true,
-          code: 'OK',
-          reason: output.trim().split(/\r?\n/)[0] || `${command} ready`,
-        });
-        return;
-      }
-      finish({
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: (errorOutput || output || `${command} exited with code ${code}`).trim().slice(0, 240),
-      });
-    });
-  });
+  }
+  return probeCliVersion(command, { timeoutMs });
 }
 
 async function checkRuntimeProvider(runtime, availabilityByProvider, trace = null) {

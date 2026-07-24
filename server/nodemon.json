@@ -1,6 +1,14 @@
 {
+  "watch": [
+    "src",
+    ".env"
+  ],
+  "ext": "js,mjs,cjs,json,env",
   "ignore": [
     "data/**",
-    "uploads/**"
-  ]
+    "uploads/**",
+    "test/**",
+    "scripts/**"
+  ],
+  "delay": "400"
 }

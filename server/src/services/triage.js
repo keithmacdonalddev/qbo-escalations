@@ -4,10 +4,10 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const path = require('path');
-const { spawn } = require('child_process');
 const ProviderCallPackage = require('../models/ProviderCallPackage');
 const TriageResult = require('../models/TriageResult');
 const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
+const { probeCliVersion } = require('../lib/cli-version-probe');
 const { parseEscalationText } = require('../lib/escalation-parser');
 const {
   buildCategoryPlausibilityIssue,
@@ -88,84 +88,13 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function checkCodexCliAvailability(model = '') {
-  return new Promise((resolve) => {
-    let settled = false;
-    let output = '';
-    let errorOutput = '';
-
-    function finish(payload) {
-      if (settled) return;
-      settled = true;
-      resolve(payload);
-    }
-
-    let child;
-    try {
-      child = spawn('codex', ['--version'], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        shell: true,
-        env: { ...process.env, CLAUDECODE: undefined },
-      });
-    } catch (err) {
-      finish({
-        ok: false,
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: err.message || 'Codex CLI unavailable',
-        model,
-      });
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      try { child.kill('SIGTERM'); } catch { /* ignore */ }
-      finish({
-        ok: false,
-        available: false,
-        code: 'TIMEOUT',
-        reason: 'Codex CLI availability check timed out',
-        model,
-      });
-    }, 3000);
-
-    child.stdout.on('data', (chunk) => {
-      if (output.length < 1000) output += chunk.toString();
-    });
-    child.stderr.on('data', (chunk) => {
-      if (errorOutput.length < 1000) errorOutput += chunk.toString();
-    });
-    child.on('error', (err) => {
-      clearTimeout(timeout);
-      finish({
-        ok: false,
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: err.message || 'Codex CLI unavailable',
-        model,
-      });
-    });
-    child.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        finish({
-          ok: true,
-          available: true,
-          code: 'OK',
-          reason: output.trim().split(/\r?\n/)[0] || 'Codex CLI ready',
-          model,
-        });
-        return;
-      }
-      finish({
-        ok: false,
-        available: false,
-        code: 'CLI_UNAVAILABLE',
-        reason: (errorOutput || output || `Codex CLI exited with code ${code}`).trim().slice(0, 240),
-        model,
-      });
-    });
-  });
+async function checkCodexCliAvailability(model = '') {
+  const result = await probeCliVersion('codex', { timeoutMs: 3000 });
+  return {
+    ...result,
+    ok: result.available,
+    model,
+  };
 }
 
 function abortError(message = 'Triage request cancelled') {

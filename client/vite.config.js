@@ -2,7 +2,13 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import devAgentBridge from './vite-plugin-dev-agent-bridge.js';
 
-const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:4000';
+const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://127.0.0.1:4000';
+const devPortText = String(process.env.VITE_DEV_PORT || '5174').trim();
+const devPort = /^\d+$/.test(devPortText) ? Number.parseInt(devPortText, 10) : Number.NaN;
+
+if (!Number.isInteger(devPort) || devPort < 1 || devPort > 65535) {
+  throw new Error(`VITE_DEV_PORT must be a number from 1 to 65535; received ${process.env.VITE_DEV_PORT || '(empty)'}.`);
+}
 
 export default defineConfig({
   plugins: [react(), devAgentBridge()],
@@ -19,7 +25,8 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5174,
+    port: devPort,
+    strictPort: true,
     proxy: {
       '/api': {
         target: proxyTarget,

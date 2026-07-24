@@ -347,3 +347,10 @@ Model: Codex GPT-5
 Is duplicate?: no
 Complexity: high
 Special Feature: Agent Profile Authority Seal - Give every high-autonomy agent a signed, versioned operational contract that binds its enabled state, effective model, tool catalog, action permissions, memory sources, background jobs, and harness version. Refuse live runs and show a profile-drift warning when deployed code or configuration no longer matches the reviewed seal. This is distinct from Agent Action Permissions because it detects cross-layer drift between the profile UI, prompt, runtime, and server enforcement.
+
+Date: 2026-07-23
+Time: 21:10 ADT
+Model: Codex GPT-5.6 Sol (xhigh)
+Is duplicate?: no
+Complexity: high
+Special Feature: Proactive Agent Run Assurance - Define an expected heartbeat and completion window for every background agent, such as email monitoring, calendar monitoring, daily briefings, and knowledge review, then create durable evidence when a run is missed, late, duplicated, or overlapping. Show the operator whether proactive work is actually continuing—not merely whether a scheduler printed “started”—with safe recovery guidance and an acknowledgement trail; this is distinct from Workflow Readiness Gate because it governs recurring automation after startup rather than readiness before one workflow.

@@ -1,12 +1,14 @@
 # Observability Review
 
-Static review of `C:\Projects\qbo-escalations` completed 2026-07-09 and refreshed for AI Management and Connected Accounts on 2026-07-21. The evidence collector ran again in read-only mode on 2026-07-22 UTC. No application server, client server, gateway, model server, database process, or other long-running service was started or changed.
+Static review of `C:\Projects\qbo-escalations` completed 2026-07-09 and refreshed for AI Management and Connected Accounts on 2026-07-21. The evidence collector ran again in read-only mode on 2026-07-23 UTC while the development-startup experience was reviewed. No application server, client server, gateway, model server, database process, or other long-running service was started or changed by that review.
 
 ## 1. Plain-English summary
 
 The app can already prove a useful amount about chat and image-parser work. It stores AI traces with a request ID, provider and model, success or failure, fallback attempts, timing, image metadata, validation results, and usage/cost fields when the provider supplies them. It also stores provider-call evidence, usage records, image-parse history, and provider-health history. The user can see much of this through Usage > AI Traces, Sessions, Image Parser history, the request waterfall, workflow log panels, and health banners.
 
 The 2026-07-21 settings update adds a smaller but important evidence path. AI Management now saves the automatic-check schedule, last/next check times, provider-connection results, genuinely-new model alerts, overdue official-review alerts, and whether each alert was reviewed. Connected Accounts now saves the last successful Gmail and Calendar API access for each Google account and translates the granted Google permissions into plain-English status. These records survive a terminal close, but they are operational state—not a complete actor-aware Audit Trail.
+
+The 2026-07-23 development launcher makes the current startup easier to understand. It checks required ports before starting, waits for the API before starting Vite, translates expected restarts into one plain-English message, and stops only the process trees it started. This prevents common duplicate-process and startup-order confusion, but the output is still temporary: it does not save a durable incident record or historical process-owner snapshot.
 
 The app cannot yet prove, in one reliable place:
 
@@ -25,6 +27,7 @@ The most important next fix is to make the existing evidence joinable and durabl
 | Area                            | Current evidence                                                                                                                                                    | Where found                                                                                                                   | Durable or temporary                                                                                               | What it proves                                                                 |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
 | Server startup and route errors | Many `console.log`, `console.warn`, and `console.error` calls; Express error handler reports errors to the server error pipeline                                    | `server/src/index.js`, `server/src/app.js`, route/service files                                                               | Mostly temporary terminal output                                                                                   | What a running process printed, plus the current in-memory server error buffer |
+| Development startup             | Friendly port preflight, API-before-client readiness, concise restart/proxy explanations, and launcher-owned process-tree cleanup                                  | `scripts/dev-launcher.js`, `server/nodemon.json`, `client/vite.config.js`                                                      | Temporary terminal output                                                                                          | Why the current development run started, reused an existing stack, stopped safely, or refused to start             |
 | Request tracking                | Every Express request receives or generates `req.requestId`; the response includes `X-Request-ID`                                                                   | `server/src/middleware/request-id.js:4-13`, `server/src/app.js:32-35`                                                         | Request ID itself is durable only when copied into another record                                                  | A server-side label for following a request                                    |
 | AI chat and parse traces        | Mongo-backed `AiTrace` records include request ID, route, status, prompt preview, providers/models, attempts, fallbacks, timings, usage, outcomes, and stage events | `server/src/models/AiTrace.js:134-169`, `server/src/services/ai-traces.js:216-247`, `server/src/routes/traces.js`             | Durable MongoDB records                                                                                            | What the app believes happened during chat and parse operations                |
 | Provider-call evidence          | Provider-specific request/response, CLI stdout/stderr/events, errors, timing, gateway request ID, and redaction metadata can be captured                            | `server/src/models/ProviderCallPackage.js:462-507`, `server/src/services/provider-call-package-recorder.js:1201-1240`         | Durable MongoDB plus possible files under `server/data/provider-call-packages`; default Mongo retention is 30 days | Detailed forensic evidence for captured provider calls                         |
@@ -39,6 +42,7 @@ The most important next fix is to make the existing evidence joinable and durabl
 ## 3. What logs are only temporary terminal output
 
 - Most server diagnostics are direct console output. This includes Gmail OAuth errors, provider warm-up messages, scheduler messages, CLI availability messages, route-specific failures, and many service errors.
+- The friendly development-launcher summary is also terminal-only. Its current port/readiness decisions disappear when the terminal closes.
 - `server/src/lib/server-error-pipeline.js` keeps only the latest 50 server errors in memory and broadcasts them to subscribers. It is not a durable error store.
 - `client/src/lib/devTelemetry.js` keeps only the latest 50 browser breadcrumbs in memory.
 - `client/src/hooks/useErrorCapture.js` can collect browser errors and unhandled promise rejections, but the current repository search found no component mounting the hook. There is therefore no confirmed active path from browser error capture to storage or a server endpoint.
@@ -114,6 +118,8 @@ The client already shows request health in the top health banner, agent health i
 Settings > AI Management now adds an operator-run “Test all connections” check with per-provider results, a saved failure alert, and a global badge on the Settings button until the alert is reviewed. Settings > Connected Accounts shows the last successful Gmail and Calendar access and warns when a required Google permission is missing.
 
 These checks prove current or recently recorded health. They do not provide a complete historical snapshot of all processes on the machine, such as whether a separate gateway or LM Studio process was running, which process owned a port, or whether an orphan process was safe to preserve.
+
+For local development, `npm run dev` now performs a preflight check and waits for `/api/health` before starting the client. This reduces false alarms and duplicate starts; it does not replace the broader saved runtime snapshot described below.
 
 ## 8. What client-side errors are captured
 
@@ -201,7 +207,7 @@ Recommended missing or incomplete paths:
 3. **P0 — Persist and display errors.** Turn the current server ring buffer and client capture plan into a durable, client-visible Diagnostics/Logs path. Wire the existing client capture hook before adding more client logging.
 4. **P1 — Make prompt/response capture explicit.** Record capture enabled/skipped/expired/redacted status and prompt/version hashes for every AI attempt. Decide deliberately which full payloads may be retained.
 5. **P1 — Finish provider-package storage cleanup.** Remove externalized payloads according to the same retention policy as their Mongo record, with dry-run and failure reporting.
-6. **P1 — Add the runtime-doctor workflow.** Keep the app’s health endpoints focused on app health; use a read-only diagnostic skill to inspect the multi-process local layout and preserve healthy instances by default.
+6. **P1 — Extend startup checks into the runtime-doctor workflow.** Keep the app’s health endpoints focused on app health; build on the friendly launcher with a read-only diagnostic skill that can inspect and save the multi-process local layout while preserving healthy instances by default.
 7. **P2 — Improve visual QA of diagnostic surfaces.** Verify that traces, errors, runtime state, and audit information are understandable and useful in the UI, rather than merely exposing raw JSON.
 
 ## 15. Verification checklist
