@@ -15,24 +15,24 @@ import './UserReportDialog.css';
 const REPORT_CHOICES = [
   {
     value: 'problem',
-    tagline: 'Something isn’t working',
-    label: 'Report a problem',
+    tagline: 'Found a bug?',
+    label: 'Report a Problem',
     titlePlaceholder: 'Example: Escalation notes do not save',
     explanationLabel: 'What happened?',
     explanationPlaceholder: 'Describe what happened, what you expected, and any steps that help us reproduce it.',
   },
   {
     value: 'feature',
-    tagline: 'There’s something you need',
-    label: 'Request a feature',
+    tagline: 'Have an idea?',
+    label: 'Request a Feature',
     titlePlaceholder: 'Example: Add a faster review shortcut',
     explanationLabel: 'What would help?',
     explanationPlaceholder: 'Describe the capability you need and why it would make the app more useful.',
   },
   {
     value: 'feedback',
-    tagline: 'Tell us what could be better',
-    label: 'Share feedback',
+    tagline: 'Want to chat?',
+    label: 'Submit Feedback',
     titlePlaceholder: 'Example: Make filters easier to scan',
     explanationLabel: 'What should we improve?',
     explanationPlaceholder: 'Share your observation and what would make the experience better.',
@@ -63,6 +63,32 @@ function ReportChoiceIcon({ kind }) {
       <path d="M20 14a4 4 0 0 1-4 4H9l-5 3v-7a8 8 0 1 1 16 0Z" />
       <path d="M8.5 11.5h7" />
       <path d="M8.5 14.5h4.5" />
+    </svg>
+  );
+}
+
+function ReportUtilityIcon({ kind }) {
+  if (kind === 'screenshot') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m7 15 3-3 2.5 2.5 2-2L19 17" />
+        <circle cx="16.5" cy="9" r="1.25" />
+      </svg>
+    );
+  }
+  if (kind === 'contact') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5Z" />
+        <path d="m5 7 7 5 7-5" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3 5 6v5c0 4.6 2.8 8.4 7 10 4.2-1.6 7-5.4 7-10V6Z" />
+      <path d="m9.5 12 1.7 1.7 3.6-3.7" />
     </svg>
   );
 }
@@ -146,7 +172,11 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
 
 
   useEffect(() => {
-    if (open && bootstrap.state === 'ready') titleRef.current?.focus();
+    if (open && bootstrap.state === 'ready' && titleRef.current) {
+      titleRef.current.focus({ preventScroll: true });
+      const details = dialogRef.current?.querySelector('.user-report-form-details');
+      if (details) details.scrollTop = 0;
+    }
   }, [bootstrap.state, open]);
 
   useEffect(() => {
@@ -208,7 +238,11 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
 
   const chooseReportKind = (kind) => {
     updateDraft('kind', kind);
-    requestAnimationFrame(() => titleRef.current?.focus());
+    requestAnimationFrame(() => {
+      titleRef.current?.focus({ preventScroll: true });
+      const details = dialogRef.current?.querySelector('.user-report-form-details');
+      if (details) details.scrollTop = 0;
+    });
   };
 
   const chooseScreenshot = (file) => {
@@ -433,127 +467,156 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
 
             {selectedChoice ? (
               <div className="user-report-form-details" key={selectedChoice.value}>
-            <div className="user-report-field">
-              <div className="user-report-field-heading">
-                <label htmlFor="user-report-summary">Short title</label>
-                <small id="user-report-summary-help">Make it easy to recognize in a work queue.</small>
-              </div>
-              <input
-                ref={titleRef}
-                id="user-report-summary"
-                value={draft.title}
-                onChange={(event) => updateDraft('title', event.target.value)}
-                maxLength={240}
-                aria-invalid={Boolean(errors.title)}
-                aria-describedby={errors.title ? 'user-report-summary-error' : 'user-report-summary-help'}
-                placeholder={selectedChoice.titlePlaceholder}
-              />
-              {errors.title ? <span id="user-report-summary-error" className="user-report-field-error" role="alert">{errors.title}</span> : null}
-            </div>
+                <section className="user-report-writing" aria-labelledby="user-report-writing-title">
+                  <div className="user-report-writing-heading">
+                    <div>
+                      <h3 id="user-report-writing-title">Share the details</h3>
+                      <p>A clear title and a little context help us act faster.</p>
+                    </div>
+                    <span className="user-report-required-key">Required</span>
+                  </div>
 
-            <div className="user-report-field">
-              <div className="user-report-field-heading">
-                <label htmlFor="user-report-explanation">{selectedChoice.explanationLabel}</label>
-                <small id="user-report-explanation-help">Do not include passwords, payment information, access tokens, or customer secrets.</small>
-              </div>
-              <textarea
-                id="user-report-explanation"
-                value={draft.explanation}
-                onChange={(event) => updateDraft('explanation', event.target.value)}
-                rows={6}
-                maxLength={40_000}
-                aria-invalid={Boolean(errors.explanation)}
-                aria-describedby={errors.explanation ? 'user-report-explanation-error' : 'user-report-explanation-help'}
-                placeholder={selectedChoice.explanationPlaceholder}
-              />
-              {errors.explanation ? <span id="user-report-explanation-error" className="user-report-field-error" role="alert">{errors.explanation}</span> : null}
-            </div>
+                  <div className="user-report-field">
+                    <div className="user-report-field-heading">
+                      <label htmlFor="user-report-summary">Short title</label>
+                      <span className="user-report-character-count" aria-hidden="true">{draft.title.length}/240</span>
+                    </div>
+                    <small id="user-report-summary-help" className="user-report-field-help">Make it easy to recognize in a work queue.</small>
+                    <input
+                      ref={titleRef}
+                      id="user-report-summary"
+                      required
+                      value={draft.title}
+                      onChange={(event) => updateDraft('title', event.target.value)}
+                      maxLength={240}
+                      aria-invalid={Boolean(errors.title)}
+                      aria-describedby={errors.title ? 'user-report-summary-error' : 'user-report-summary-help'}
+                      placeholder={selectedChoice.titlePlaceholder}
+                    />
+                    {errors.title ? <span id="user-report-summary-error" className="user-report-field-error" role="alert">{errors.title}</span> : null}
+                  </div>
 
-            <section
-              className="user-report-screenshot"
-              aria-labelledby="user-report-screenshot-title"
-            >
-              <div className="user-report-screenshot-heading">
-                <h3 id="user-report-screenshot-title">Add a screenshot <small>Optional</small></h3>
-                <p>A screenshot helps us understand your report and respond more effectively.</p>
-              </div>
-              {bootstrap.screenshotAvailable ? (
-                <>
-                  <input
-                    ref={screenshotInputRef}
-                    className="user-report-file-input"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp"
-                    aria-label="Add screenshot image"
-                    onChange={(event) => chooseScreenshot(event.target.files?.[0])}
-                  />
-                  {screenshot ? (
-                    <div className="user-report-screenshot-preview">
-                      {screenshotPreview ? <img src={screenshotPreview} alt="Screenshot preview for this report" /> : null}
+                  <div className="user-report-field">
+                    <div className="user-report-field-heading">
+                      <label htmlFor="user-report-explanation">{selectedChoice.explanationLabel}</label>
+                      <span className="user-report-character-count" aria-hidden="true">{draft.explanation.length.toLocaleString()}/40,000</span>
+                    </div>
+                    <textarea
+                      id="user-report-explanation"
+                      required
+                      value={draft.explanation}
+                      onChange={(event) => updateDraft('explanation', event.target.value)}
+                      rows={6}
+                      maxLength={40_000}
+                      aria-invalid={Boolean(errors.explanation)}
+                      aria-describedby={errors.explanation ? 'user-report-explanation-error' : 'user-report-privacy-note'}
+                      placeholder={selectedChoice.explanationPlaceholder}
+                    />
+                    {errors.explanation ? <span id="user-report-explanation-error" className="user-report-field-error" role="alert">{errors.explanation}</span> : null}
+                  </div>
+
+                  <div id="user-report-privacy-note" className="user-report-privacy-note">
+                    <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="privacy" /></span>
+                    <span>Leave out passwords, payment information, access tokens, and customer secrets.</span>
+                  </div>
+                </section>
+
+                <div className="user-report-support-grid">
+                  <section className="user-report-screenshot" aria-labelledby="user-report-screenshot-title">
+                    <div className="user-report-support-heading">
+                      <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="screenshot" /></span>
                       <div>
-                        <strong>{screenshot.name}</strong>
-                        <small>{fileSizeLabel(screenshot.size)} · {screenshot.type}</small>
-                      </div>
-                      <div className="user-report-screenshot-actions">
-                        {screenCaptureSupported() ? <button type="button" className="user-report-secondary" onClick={handleCapture} disabled={busy}>Retake</button> : null}
-                        <button type="button" className="user-report-secondary" onClick={() => screenshotInputRef.current?.click()} disabled={busy}>Replace</button>
-                        <button type="button" className="user-report-secondary is-danger" onClick={() => {
-                          setScreenshot(null);
-                          setCaptureState({ state: 'notice', message: 'Screenshot removed from this report.' });
-                        }} disabled={busy}>Remove</button>
+                        <h3 id="user-report-screenshot-title">Add a screenshot <small>Optional</small></h3>
+                        <p>Show us exactly what you see.</p>
                       </div>
                     </div>
-                  ) : (
-                    <div className="user-report-screenshot-empty">
-                      {screenCaptureSupported() ? (
-                        <button type="button" className="user-report-secondary" onClick={handleCapture} disabled={busy}>Capture screenshot</button>
-                      ) : null}
-                      <button type="button" className="user-report-secondary" onClick={() => screenshotInputRef.current?.click()} disabled={busy}>Choose image</button>
-                    </div>
-                  )}
-                  {captureState.message ? (
-                    <div className={`user-report-screenshot-message is-${captureState.state}`} role={captureState.state === 'error' ? 'alert' : 'status'} aria-live="polite">
-                      {captureState.message}
-                    </div>
-                  ) : null}
-                </>
-              ) : (
-                <p className="user-report-screenshot-unavailable" role="status">Screenshot attachments are not connected on this server yet. You can still send the text report.</p>
-              )}
-            </section>
+                    {bootstrap.screenshotAvailable ? (
+                      <>
+                        <input
+                          ref={screenshotInputRef}
+                          className="user-report-file-input"
+                          type="file"
+                          accept="image/png,image/jpeg,image/webp"
+                          aria-label="Add screenshot image"
+                          onChange={(event) => chooseScreenshot(event.target.files?.[0])}
+                        />
+                        {screenshot ? (
+                          <div className="user-report-screenshot-preview">
+                            {screenshotPreview ? <img src={screenshotPreview} alt="Screenshot preview for this report" /> : null}
+                            <div>
+                              <strong>{screenshot.name}</strong>
+                              <small>{fileSizeLabel(screenshot.size)} · {screenshot.type}</small>
+                            </div>
+                            <div className="user-report-screenshot-actions">
+                              {screenCaptureSupported() ? <button type="button" className="user-report-secondary" onClick={handleCapture} disabled={busy}>Retake</button> : null}
+                              <button type="button" className="user-report-secondary" onClick={() => screenshotInputRef.current?.click()} disabled={busy}>Replace</button>
+                              <button type="button" className="user-report-secondary is-danger" onClick={() => {
+                                setScreenshot(null);
+                                setCaptureState({ state: 'notice', message: 'Screenshot removed from this report.' });
+                              }} disabled={busy}>Remove</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="user-report-screenshot-empty">
+                            {screenCaptureSupported() ? (
+                              <button type="button" className="user-report-secondary is-emphasized" onClick={handleCapture} disabled={busy}>Capture screenshot</button>
+                            ) : null}
+                            <button type="button" className="user-report-secondary" onClick={() => screenshotInputRef.current?.click()} disabled={busy}>Choose image</button>
+                          </div>
+                        )}
+                        {captureState.message ? (
+                          <div className={`user-report-screenshot-message is-${captureState.state}`} role={captureState.state === 'error' ? 'alert' : 'status'} aria-live="polite">
+                            {captureState.message}
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <p className="user-report-screenshot-unavailable" role="status">Screenshot attachments are not connected on this server yet. You can still send the text report.</p>
+                    )}
+                  </section>
 
-            <section className="user-report-contact" aria-label="Optional contact details">
-              <div className="user-report-contact-grid">
-                <div className="user-report-field">
-                  <label htmlFor="user-report-name">Name <small>Optional</small></label>
-                  <input
-                    id="user-report-name"
-                    autoComplete="name"
-                    value={draft.reporterName}
-                    onChange={(event) => updateDraft('reporterName', event.target.value)}
-                    maxLength={120}
-                    aria-invalid={Boolean(errors.reporterName)}
-                    aria-describedby={errors.reporterName ? 'user-report-name-error' : undefined}
-                  />
-                  {errors.reporterName ? <span id="user-report-name-error" className="user-report-field-error" role="alert">{errors.reporterName}</span> : null}
+                  <section className="user-report-contact" aria-label="Optional contact details">
+                    <div className="user-report-support-heading">
+                      <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="contact" /></span>
+                      <div>
+                        <h3>Want a reply? <small>Optional</small></h3>
+                        <p>Leave your details so we can follow up.</p>
+                      </div>
+                    </div>
+                    <div className="user-report-contact-grid">
+                      <div className="user-report-field">
+                        <label htmlFor="user-report-name">Name</label>
+                        <input
+                          id="user-report-name"
+                          autoComplete="name"
+                          value={draft.reporterName}
+                          onChange={(event) => updateDraft('reporterName', event.target.value)}
+                          maxLength={120}
+                          aria-invalid={Boolean(errors.reporterName)}
+                          aria-describedby={errors.reporterName ? 'user-report-name-error' : undefined}
+                          placeholder="Your name"
+                        />
+                        {errors.reporterName ? <span id="user-report-name-error" className="user-report-field-error" role="alert">{errors.reporterName}</span> : null}
+                      </div>
+                      <div className="user-report-field">
+                        <label htmlFor="user-report-email">Email</label>
+                        <input
+                          id="user-report-email"
+                          type="email"
+                          inputMode="email"
+                          autoComplete="email"
+                          value={draft.reporterEmail}
+                          onChange={(event) => updateDraft('reporterEmail', event.target.value)}
+                          maxLength={320}
+                          aria-invalid={Boolean(errors.reporterEmail)}
+                          aria-describedby={errors.reporterEmail ? 'user-report-email-error' : undefined}
+                          placeholder="you@example.com"
+                        />
+                        {errors.reporterEmail ? <span id="user-report-email-error" className="user-report-field-error" role="alert">{errors.reporterEmail}</span> : null}
+                      </div>
+                    </div>
+                  </section>
                 </div>
-                <div className="user-report-field">
-                  <label htmlFor="user-report-email">Email <small>Optional</small></label>
-                  <input
-                    id="user-report-email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    value={draft.reporterEmail}
-                    onChange={(event) => updateDraft('reporterEmail', event.target.value)}
-                    maxLength={320}
-                    aria-invalid={Boolean(errors.reporterEmail)}
-                    aria-describedby={errors.reporterEmail ? 'user-report-email-error' : undefined}
-                  />
-                  {errors.reporterEmail ? <span id="user-report-email-error" className="user-report-field-error" role="alert">{errors.reporterEmail}</span> : null}
-                </div>
-              </div>
-            </section>
 
             {!online ? (
               <div className="user-report-inline-error" role="alert">You are offline. Your draft is preserved and can be sent when the connection returns.</div>
@@ -565,21 +628,25 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
               </div>
             ) : null}
 
-            <div className="user-report-actions">
-              <button type="button" className="user-report-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-              <button type="submit" className="user-report-primary" disabled={!canSubmit}>
-                {submitState.state === 'submitting' ? 'Sending…' : 'Send report'}
-              </button>
-            </div>
-
-            <p className="user-report-data-use">
-              See how Ticket Snitch uses and stores report data{' '}
-              {bootstrap.dataUseUrl ? (
-                <a href={bootstrap.dataUseUrl} target="_blank" rel="noopener noreferrer">here</a>
-              ) : (
-                <span>in the Ticket Snitch data-use notice</span>
-              )}.
-            </p>
+                <footer className="user-report-submit-bar">
+                  <p className="user-report-data-use">
+                    <span className="user-report-utility-icon" aria-hidden="true"><ReportUtilityIcon kind="privacy" /></span>
+                    <span>
+                      Sent to Ticket Snitch for human review.{' '}
+                      {bootstrap.dataUseUrl ? (
+                        <a href={bootstrap.dataUseUrl} target="_blank" rel="noopener noreferrer">How report data is used</a>
+                      ) : (
+                        <span>See the Ticket Snitch data-use notice.</span>
+                      )}
+                    </span>
+                  </p>
+                  <div className="user-report-actions">
+                    <button type="button" className="user-report-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+                    <button type="submit" className="user-report-primary" disabled={!canSubmit}>
+                      {submitState.state === 'submitting' ? 'Sending…' : 'Send report'}
+                    </button>
+                  </div>
+                </footer>
               </div>
             ) : null}
           </form>

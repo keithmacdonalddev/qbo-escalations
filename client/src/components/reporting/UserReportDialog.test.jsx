@@ -66,7 +66,7 @@ beforeEach(() => {
   screenshotMocks.validateScreenshotFile.mockReset().mockImplementation((file) => file);
 });
 
-async function chooseType(user, name = 'Report a problem') {
+async function chooseType(user, name = 'Report a Problem') {
   await screen.findByRole('group', { name: 'Choose what to send' });
   await user.click(screen.getByRole('radio', { name }));
   await screen.findByRole('button', { name: 'Send report' });
@@ -82,40 +82,42 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   expect(screen.queryByText('Tell us what happened or what would make QBO Escalations better.')).not.toBeInTheDocument();
   expect(await screen.findByRole('group', { name: 'Choose what to send' })).toBeVisible();
   expect(screen.queryByText('Type', { exact: true })).not.toBeInTheDocument();
-  expect(screen.getByRole('radio', { name: 'Report a problem' })).not.toBeChecked();
-  expect(screen.getByRole('radio', { name: 'Request a feature' })).not.toBeChecked();
-  expect(screen.getByRole('radio', { name: 'Share feedback' })).not.toBeChecked();
-  expect(screen.getByRole('radio', { name: 'Report a problem' })).toHaveAccessibleDescription('Something isn’t working');
-  expect(screen.getByRole('radio', { name: 'Request a feature' })).toHaveAccessibleDescription('There’s something you need');
-  expect(screen.getByRole('radio', { name: 'Share feedback' })).toHaveAccessibleDescription('Tell us what could be better');
+  expect(screen.getByRole('radio', { name: 'Report a Problem' })).not.toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Request a Feature' })).not.toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Submit Feedback' })).not.toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Report a Problem' })).toHaveAccessibleDescription('Found a bug?');
+  expect(screen.getByRole('radio', { name: 'Request a Feature' })).toHaveAccessibleDescription('Have an idea?');
+  expect(screen.getByRole('radio', { name: 'Submit Feedback' })).toHaveAccessibleDescription('Want to chat?');
   expect(screen.queryByLabelText('Short title')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Send report' })).not.toBeInTheDocument();
   expect(screen.queryByText('New report')).not.toBeInTheDocument();
   expect(screen.queryByText('My reports')).not.toBeInTheDocument();
 
-  await user.click(screen.getByRole('radio', { name: 'Request a feature' }));
+  await user.click(screen.getByRole('radio', { name: 'Request a Feature' }));
   expect(screen.getByLabelText('What would help?')).toHaveAttribute('placeholder', expect.stringMatching(/capability/i));
-  expect(screen.getByText('Make it easy to recognize in a work queue.').closest('.user-report-field-heading')).toContainElement(screen.getByText('Short title'));
-  expect(screen.getByText(/Do not include passwords/).closest('.user-report-field-heading')).toContainElement(screen.getByText('What would help?'));
+  expect(screen.getByRole('heading', { name: 'Share the details' })).toBeVisible();
+  expect(screen.getByText('Make it easy to recognize in a work queue.').closest('.user-report-field')).toContainElement(screen.getByText('Short title'));
+  expect(screen.getByText(/Leave out passwords/)).toBeVisible();
   expect(screen.getByLabelText(/^Name/)).toBeVisible();
   expect(screen.getByLabelText(/^Email/)).toBeVisible();
   expect(screen.getByRole('heading', { name: /^Add a screenshot/ })).toBeVisible();
-  expect(screen.getByText('A screenshot helps us understand your report and respond more effectively.')).toBeVisible();
+  expect(screen.getByText('Show us exactly what you see.')).toBeVisible();
+  expect(screen.getByRole('heading', { name: /^Want a reply/ })).toBeVisible();
   expect(screen.queryByText(/Used only for this report and future follow-up/)).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox', { name: /diagnostics/i })).not.toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'here' })).toHaveAttribute('href', 'https://tickets.example.test/api/v1/data-use');
-  expect(screen.getByRole('link', { name: 'here' })).toHaveAttribute('target', '_blank');
+  expect(screen.getByRole('link', { name: 'How report data is used' })).toHaveAttribute('href', 'https://tickets.example.test/api/v1/data-use');
+  expect(screen.getByRole('link', { name: 'How report data is used' })).toHaveAttribute('target', '_blank');
   const screenshotSection = screen.getByRole('heading', { name: /^Add a screenshot/ }).closest('section');
   const contactSection = screen.getByRole('region', { name: 'Optional contact details' });
-  const dataUse = screen.getByRole('link', { name: 'here' }).closest('p');
+  const dataUse = screen.getByRole('link', { name: 'How report data is used' }).closest('p');
   const actions = screen.getByRole('button', { name: 'Cancel' }).parentElement;
   expect(screenshotSection.compareDocumentPosition(contactSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(actions.compareDocumentPosition(dataUse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(dataUse.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-  await user.click(screen.getByRole('radio', { name: 'Share feedback' }));
+  await user.click(screen.getByRole('radio', { name: 'Submit Feedback' }));
   expect(screen.getByLabelText('What should we improve?')).toBeVisible();
 
-  await user.click(screen.getByRole('radio', { name: 'Report a problem' }));
+  await user.click(screen.getByRole('radio', { name: 'Report a Problem' }));
   expect(screen.getByLabelText('What happened?')).toBeVisible();
 
   await user.click(screen.getByRole('button', { name: 'Send report' }));
@@ -127,7 +129,7 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
 it('submits feedback with mandatory metadata handled outside the form and shows the returned Ticket Snitch case key', async () => {
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} errorCode="SAFE_ERROR" />);
-  await chooseType(user, 'Share feedback');
+  await chooseType(user, 'Submit Feedback');
   await user.type(screen.getByLabelText('Short title'), 'Make filters easier to scan');
   await user.type(screen.getByLabelText('What should we improve?'), 'Grouping the filters would make review much faster.');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
@@ -152,7 +154,7 @@ it('submits optional contact details and rejects a malformed email without losin
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
   await chooseType(user);
-  expect(screen.getAllByText('Optional')).toHaveLength(3);
+  expect(screen.getAllByText('Optional')).toHaveLength(2);
   expect(screen.getByLabelText(/^Name/)).toBeVisible();
   expect(screen.getByLabelText(/^Email/)).toBeVisible();
   await user.type(screen.getByLabelText('Short title'), 'Contact details test');
