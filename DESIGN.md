@@ -1,6 +1,6 @@
 # QBO Escalations Design System
 
-> Source-backed product UI guidance. Last verified against the live repository and Settings route on 2026-07-21.
+> Source-backed product UI guidance. Last verified against the production client source on 2026-07-23. Rendered browser verification is a required release gate whenever the browser test surface is available.
 
 ## Product and interface purpose
 
@@ -16,6 +16,21 @@ The interface is not a marketing site and should not behave like one. Large hero
 4. **Prefer one organized surface over card collections.** Group related controls with dividers inside one panel. Do not give every preference its own large container.
 5. **Explain at the point of uncertainty.** Use one short sentence by default. Put rare details in a tooltip, disclosure, help link, or confirmation shown when it matters.
 
+## Interaction quality is a release gate
+
+Functional correctness is necessary but is not enough to call UI work complete. Every changed flow must be reviewed as a rendered user experience, not only as JSX, CSS, tests, or a successful build.
+
+- Use progressive disclosure: ask for the next required decision first, then reveal the controls that decision makes relevant.
+- Keep optional information collapsed or visually secondary until the user asks for it.
+- Give every interactive control intentional hover, focus-visible, active, selected, disabled, and loading behavior where those states apply.
+- Use purposeful 120–180ms motion to explain selection and disclosure changes, with a reduced-motion fallback.
+- Use one explicit control height within a row. Labels, inputs, icons, and helper text must align; accidental height differences are a release defect.
+- Preserve 8–10px between a field label and its control unless a documented dense pattern requires otherwise.
+- Apply the space/value assessment before review. Large empty containers and decorative cards must be reduced or removed when they do not help the next action.
+- Inspect desktop and mobile renderings, interaction states, and browser console output before declaring the UI complete. If the browser surface is unavailable, report the visual gate as incomplete; do not infer a pass from source or tests.
+
+User screenshots and direct usability feedback are product evidence. Repeated criticism of density, hierarchy, interaction feedback, or alignment means the design standard or review process must be corrected, not treated as a one-off styling preference.
+
 ## Source of truth and implementation map
 
 | Concern | Primary source | Notes |
@@ -29,6 +44,7 @@ The interface is not a marketing site and should not behave like one. Large hero
 | AI catalog workspace | `client/src/components/AiManagementSettings.jsx` | Provider/model management and new-model review |
 | Connected accounts | `client/src/components/SettingsAccountsSection.jsx` | Account health, permissions, repair, and purpose-specific defaults |
 | AI safety controls | `client/src/components/AiAssistantSettingsPanel.jsx` | Accordion-based advanced configuration |
+| Feedback and problem reporting | `client/src/components/reporting/UserReportDialog.jsx` and `.css` | Progressive type selection, report form, optional contact and evidence controls |
 
 Prototypes under `prototypes/` are deliberately excluded from the production design contract unless a later maintained change explicitly promotes them.
 
@@ -311,6 +327,8 @@ Use for independent options. Keep the title and one-line consequence adjacent to
 
 Use for 2–4 mutually exclusive compact choices. Use radio semantics (`role="radiogroup"`, `role="radio"`, and `aria-checked`).
 
+A segmented control that determines the rest of a form should be the only form content shown initially. Reveal the matching form after selection, focus its first field, and keep the selector available so the user can change course. Hover and active treatments must make each segment feel clickable before selection.
+
 ### Sliders
 
 Always show the current value. Provide a reset when the value differs from the default. Do not add a large preview if the interface itself already reflects the change.
@@ -322,6 +340,8 @@ Always show the current value. Provide a reset when the value differs from the d
 - Focus uses the blue accent
 - Errors state what happened and what the user can do next
 - Secret inputs never reveal saved server values; reveal only the value currently typed
+- Inputs sharing a row use the same explicit height and vertical alignment
+- Optional identity or follow-up fields belong in a compact disclosure, not a full-size card that competes with required fields
 
 ## State and feedback
 
@@ -403,7 +423,7 @@ Define unfamiliar technical terms immediately in everyday language. Prefer one s
 
 ## Motion
 
-Use 120–180ms transitions for hover, focus, switching, and small disclosure changes. Motion should clarify state change. Avoid entrance animations for ordinary settings and repeated floating/pulsing treatments. Disable nonessential motion when reduced motion is requested.
+Use 120–180ms transitions for hover, focus, switching, and small disclosure changes. A short opacity-and-position reveal is appropriate when a user choice causes the next stage of a form to appear. Motion should clarify state change. Avoid entrance animations for ordinary static settings and repeated floating/pulsing treatments. Disable nonessential motion when reduced motion is requested.
 
 ## Quality checklist
 
@@ -413,13 +433,15 @@ Before merging a UI change:
 2. Apply the space/value assessment to every first-viewport element.
 3. Use the canonical tokens; search for new hard-coded colors.
 4. Confirm title, copy, and action hierarchy.
-5. Check loading, empty, warning, error, disabled, dirty, and saved states.
-6. Verify keyboard focus and accessible names.
-7. Build the client.
-8. Inspect the live desktop route at a typical laptop viewport.
-9. Inspect a mobile viewport.
-10. Check browser console errors.
-11. Re-read changed files before reporting current state.
+5. Confirm progressive disclosure: only controls needed for the current decision are prominent.
+6. Check hover, focus-visible, active, selected, disabled, loading, empty, warning, error, dirty, and saved states as applicable.
+7. Verify equal control heights, label gaps, alignment, keyboard focus, and accessible names.
+8. Build the client and run focused interaction tests.
+9. Inspect the live desktop route at a typical laptop viewport.
+10. Inspect a mobile viewport.
+11. Check browser console errors.
+12. If visual inspection was blocked, mark the visual gate incomplete instead of declaring a visual pass.
+13. Re-read changed files before reporting current state.
 
 ## Known design debt
 
@@ -431,7 +453,7 @@ Before merging a UI change:
 
 Use this context when requesting implementation:
 
-> Build this as a compact operational interface using the repository's existing Slate design tokens from `client/src/App.css`. Put the user's actual task in the first viewport. Apply the space/value assessment from `DESIGN.md` to every visible element. Prefer one organized surface with dividers over a collection of cards. Use blue only for action, focus, and current selection; use semantic colors only for real status. Verify desktop and mobile in the live app and report loading, empty, warning, error, and disabled states.
+> Build this as a compact operational interface using the repository's existing Slate design tokens from `client/src/App.css`. Put the user's actual task in the first viewport and use progressive disclosure so each step shows only what is relevant now. Apply the space/value assessment from `DESIGN.md` to every visible element. Prefer one organized surface with dividers over a collection of cards. Give controls deliberate hover, focus-visible, active, selected, disabled, and loading states; keep aligned inputs equal in height; and use 120–180ms purposeful motion with reduced-motion support. Verify desktop and mobile in the live app. If browser verification is unavailable, say the visual gate is incomplete rather than inferring a pass from tests or build output.
 
 For Settings work, add:
 

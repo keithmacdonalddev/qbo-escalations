@@ -65,16 +65,34 @@ beforeEach(() => {
   screenshotMocks.validateScreenshotFile.mockReset().mockImplementation((file) => file);
 });
 
-it('offers the three plain-language choices and validates the short form', async () => {
+async function chooseType(user, name = 'Problem') {
+  await screen.findByRole('group', { name: 'Type' });
+  await user.click(screen.getByRole('radio', { name }));
+  await screen.findByRole('button', { name: 'Send report' });
+}
+
+it('shows only the type choice first, then reveals the corresponding form', async () => {
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
 
   expect(await screen.findByRole('dialog', { name: 'Send feedback' })).toBeVisible();
-  expect(screen.getByRole('group', { name: 'Type' })).toBeVisible();
-  expect(screen.getByRole('radio', { name: /Problem/ })).toBeChecked();
-  expect(screen.getByRole('radio', { name: /Feature request/ })).toBeVisible();
-  expect(screen.getByRole('radio', { name: /Feedback/ })).toBeVisible();
-  expect(screen.queryByText('Something did not work as expected.')).not.toBeInTheDocument();
+  expect(await screen.findByRole('group', { name: 'Type' })).toBeVisible();
+  expect(screen.getByRole('radio', { name: 'Problem' })).not.toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Feature request' })).not.toBeChecked();
+  expect(screen.getByRole('radio', { name: 'Feedback' })).not.toBeChecked();
+  expect(screen.queryByLabelText('Short title')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Send report' })).not.toBeInTheDocument();
+
+  await user.click(screen.getByRole('radio', { name: 'Feature request' }));
+  expect(screen.getByLabelText('What would help?')).toHaveAttribute('placeholder', expect.stringMatching(/capability/i));
+  expect(screen.getByText('Add contact details')).toBeVisible();
+  expect(screen.getByLabelText('Name')).not.toBeVisible();
+
+  await user.click(screen.getByRole('radio', { name: 'Feedback' }));
+  expect(screen.getByLabelText('What should we improve?')).toBeVisible();
+
+  await user.click(screen.getByRole('radio', { name: 'Problem' }));
+  expect(screen.getByLabelText('What happened?')).toBeVisible();
 
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   expect(screen.getByText('Enter at least 3 characters.')).toBeVisible();
@@ -85,11 +103,9 @@ it('offers the three plain-language choices and validates the short form', async
 it('submits consented feedback and shows the returned Ticket Snitch case key', async () => {
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} errorCode="SAFE_ERROR" />);
-  await screen.findByRole('button', { name: 'Send report' });
-
-  await user.click(screen.getByRole('radio', { name: /Feedback/ }));
+  await chooseType(user, 'Feedback');
   await user.type(screen.getByLabelText('Short title'), 'Make filters easier to scan');
-  await user.type(screen.getByLabelText('What should we know?'), 'Grouping the filters would make review much faster.');
+  await user.type(screen.getByLabelText('What should we improve?'), 'Grouping the filters would make review much faster.');
   await user.click(screen.getByRole('checkbox', { name: /Include basic diagnostics/ }));
   await user.click(screen.getByRole('button', { name: 'Send report' }));
 
@@ -113,10 +129,12 @@ it('submits consented feedback and shows the returned Ticket Snitch case key', a
 it('submits optional contact details and rejects a malformed email without losing the draft', async () => {
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
-  await screen.findByRole('button', { name: 'Send report' });
-  expect(screen.getByText(/Leave both fields blank to report anonymously/i)).toBeVisible();
+  await chooseType(user);
+  expect(screen.getByText(/stay anonymous if left blank/i)).toBeVisible();
+  expect(screen.getByLabelText('Name')).not.toBeVisible();
+  await user.click(screen.getByText('Add contact details'));
   await user.type(screen.getByLabelText('Short title'), 'Contact details test');
-  await user.type(screen.getByLabelText('What should we know?'), 'Please follow up with me about this report in the future.');
+  await user.type(screen.getByLabelText('What happened?'), 'Please follow up with me about this report in the future.');
   await user.type(screen.getByLabelText('Name'), 'Ada Lovelace');
   await user.type(screen.getByLabelText('Email'), 'not-an-email');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
@@ -142,9 +160,9 @@ it('explains duplicate-safe replay without claiming a second case', async () => 
   });
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
-  await screen.findByRole('button', { name: 'Send report' });
+  await chooseType(user);
   await user.type(screen.getByLabelText('Short title'), 'Retry the same report');
-  await user.type(screen.getByLabelText('What should we know?'), 'This report is retried after an uncertain response.');
+  await user.type(screen.getByLabelText('What happened?'), 'This report is retried after an uncertain response.');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   expect(await screen.findByText('This report was already received. No duplicate was created.')).toBeVisible();
 });
@@ -169,9 +187,9 @@ it('preserves the draft and request ID after a permission failure', async () => 
   }));
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
-  await screen.findByRole('button', { name: 'Send report' });
+  await chooseType(user);
   await user.type(screen.getByLabelText('Short title'), 'Permission failure');
-  await user.type(screen.getByLabelText('What should we know?'), 'The draft should remain after this failure.');
+  await user.type(screen.getByLabelText('What happened?'), 'The draft should remain after this failure.');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   expect(await screen.findByText(/not permitted to submit reports/i)).toBeVisible();
   expect(screen.getByText('Request ID: permission-request')).toBeVisible();
@@ -184,9 +202,10 @@ it('preserves a valid draft while offline and does not attempt submission', asyn
   try {
     const user = userEvent.setup();
     render(<UserReportDialog open onClose={() => {}} />);
+    await chooseType(user);
     await screen.findByText(/You are offline. Your draft is preserved/i);
     await user.type(screen.getByLabelText('Short title'), 'Offline report draft');
-    await user.type(screen.getByLabelText('What should we know?'), 'This explanation must remain available while offline.');
+    await user.type(screen.getByLabelText('What happened?'), 'This explanation must remain available while offline.');
     expect(screen.getByRole('button', { name: 'Send report' })).toBeDisabled();
     expect(screen.getByLabelText('Short title')).toHaveValue('Offline report draft');
     expect(reportingMocks.submitUserReport).not.toHaveBeenCalled();
@@ -210,7 +229,7 @@ it('shows a configuration error without presenting a user sign-in flow', async (
 it('captures only after an explicit action and lets the user preview, replace, and remove the optional image', async () => {
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
-  await screen.findByRole('button', { name: 'Capture screenshot' });
+  await chooseType(user);
   expect(screenshotMocks.captureScreenFrame).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
@@ -234,9 +253,9 @@ it('submits an approved screenshot and confirms that it became case evidence', a
   });
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
-  await screen.findByRole('button', { name: 'Capture screenshot' });
+  await chooseType(user);
   await user.type(screen.getByLabelText('Short title'), 'Screenshot evidence report');
-  await user.type(screen.getByLabelText('What should we know?'), 'The selected screenshot shows the reported layout problem.');
+  await user.type(screen.getByLabelText('What happened?'), 'The selected screenshot shows the reported layout problem.');
   await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
   await user.click(screen.getByRole('button', { name: 'Send report' }));
 
@@ -265,9 +284,9 @@ it('preserves a created case and retries only with the same duplicate-safe draft
     });
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
-  await screen.findByRole('button', { name: 'Capture screenshot' });
+  await chooseType(user);
   await user.type(screen.getByLabelText('Short title'), 'Partial evidence retry');
-  await user.type(screen.getByLabelText('What should we know?'), 'The case must remain safe while the screenshot attachment is retried.');
+  await user.type(screen.getByLabelText('What happened?'), 'The case must remain safe while the screenshot attachment is retried.');
   await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
   await user.click(screen.getByRole('button', { name: 'Send report' }));
 
@@ -292,7 +311,9 @@ it('keeps text reporting usable when the separate screenshot credential is unava
     reporterScope: 'qrv_test-browser-scope',
     requestId: 'bootstrap-request',
   });
+  const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
+  await chooseType(user);
   expect(await screen.findByText(/Screenshot attachments are not connected/i)).toBeVisible();
   expect(screen.getByRole('button', { name: 'Send report' })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Capture screenshot' })).not.toBeInTheDocument();
@@ -313,9 +334,9 @@ it('saves an opaque report handle and supports public replies and fixed confirma
   });
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
-  await screen.findByRole('button', { name: 'Send report' });
+  await chooseType(user);
   await user.type(screen.getByLabelText('Short title'), 'Customer follow-up test');
-  await user.type(screen.getByLabelText('What should we know?'), 'I need to return and confirm whether the repair works.');
+  await user.type(screen.getByLabelText('What happened?'), 'I need to return and confirm whether the repair works.');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   await user.click(await screen.findByRole('button', { name: 'View report status' }));
   expect(await screen.findByText('The repair is ready for confirmation.')).toBeVisible();

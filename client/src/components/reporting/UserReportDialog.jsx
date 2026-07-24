@@ -20,16 +20,34 @@ import {
 import './UserReportDialog.css';
 
 const REPORT_CHOICES = [
-  { value: 'problem', label: 'Problem' },
-  { value: 'feature', label: 'Feature request' },
-  { value: 'feedback', label: 'Feedback' },
+  {
+    value: 'problem',
+    label: 'Problem',
+    titlePlaceholder: 'Example: Escalation notes do not save',
+    explanationLabel: 'What happened?',
+    explanationPlaceholder: 'Describe what happened, what you expected, and any steps that help us reproduce it.',
+  },
+  {
+    value: 'feature',
+    label: 'Feature request',
+    titlePlaceholder: 'Example: Add a faster review shortcut',
+    explanationLabel: 'What would help?',
+    explanationPlaceholder: 'Describe the capability you need and why it would make the app more useful.',
+  },
+  {
+    value: 'feedback',
+    label: 'Feedback',
+    titlePlaceholder: 'Example: Make filters easier to scan',
+    explanationLabel: 'What should we improve?',
+    explanationPlaceholder: 'Share your observation and what would make the experience better.',
+  },
 ];
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function initialDraft() {
   return {
-    kind: 'problem',
+    kind: '',
     title: '',
     explanation: '',
     reporterName: '',
@@ -55,6 +73,7 @@ function fileSizeLabel(size) {
 export default function UserReportDialog({ open, onClose, errorCode = '' }) {
   const dialogRef = useRef(null);
   const titleRef = useRef(null);
+  const contactDetailsRef = useRef(null);
   const screenshotInputRef = useRef(null);
   const priorFocusRef = useRef(null);
   const [draft, setDraft] = useState(initialDraft);
@@ -219,6 +238,11 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
     if (submitState.state === 'error') setSubmitState({ state: 'idle', ticket: null, replay: false, message: '', requestId: '' });
   };
 
+  const chooseReportKind = (kind) => {
+    updateDraft('kind', kind);
+    requestAnimationFrame(() => titleRef.current?.focus());
+  };
+
   const chooseScreenshot = (file) => {
     try {
       setScreenshot(validateScreenshotFile(file));
@@ -270,8 +294,12 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
     setErrors(next);
     if (next.title) titleRef.current?.focus();
     else if (next.explanation) dialogRef.current?.querySelector('#user-report-explanation')?.focus();
-    else if (next.reporterName) dialogRef.current?.querySelector('#user-report-name')?.focus();
-    else if (next.reporterEmail) dialogRef.current?.querySelector('#user-report-email')?.focus();
+    else if (next.reporterName || next.reporterEmail) {
+      if (contactDetailsRef.current) contactDetailsRef.current.open = true;
+      requestAnimationFrame(() => dialogRef.current
+        ?.querySelector(next.reporterName ? '#user-report-name' : '#user-report-email')
+        ?.focus());
+    }
     return Object.keys(next).length === 0;
   };
 
@@ -422,6 +450,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
 
   const busy = bootstrap.state === 'loading' || submitState.state === 'submitting' || submitState.state === 'retrying' || captureState.state === 'capturing';
   const canSubmit = bootstrap.state === 'ready' && online && !busy;
+  const selectedChoice = REPORT_CHOICES.find((choice) => choice.value === draft.kind);
 
   return (
     <div
@@ -682,7 +711,7 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                       name="report-kind"
                       value={choice.value}
                       checked={draft.kind === choice.value}
-                      onChange={() => updateDraft('kind', choice.value)}
+                      onChange={() => chooseReportKind(choice.value)}
                     />
                     <span>{choice.label}</span>
                   </label>
@@ -690,6 +719,8 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
               </div>
             </fieldset>
 
+            {selectedChoice ? (
+              <div className="user-report-form-details" key={selectedChoice.value}>
             <div className="user-report-field">
               <label htmlFor="user-report-summary">Short title</label>
               <input
@@ -700,14 +731,14 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                 maxLength={240}
                 aria-invalid={Boolean(errors.title)}
                 aria-describedby={errors.title ? 'user-report-summary-error' : 'user-report-summary-help'}
-                placeholder="Example: Escalation notes do not save"
+                placeholder={selectedChoice.titlePlaceholder}
               />
               <span id="user-report-summary-help" className="user-report-help">Make it easy to recognize in a work queue.</span>
               {errors.title ? <span id="user-report-summary-error" className="user-report-field-error" role="alert">{errors.title}</span> : null}
             </div>
 
             <div className="user-report-field">
-              <label htmlFor="user-report-explanation">What should we know?</label>
+              <label htmlFor="user-report-explanation">{selectedChoice.explanationLabel}</label>
               <textarea
                 id="user-report-explanation"
                 value={draft.explanation}
@@ -716,52 +747,52 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                 maxLength={40_000}
                 aria-invalid={Boolean(errors.explanation)}
                 aria-describedby={errors.explanation ? 'user-report-explanation-error' : 'user-report-explanation-help'}
-                placeholder="Describe what happened, what you expected, or why the idea would help."
+                placeholder={selectedChoice.explanationPlaceholder}
               />
               <span id="user-report-explanation-help" className="user-report-help">Do not include passwords, payment information, access tokens, or customer secrets.</span>
               {errors.explanation ? <span id="user-report-explanation-error" className="user-report-field-error" role="alert">{errors.explanation}</span> : null}
             </div>
 
-            <section className="user-report-contact" aria-labelledby="user-report-contact-title">
-              <div className="user-report-section-heading">
-                <div>
-                  <h3 id="user-report-contact-title">Contact details</h3>
-                  <p>Optional. Leave both fields blank to report anonymously.</p>
+            <details ref={contactDetailsRef} className="user-report-contact">
+              <summary>
+                <span>Add contact details</span>
+                <small>Optional · stay anonymous if left blank</small>
+                <span className="user-report-contact-chevron" aria-hidden="true">⌄</span>
+              </summary>
+              <div className="user-report-contact-body">
+                <div className="user-report-contact-grid">
+                  <div className="user-report-field">
+                    <label htmlFor="user-report-name">Name</label>
+                    <input
+                      id="user-report-name"
+                      autoComplete="name"
+                      value={draft.reporterName}
+                      onChange={(event) => updateDraft('reporterName', event.target.value)}
+                      maxLength={120}
+                      aria-invalid={Boolean(errors.reporterName)}
+                      aria-describedby={errors.reporterName ? 'user-report-name-error' : 'user-report-contact-help'}
+                    />
+                    {errors.reporterName ? <span id="user-report-name-error" className="user-report-field-error" role="alert">{errors.reporterName}</span> : null}
+                  </div>
+                  <div className="user-report-field">
+                    <label htmlFor="user-report-email">Email</label>
+                    <input
+                      id="user-report-email"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      value={draft.reporterEmail}
+                      onChange={(event) => updateDraft('reporterEmail', event.target.value)}
+                      maxLength={320}
+                      aria-invalid={Boolean(errors.reporterEmail)}
+                      aria-describedby={errors.reporterEmail ? 'user-report-email-error' : 'user-report-contact-help'}
+                    />
+                    {errors.reporterEmail ? <span id="user-report-email-error" className="user-report-field-error" role="alert">{errors.reporterEmail}</span> : null}
+                  </div>
                 </div>
-                <span>Optional</span>
+                <p id="user-report-contact-help" className="user-report-help">Used only for this report and future follow-up. These self-reported details do not create an account or prove identity.</p>
               </div>
-              <div className="user-report-contact-grid">
-                <div className="user-report-field">
-                  <label htmlFor="user-report-name">Name</label>
-                  <input
-                    id="user-report-name"
-                    autoComplete="name"
-                    value={draft.reporterName}
-                    onChange={(event) => updateDraft('reporterName', event.target.value)}
-                    maxLength={120}
-                    aria-invalid={Boolean(errors.reporterName)}
-                    aria-describedby={errors.reporterName ? 'user-report-name-error' : 'user-report-contact-help'}
-                  />
-                  {errors.reporterName ? <span id="user-report-name-error" className="user-report-field-error" role="alert">{errors.reporterName}</span> : null}
-                </div>
-                <div className="user-report-field">
-                  <label htmlFor="user-report-email">Email</label>
-                  <input
-                    id="user-report-email"
-                    type="email"
-                    inputMode="email"
-                    autoComplete="email"
-                    value={draft.reporterEmail}
-                    onChange={(event) => updateDraft('reporterEmail', event.target.value)}
-                    maxLength={320}
-                    aria-invalid={Boolean(errors.reporterEmail)}
-                    aria-describedby={errors.reporterEmail ? 'user-report-email-error' : 'user-report-contact-help'}
-                  />
-                  {errors.reporterEmail ? <span id="user-report-email-error" className="user-report-field-error" role="alert">{errors.reporterEmail}</span> : null}
-                </div>
-              </div>
-              <p id="user-report-contact-help" className="user-report-help">These details are self-reported and are used only to identify this report and support future follow-up. They do not create an account or prove identity.</p>
-            </section>
+            </details>
 
             <section
               className="user-report-screenshot"
@@ -860,6 +891,8 @@ export default function UserReportDialog({ open, onClose, errorCode = '' }) {
                 {submitState.state === 'submitting' ? 'Sending…' : 'Send report'}
               </button>
             </div>
+              </div>
+            ) : null}
           </form>
         )}
       </section>
