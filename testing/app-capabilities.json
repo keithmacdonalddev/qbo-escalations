@@ -425,7 +425,7 @@
     {
       "id": "development-startup-safety",
       "label": "Friendly and safe local development startup",
-      "userOutcome": "Starting or checking the local app gives the owner a concise core, realtime, background-agent, connected-service, and evidence-storage summary; deep external checks remain explicit, and the launcher refuses unsafe duplicate ports or unrelated process cleanup.",
+      "userOutcome": "Starting or checking the local app quickly identifies the exact code in use, reports core readiness before slower operational checks, retries only safe temporary failures once, gives one direct fix for each warning, supports quiet or browser-open startup, and confirms shutdown service by service without touching unrelated processes.",
       "risk": "normal",
       "owner": "Development runtime",
       "sourcePaths": [
@@ -448,7 +448,7 @@
         { "type": "unit", "groupId": "dev-startup", "paths": ["scripts/dev-launcher.test.js", "server/test/startup-console.test.js", "server/test/service-health-status.test.js", "server/test/knowledgebase-agent-scheduler.test.js"] }
       ],
       "knownGaps": [
-        "The deterministic fast checks, read-only status path, deep-check boundaries, Windows npm invocation, timeout cleanup, and focused server status contracts are covered. Paid/external deep checks intentionally do not run in the automated suite; they require an operator-invoked controlled account check. The user completed an operator-observed friendly launcher start on 2026-07-23, while the newly added service-health lines still need their next operator-visible startup confirmation."
+        "The deterministic fast checks, safe single-retry boundary, redacted diagnostics, read-only status path, deep-check boundaries, shell-free browser opening, redirected color handling, Windows npm invocation, shutdown reporting, timeout cleanup, and focused server status contracts are covered. Paid/external deep checks intentionally do not run in the automated suite; they require an operator-invoked controlled account check. The user completed an operator-observed friendly launcher start on 2026-07-23, while the 2026-07-24 quality-of-life output still needs its next operator-visible startup and Ctrl+C confirmation."
       ],
       "lastHumanReviewDate": "2026-07-23"
     },

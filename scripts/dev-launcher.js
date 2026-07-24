@@ -1,6 +1,6 @@
 'use strict';
 
-const { spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 const net = require('net');
@@ -18,15 +18,21 @@ function stripAnsi(value) {
   return String(value || '').replace(ANSI_PATTERN, '');
 }
 
-function parseArgs(argv = process.argv.slice(2)) {
-  const colorRequested = !argv.includes('--no-color') && !process.env.NO_COLOR;
-  const colorSupported = process.stdout.isTTY === true || Boolean(process.env.FORCE_COLOR);
+function parseArgs(argv = process.argv.slice(2), options = {}) {
+  const env = options.env || process.env;
+  const outputIsInteractive = options.stdoutIsTTY === undefined
+    ? process.stdout.isTTY === true
+    : options.stdoutIsTTY === true;
+  const colorRequested = !argv.includes('--no-color') && !env.NO_COLOR;
+  const quiet = argv.includes('--quiet');
   return {
     check: argv.includes('--check'),
-    color: colorRequested && colorSupported,
+    color: colorRequested && outputIsInteractive,
     deep: argv.includes('--deep'),
+    open: argv.includes('--open'),
     preview: argv.includes('--preview'),
-    verbose: argv.includes('--verbose') || process.env.QBO_DEV_VERBOSE === '1',
+    quiet,
+    verbose: !quiet && (argv.includes('--verbose') || env.QBO_DEV_VERBOSE === '1'),
   };
 }
 
@@ -34,8 +40,11 @@ function colorize(code, value, enabled) {
   return enabled ? `\u001b[${code}m${value}\u001b[0m` : value;
 }
 
-function createOutput({ stream = process.stdout, color = true } = {}) {
-  const write = (value = '') => stream.write(`${value}\n`);
+function createOutput({ stream = process.stdout, color = true, quiet = false } = {}) {
+  const writeRaw = (value = '') => stream.write(`${value}\n`);
+  const write = (value = '') => {
+    if (!quiet) writeRaw(value);
+  };
   const prefix = (source) => {
     if (source === 'api') return colorize('36;1', ' API ', color);
     if (source === 'web') return colorize('35;1', ' WEB ', color);
@@ -57,7 +66,9 @@ function createOutput({ stream = process.stdout, color = true } = {}) {
 
   return {
     color,
+    quiet,
     write,
+    always: writeRaw,
     blank: () => write(),
     banner() {
       write(`🚀 ${colorize('1;36', 'QBO Operations Platform', color)} ${colorize('90', '— development', color)}`);
@@ -68,8 +79,12 @@ function createOutput({ stream = process.stdout, color = true } = {}) {
       write(colorize('1', value, color));
     },
     line(level, value, source = 'dev') {
+      if (quiet && level !== 'warning' && level !== 'error') return;
       const code = levelColor[level] || levelColor.info;
-      write(`${prefix(source)} ${colorize(code, value, color)}`);
+      writeRaw(`${prefix(source)} ${colorize(code, value, color)}`);
+    },
+    action(value, source = 'dev') {
+      writeRaw(`${prefix(source)} ${colorize('90', `   Fix: ${value}`, color)}`);
     },
     success(value, source) { this.line('success', value, source); },
     warning(value, source) { this.line('warning', value, source); },
@@ -77,6 +92,95 @@ function createOutput({ stream = process.stdout, color = true } = {}) {
     info(value, source) { this.line('info', value, source); },
     muted(value, source) { this.line('muted', value, source); },
   };
+}
+
+function formatDuration(durationMs) {
+  const milliseconds = Math.max(0, Number(durationMs) || 0);
+  if (milliseconds < 1000) return `${Math.round(milliseconds)}ms`;
+  return `${(milliseconds / 1000).toFixed(1)}s`;
+}
+
+function sanitizeIdentityPart(value, fallback) {
+  const singleLine = String(value || '').split(/\r?\n/, 1)[0].trim();
+  return singleLine && /^[a-z0-9._\/-]+$/i.test(singleLine)
+    ? singleLine.slice(0, 80)
+    : fallback;
+}
+
+function sanitizeDiagnostic(value, fallback = 'check did not pass') {
+  const text = String(value || fallback)
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted email]')
+    .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+    .replace(/\b(api[-_ ]?key|authorization|access[-_ ]?token|refresh[-_ ]?token|secret)\s*[:=]\s*["']?[^\s,"';]+/gi, '$1=[redacted]')
+    .replace(/\b(?:sk|key)-[a-z0-9_-]{12,}\b/gi, '[redacted key]')
+    .replace(/:\/\/[^\s:/]+:[^\s@/]+@/g, '://[redacted]@')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  if (!text) return fallback;
+  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+}
+
+function getRuntimeIdentity(options = {}) {
+  const execFile = options.execFile || execFileSync;
+  const nodeVersion = sanitizeIdentityPart(options.nodeVersion || process.versions.node, 'unknown');
+  const runGit = (args) => {
+    try {
+      return String(execFile('git', args, {
+        cwd: options.cwd || REPO_ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      }) || '');
+    } catch {
+      return '';
+    }
+  };
+  const readGit = (args, fallback) => sanitizeIdentityPart(runGit(args), fallback);
+  const branch = readGit(['rev-parse', '--abbrev-ref', 'HEAD'], 'unknown-branch');
+  const commit = readGit(['rev-parse', '--short=7', 'HEAD'], 'unknown');
+  const dirty = runGit(['status', '--porcelain']).trim().length > 0;
+  return {
+    branch: branch === 'HEAD' ? 'detached' : branch,
+    commit,
+    dirty,
+    nodeVersion,
+  };
+}
+
+function buildOpenInvocation(url, platform = process.platform) {
+  const parsed = new URL(url);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Only HTTP and HTTPS app URLs can be opened.');
+  }
+  if (platform === 'win32') return { command: 'explorer.exe', args: [parsed.href] };
+  if (platform === 'darwin') return { command: 'open', args: [parsed.href] };
+  return { command: 'xdg-open', args: [parsed.href] };
+}
+
+function openBrowser(url, options = {}) {
+  const platform = options.platform || process.platform;
+  const invocation = buildOpenInvocation(url, platform);
+  const spawnFn = options.spawnFn || spawn;
+  return new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawnFn(invocation.command, invocation.args, {
+        stdio: 'ignore',
+        shell: false,
+        windowsHide: true,
+        detached: platform !== 'win32',
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    child.once('error', reject);
+    child.once('spawn', () => {
+      child.unref?.();
+      resolve(invocation);
+    });
+  });
 }
 
 function parseEnvValue(contents, key) {
@@ -177,12 +281,40 @@ function parseJsonResponse(response) {
   try { return JSON.parse(response.body); } catch { return null; }
 }
 
+function isLikelyTransientError(error) {
+  const code = String(error?.code || '').toUpperCase();
+  if (['ECONNABORTED', 'ECONNREFUSED', 'ECONNRESET', 'ENETDOWN', 'ENETUNREACH', 'EPIPE', 'ETIMEDOUT'].includes(code)) {
+    return true;
+  }
+  return /\b(?:connection (?:aborted|refused|reset)|network unavailable|socket hang up|timed out)\b/i.test(String(error?.message || ''));
+}
+
 async function safeHealthCheck(run, fallbackMessage) {
   try {
     return await run();
   } catch (error) {
-    return { ok: false, error: error?.message || fallbackMessage };
+    return {
+      ok: false,
+      error: error?.message || fallbackMessage,
+      transient: isLikelyTransientError(error),
+    };
   }
+}
+
+function isTransientHealthFailure(result) {
+  if (!result || result.ok) return false;
+  if (result.transient === true) return true;
+  return result.status === 0 && Boolean(result.error);
+}
+
+async function retryTransientHealthCheck(run, options = {}) {
+  const sleep = options.sleep || ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
+  const fallbackMessage = options.fallbackMessage || 'Health check failed.';
+  let result = await safeHealthCheck(run, fallbackMessage);
+  if (!isTransientHealthFailure(result)) return { ...result, attempts: 1 };
+  await sleep(options.delayMs ?? 200);
+  result = await safeHealthCheck(run, fallbackMessage);
+  return { ...result, attempts: 2 };
 }
 
 function loadWebSocketImplementation() {
@@ -215,9 +347,14 @@ function checkWebSocket(url, options = {}) {
         pong,
         latencyMs: Date.now() - startedAt,
         error: error ? String(error.message || error) : null,
+        transient: Boolean(error?.transient ?? error),
       });
     };
-    const timer = setTimeout(() => finish(new Error(`WebSocket check timed out after ${timeoutMs}ms.`)), timeoutMs);
+    const timer = setTimeout(() => {
+      const error = new Error(`WebSocket check timed out after ${timeoutMs}ms.`);
+      error.transient = !hello;
+      finish(error);
+    }, timeoutMs);
 
     try {
       socket = new WebSocketImpl(url, { origin: options.origin || 'http://localhost:5174', handshakeTimeout: timeoutMs });
@@ -237,10 +374,18 @@ function checkWebSocket(url, options = {}) {
         finish();
       }
     });
-    socket.once('unexpected-response', (_request, response) => finish(new Error(`WebSocket upgrade returned HTTP ${response.statusCode}.`)));
+    socket.once('unexpected-response', (_request, response) => {
+      const error = new Error(`WebSocket upgrade returned HTTP ${response.statusCode}.`);
+      error.transient = false;
+      finish(error);
+    });
     socket.once('error', finish);
     socket.once('close', (code) => {
-      if (!settled && !(hello && pong)) finish(new Error(`WebSocket closed with code ${code}.`));
+      if (!settled && !(hello && pong)) {
+        const error = new Error(`WebSocket closed with code ${code}.`);
+        error.transient = !hello;
+        finish(error);
+      }
     });
   });
 }
@@ -250,6 +395,7 @@ function checkWorkspaceEventStream(url, options = {}) {
   const startedAt = Date.now();
   return new Promise((resolve) => {
     let settled = false;
+    let streamConnected = false;
     let request = null;
     const finish = (result) => {
       if (settled) return;
@@ -258,13 +404,18 @@ function checkWorkspaceEventStream(url, options = {}) {
       request?.destroy();
       resolve({ latencyMs: Date.now() - startedAt, ...result });
     };
-    const timer = setTimeout(() => finish({ ok: false, error: `Workspace event stream timed out after ${timeoutMs}ms.` }), timeoutMs);
+    const timer = setTimeout(() => finish({
+      ok: false,
+      error: `Workspace event stream timed out after ${timeoutMs}ms.`,
+      transient: !streamConnected,
+    }), timeoutMs);
     request = http.get(url, { timeout: timeoutMs }, (response) => {
       const contentType = String(response.headers['content-type'] || '');
       if (response.statusCode !== 200 || !contentType.includes('text/event-stream')) {
-        finish({ ok: false, error: `Workspace event stream returned HTTP ${response.statusCode || 0}.` });
+        finish({ ok: false, error: `Workspace event stream returned HTTP ${response.statusCode || 0}.`, transient: false });
         return;
       }
+      streamConnected = true;
       response.setEncoding('utf8');
       let body = '';
       response.on('data', (chunk) => {
@@ -272,12 +423,12 @@ function checkWorkspaceEventStream(url, options = {}) {
         if (/event:\s*snapshot\b/.test(body) && /data:\s*\{/.test(body)) {
           finish({ ok: true, snapshot: true });
         } else if (body.length > 16_384) {
-          finish({ ok: false, error: 'Workspace event stream did not provide a snapshot.' });
+          finish({ ok: false, error: 'Workspace event stream did not provide a snapshot.', transient: false });
         }
       });
     });
-    request.once('timeout', () => finish({ ok: false, error: 'Workspace event stream request timed out.' }));
-    request.once('error', (error) => finish({ ok: false, error: error.message }));
+    request.once('timeout', () => finish({ ok: false, error: 'Workspace event stream request timed out.', transient: !streamConnected }));
+    request.once('error', (error) => finish({ ok: false, error: error.message, transient: true }));
   });
 }
 
@@ -363,6 +514,7 @@ function translateChildLine(source, rawLine, state = {}, channel = 'stdout') {
         text: state.apiRestarting
           ? '⏳ API is restarting; browser requests will retry automatically.'
           : '⚠️ API connection was interrupted; retrying automatically.',
+        action: 'If it continues after the API is ready, run npm run dev:check.',
       };
     }
   }
@@ -420,13 +572,18 @@ function translateChildLine(source, rawLine, state = {}, channel = 'stdout') {
       const flagged = line.match(/(\d+) item\(s\) flagged/)?.[1] || '0';
       const duration = line.match(/\((\d+)ms\)/)?.[1];
       const suffix = duration ? ` in ${(Number(duration) / 1000).toFixed(1)}s` : '';
-      return { level: Number(flagged) > 0 ? 'warning' : 'success', text: `📚 Knowledge review: ${flagged} item(s) need attention${suffix}` };
+      return {
+        level: Number(flagged) > 0 ? 'warning' : 'success',
+        text: `📚 Knowledge review: ${flagged} item(s) need attention${suffix}`,
+        action: Number(flagged) > 0 ? 'Review the flagged Knowledge items in the app.' : undefined,
+      };
     }
     if (line.startsWith('[image-parser] Provider availability:')) return { skip: true };
     if (line.startsWith('[providers] ')) {
       return {
         level: line.includes('❌') ? 'error' : line.includes('⚠️') ? 'warning' : line.includes('✅') ? 'success' : 'info',
         text: line.slice(12),
+        action: line.includes('⚠️') ? 'Run npm run dev:check -- --deep if you need that connection.' : undefined,
       };
     }
     if (line.startsWith('Codex CLI ready')) {
@@ -434,7 +591,11 @@ function translateChildLine(source, rawLine, state = {}, channel = 'stdout') {
     }
     if (line.includes('[DEP0190] DeprecationWarning')) {
       state.suppressTrace = true;
-      return { level: 'warning', text: '⚠️ Node reported a CLI compatibility warning; use --verbose for its raw detail.' };
+      return {
+        level: 'warning',
+        text: '⚠️ Node reported a CLI compatibility warning; use --verbose for its raw detail.',
+        action: 'Run npm run dev -- --verbose to inspect the compatibility warning.',
+      };
     }
   }
 
@@ -460,11 +621,26 @@ function attachChildOutput(child, source, output, state, options = {}) {
         if (recentLines.length > 30) recentLines.shift();
       }
       if (verbose) {
+        if (state.coreReady && !state.backgroundActivityHeadingShown) {
+          state.backgroundActivityHeadingShown = true;
+          output.blank();
+          output.heading('🔄 Background activity');
+        }
         output.info(plain, source);
         return;
       }
       const translated = translateChildLine(source, rawLine, state, channel);
-      if (!translated.skip && translated.text) output.line(translated.level, translated.text, source);
+      if (!translated.skip && translated.text) {
+        if (state.coreReady && !state.backgroundActivityHeadingShown) {
+          state.backgroundActivityHeadingShown = true;
+          output.blank();
+          output.heading('🔄 Background activity');
+        }
+        output.line(translated.level, translated.text, source);
+        if (translated.level === 'warning' && typeof output.action === 'function') {
+          output.action(translated.action || 'Run npm run dev:check if this warning continues.', source);
+        }
+      }
     });
   };
   attach(child.stdout, 'stdout');
@@ -498,11 +674,15 @@ function buildTreeKillInvocation(pid, platform = process.platform) {
 }
 
 function stopProcessTree(child, options = {}) {
-  if (!child?.pid || child.exitCode !== null) return Promise.resolve();
+  if (!child?.pid || child.exitCode !== null) return Promise.resolve({ ok: true, alreadyStopped: true });
   const platform = options.platform || process.platform;
   if (platform !== 'win32') {
-    try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already stopped */ }
-    return Promise.resolve();
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+      return Promise.resolve({ ok: true });
+    } catch (error) {
+      return Promise.resolve({ ok: false, error: error.message });
+    }
   }
   const invocation = buildTreeKillInvocation(child.pid, platform);
   const spawnFn = options.spawnFn || spawn;
@@ -512,9 +692,36 @@ function stopProcessTree(child, options = {}) {
       shell: false,
       windowsHide: true,
     });
-    killer.once('error', resolve);
-    killer.once('close', resolve);
+    killer.once('error', (error) => resolve({ ok: false, error: error.message }));
+    killer.once('close', (code) => resolve({ ok: code === 0, code }));
   });
+}
+
+async function stopDevelopmentServices(children, childDetails, output, options = {}) {
+  const stopTree = options.stopProcessTreeFn || stopProcessTree;
+  let allStopped = true;
+  for (const child of children.slice().reverse()) {
+    const detail = childDetails.get(child) || { label: 'Service', source: 'dev' };
+    const result = await stopTree(child);
+    if (result.ok) {
+      output.success(`✅ ${detail.label} ${result.alreadyStopped ? 'already stopped' : 'stopped'}`, detail.source);
+    } else {
+      allStopped = false;
+      emitHealthWarning(
+        output,
+        `Failed — ${detail.label} did not confirm shutdown${result.error ? `: ${sanitizeDiagnostic(result.error)}` : ''}`,
+        'Close the remaining process from its terminal.',
+        detail.source
+      );
+    }
+  }
+  const closedCleanly = options.reason === 'SIGINT' || options.reason === 'SIGTERM' || options.reason === 'shutdown';
+  output.always(closedCleanly && allStopped
+    ? '✨ Development environment closed cleanly'
+    : allStopped
+      ? '🧹 Development processes cleaned up safely after a failure'
+      : '⚠️ Shutdown incomplete — one or more development services may still be running');
+  return { ok: allStopped };
 }
 
 function sumAiStale(ai = {}) {
@@ -536,83 +743,193 @@ function connectionSummary(profile = {}) {
   };
 }
 
+function healthFailureLabel(result) {
+  return isTransientHealthFailure(result) ? 'Unavailable' : 'Failed';
+}
+
+function emitHealthWarning(output, message, fix, source) {
+  output.warning(`⚠️ ${message}`, source);
+  if (typeof output.action === 'function') output.action(fix, source);
+  else output.write?.(`   Fix: ${fix}`);
+}
+
 function emitServiceHealth(output, health) {
+  const emptyGroup = () => ({ healthy: 0, attention: 0, notConfigured: 0, total: 0 });
+  const summary = { operational: emptyGroup(), optional: emptyGroup() };
+  const mark = (state, category = 'operational') => {
+    summary[category].total += 1;
+    summary[category][state] += 1;
+  };
+
   if (health.realtime.ok) {
     output.success(`✅ Realtime socket healthy through web proxy (${health.realtime.latencyMs} ms)`, 'live');
+    mark('healthy');
   } else {
-    output.warning(`⚠️ Realtime socket unavailable through web proxy — ${health.realtime.error || 'ping/pong failed'}`, 'live');
+    emitHealthWarning(
+      output,
+      `${healthFailureLabel(health.realtime)} — Realtime socket did not pass through the web proxy: ${sanitizeDiagnostic(health.realtime.error, 'ping/pong failed')}`,
+      'Wait a moment, then run npm run dev:check.',
+      'live'
+    );
+    mark('attention');
   }
 
   if (health.eventStream.ok) {
     output.success(`✅ Workspace event stream connected (${health.eventStream.latencyMs} ms)`, 'live');
+    mark('healthy');
   } else {
-    output.warning(`⚠️ Workspace event stream unavailable — ${health.eventStream.error || 'snapshot not received'}`, 'live');
+    emitHealthWarning(
+      output,
+      `${healthFailureLabel(health.eventStream)} — Workspace event stream did not provide a snapshot: ${sanitizeDiagnostic(health.eventStream.error, 'snapshot not received')}`,
+      'Wait a moment, then run npm run dev:check.',
+      'live'
+    );
+    mark('attention');
   }
 
   const liveCallConfigured = health.workspaceStatus?.liveCall?.configured === true;
   if (health.liveCall.ok) {
     output.success(
-      `✅ Local Live Call socket ready — ElevenLabs ${liveCallConfigured ? 'configured, external call not tested' : 'not configured'}`,
+      `✅ Local Live Call socket ready — ${liveCallConfigured ? 'ElevenLabs configured; external call not tested' : 'Optional: ElevenLabs not configured'}`,
       'call'
     );
+    mark('healthy');
+    if (!liveCallConfigured) mark('notConfigured', 'optional');
   } else {
-    output.warning(`⚠️ Local Live Call socket unavailable — ${health.liveCall.error || 'ping/pong failed'}`, 'call');
+    emitHealthWarning(
+      output,
+      `${healthFailureLabel(health.liveCall)} — Local Live Call socket did not respond: ${sanitizeDiagnostic(health.liveCall.error, 'ping/pong failed')}`,
+      'Wait a moment, then run npm run dev:check.',
+      'call'
+    );
+    mark('attention');
   }
 
+  const runtimeTransport = health.transport?.runtime;
+  const workspaceTransport = health.transport?.workspace;
+  const operationalStatusAvailable = (!runtimeTransport || runtimeTransport.ok === true)
+    && (!workspaceTransport || workspaceTransport.ok === true);
   const staleRequests = Number(health.runtime?.requests?.staleCount) || 0;
   const staleAi = sumAiStale(health.runtime?.ai);
   const staleWorkspace = Number(health.workspaceStatus?.workspace?.staleCount) || 0;
   const staleBackground = Number(health.workspaceStatus?.background?.staleCount) || 0;
   const failedServices = (health.workspaceStatus?.background?.services || []).filter((service) => service?.state === 'failed' || service?.lastError);
   const totalStale = staleRequests + staleAi + staleWorkspace + staleBackground;
-  if (totalStale === 0 && failedServices.length === 0) {
+  if (!operationalStatusAvailable) {
+    const failedTransport = runtimeTransport?.ok === false ? runtimeTransport : workspaceTransport;
+    emitHealthWarning(
+      output,
+      `${healthFailureLabel(failedTransport)} — Background work status could not be verified`,
+      'Run npm run dev:check after the API finishes settling.',
+      'jobs'
+    );
+    mark('attention');
+  } else if (totalStale === 0 && failedServices.length === 0) {
     output.success('✅ No stuck requests, AI operations, Workspace sessions, or background tasks', 'jobs');
+    mark('healthy');
   } else {
     const details = [
       totalStale > 0 ? `${totalStale} stuck operation${totalStale === 1 ? '' : 's'}` : '',
       failedServices.length > 0 ? `${failedServices.length} background service failure${failedServices.length === 1 ? '' : 's'}` : '',
     ].filter(Boolean).join(' · ');
-    output.warning(`⚠️ ${details}`, 'jobs');
+    emitHealthWarning(
+      output,
+      `Failed — ${details}`,
+      'Review the background-service warning above, then run npm run dev:check.',
+      'jobs'
+    );
+    mark('attention');
   }
 
   const packageStore = health.packageStore?.packageStore || health.packageStore;
   if (packageStore?.ok === true || packageStore?.available === true) {
     output.success(`✅ Provider evidence storage is writable and readable${packageStore.latencyMs ? ` (${packageStore.latencyMs} ms)` : ''}`, 'data');
+    mark('healthy');
   } else {
-    output.warning(`⚠️ Provider evidence storage was not verified — ${packageStore?.reason || 'health endpoint unavailable'}`, 'data');
+    const packageTransport = health.transport?.packageStore || packageStore;
+    emitHealthWarning(
+      output,
+      `${healthFailureLabel(packageTransport)} — Provider evidence storage was not verified: ${sanitizeDiagnostic(packageStore?.reason, 'health endpoint unavailable')}`,
+      'Confirm MongoDB is healthy, then run npm run dev:check.',
+      'data'
+    );
+    mark('attention');
   }
 
+  const profileAvailable = !health.transport?.profile || health.transport.profile.ok === true;
   const connections = connectionSummary(health.profile);
-  if (connections.count === 0) {
-    output.warning('⚠️ No Google account is connected for proactive Gmail and Calendar work', 'work');
+  if (!profileAvailable) {
+    emitHealthWarning(
+      output,
+      `${healthFailureLabel(health.transport.profile)} — Workspace connected-service status could not be verified`,
+      'Run npm run dev:check after the API finishes settling.',
+      'work'
+    );
+    mark('attention');
+  } else if (connections.count === 0) {
+    emitHealthWarning(
+      output,
+      'Not configured — Google account is required for proactive Gmail and Calendar work',
+      'Connect Google in the app\'s Connected Accounts settings.',
+      'work'
+    );
+    mark('notConfigured');
   } else {
     const access = `Gmail ${formatAge(connections.lastGmailAccessAt)} · Calendar ${formatAge(connections.lastCalendarAccessAt)}`;
     const permissions = connections.missingPermissionAccounts > 0
       ? ` · ${connections.missingPermissionAccounts} account${connections.missingPermissionAccounts === 1 ? '' : 's'} need permission review`
       : '';
     const accessHealthy = connections.lastGmailAccessAt && connections.lastCalendarAccessAt && connections.missingPermissionAccounts === 0;
-    output.line(accessHealthy ? 'success' : 'warning', `${accessHealthy ? '✅' : '⚠️'} Connected services: ${access}${permissions}`, 'work');
+    if (accessHealthy) {
+      output.success(`✅ Connected services: ${access}${permissions}`, 'work');
+      mark('healthy');
+    } else {
+      emitHealthWarning(
+        output,
+        `Failed — Connected services need attention: ${access}${permissions}`,
+        connections.missingPermissionAccounts > 0
+          ? 'Review Google permissions in Connected Accounts.'
+          : 'Run npm run dev:check -- --deep to test Gmail and Calendar.',
+        'work'
+      );
+      mark('attention');
+    }
   }
 
-  const background = health.profile?.background || {};
-  const monitor = background.monitor || {};
-  const briefing = background.scheduler || {};
-  const knowledge = background.knowledgeReview || {};
-  const aiManagement = background.aiManagement || {};
-  const agentHealth = background.agentHealth || {};
-  const servicesRunning = monitor.running
-    && briefing.running
-    && knowledge.running
-    && aiManagement.running
-    && agentHealth.running;
-  const detail = [
-    `monitor ${monitor.lastTickStatus || (monitor.running ? 'scheduled' : 'stopped')}`,
-    `briefing ${briefing.lastStatus || (briefing.running ? 'scheduled' : 'stopped')}`,
-    `knowledge ${knowledge.lastStatus || (knowledge.running ? 'scheduled' : 'stopped')}`,
-    `AI catalog ${aiManagement.running ? 'scheduled' : 'stopped'}`,
-    agentHealth.lastCheckedAt ? `agents checked ${formatAge(agentHealth.lastCheckedAt)}` : 'agents not checked yet',
-  ].join(' · ');
-  output.line(servicesRunning ? 'success' : 'warning', `${servicesRunning ? '✅' : '⚠️'} Background systems: ${detail}`, 'jobs');
+  if (profileAvailable) {
+    const background = health.profile?.background || {};
+    const monitor = background.monitor || {};
+    const briefing = background.scheduler || {};
+    const knowledge = background.knowledgeReview || {};
+    const aiManagement = background.aiManagement || {};
+    const agentHealth = background.agentHealth || {};
+    const servicesRunning = monitor.running
+      && briefing.running
+      && knowledge.running
+      && aiManagement.running
+      && agentHealth.running;
+    const detail = [
+      `monitor ${monitor.lastTickStatus || (monitor.running ? 'scheduled' : 'stopped')}`,
+      `briefing ${briefing.lastStatus || (briefing.running ? 'scheduled' : 'stopped')}`,
+      `knowledge ${knowledge.lastStatus || (knowledge.running ? 'scheduled' : 'stopped')}`,
+      `AI catalog ${aiManagement.running ? 'scheduled' : 'stopped'}`,
+      agentHealth.lastCheckedAt ? `agents checked ${formatAge(agentHealth.lastCheckedAt)}` : 'agents not checked yet',
+    ].join(' · ');
+    if (servicesRunning) {
+      output.success(`✅ Background systems: ${detail}`, 'jobs');
+      mark('healthy');
+    } else {
+      emitHealthWarning(
+        output,
+        `Failed — One or more background systems are stopped: ${detail}`,
+        'Review the API startup warnings, then run npm run dev:check.',
+        'jobs'
+      );
+      mark('attention');
+    }
+  }
+
+  return summary;
 }
 
 async function collectServiceHealth(ports, options = {}) {
@@ -621,13 +938,32 @@ async function collectServiceHealth(ports, options = {}) {
   const requestFn = options.requestFn || requestHttp;
   const websocketFn = options.websocketFn || checkWebSocket;
   const eventStreamFn = options.eventStreamFn || checkWorkspaceEventStream;
+  const retryOptions = { sleep: options.retrySleep, delayMs: options.retryDelayMs ?? 200 };
   const [realtime, liveCall, eventStream, runtimeResponse, workspaceResponse, profileResponse, packageStoreResponse] = await Promise.all([
-    safeHealthCheck(() => websocketFn(`${wsBase}/api/realtime`, { origin: webBase }), 'Realtime socket check failed.'),
-    safeHealthCheck(() => websocketFn(`${wsBase}/api/live-call-assist/stream`, { origin: webBase }), 'Live Call socket check failed.'),
-    safeHealthCheck(() => eventStreamFn(`${webBase}/api/workspace/monitor`), 'Workspace event-stream check failed.'),
-    safeHealthCheck(() => requestFn(`${webBase}/api/runtime/health`, 5000), 'Runtime health check failed.'),
-    safeHealthCheck(() => requestFn(`${webBase}/api/workspace/status`, 5000), 'Workspace status check failed.'),
-    safeHealthCheck(() => requestFn(`${webBase}/api/workspace/profile`, 5000), 'Workspace profile check failed.'),
+    retryTransientHealthCheck(
+      () => websocketFn(`${wsBase}/api/realtime`, { origin: webBase }),
+      { ...retryOptions, fallbackMessage: 'Realtime socket check failed.' }
+    ),
+    retryTransientHealthCheck(
+      () => websocketFn(`${wsBase}/api/live-call-assist/stream`, { origin: webBase }),
+      { ...retryOptions, fallbackMessage: 'Live Call socket check failed.' }
+    ),
+    retryTransientHealthCheck(
+      () => eventStreamFn(`${webBase}/api/workspace/monitor`),
+      { ...retryOptions, fallbackMessage: 'Workspace event-stream check failed.' }
+    ),
+    retryTransientHealthCheck(
+      () => requestFn(`${webBase}/api/runtime/health`, 5000),
+      { ...retryOptions, fallbackMessage: 'Runtime health check failed.' }
+    ),
+    retryTransientHealthCheck(
+      () => requestFn(`${webBase}/api/workspace/status`, 5000),
+      { ...retryOptions, fallbackMessage: 'Workspace status check failed.' }
+    ),
+    retryTransientHealthCheck(
+      () => requestFn(`${webBase}/api/workspace/profile`, 5000),
+      { ...retryOptions, fallbackMessage: 'Workspace profile check failed.' }
+    ),
     safeHealthCheck(
       () => requestFn(`${webBase}/api/image-parser/package-store-health`, { method: 'POST', timeoutMs: 8000 }),
       'Provider evidence storage check failed.'
@@ -641,6 +977,12 @@ async function collectServiceHealth(ports, options = {}) {
     workspaceStatus: parseJsonResponse(workspaceResponse) || workspaceResponse,
     profile: parseJsonResponse(profileResponse)?.profile || null,
     packageStore: parseJsonResponse(packageStoreResponse) || packageStoreResponse,
+    transport: {
+      runtime: runtimeResponse,
+      workspace: workspaceResponse,
+      profile: profileResponse,
+      packageStore: packageStoreResponse,
+    },
   };
 }
 
@@ -759,44 +1101,155 @@ async function runDeepServiceHealth(ports, output, options = {}) {
   const providerBody = parseJsonResponse(providerRefresh);
   const gateway = providerBody?.providers?.['llm-gateway'] || null;
   const lmStudio = providerBody?.providers?.['lm-studio'] || null;
-  output.line(gmail.ok && gmailBody?.ok !== false ? 'success' : 'warning', `${gmail.ok && gmailBody?.ok !== false ? '✅' : '⚠️'} Gmail live read ${gmail.ok ? 'passed' : 'failed'}`, 'deep');
-  output.line(calendar.ok && calendarBody?.ok !== false ? 'success' : 'warning', `${calendar.ok && calendarBody?.ok !== false ? '✅' : '⚠️'} Calendar live read ${calendar.ok ? 'passed' : 'failed'}`, 'deep');
+  const emptyGroup = () => ({ healthy: 0, attention: 0, notConfigured: 0, total: 0 });
+  const deepSummary = { operational: emptyGroup(), optional: emptyGroup() };
+  const mark = (state, category = 'operational') => {
+    deepSummary[category].total += 1;
+    deepSummary[category][state] += 1;
+  };
+  const deepCheck = (result, body, label, fix) => {
+    const ok = result.ok && body?.ok !== false;
+    if (ok) {
+      output.success(`✅ ${label} passed`, 'deep');
+      mark('healthy');
+      return;
+    }
+    const message = sanitizeDiagnostic(body?.error || body?.message || result.error);
+    const notConfigured = /not (?:connected|configured)|missing .*key|no .*account/i.test(message);
+    emitHealthWarning(
+      output,
+      `${notConfigured ? 'Not configured' : healthFailureLabel(result)} — ${label}: ${message}`,
+      fix,
+      'deep'
+    );
+    mark(notConfigured ? 'notConfigured' : 'attention');
+  };
+  deepCheck(gmail, gmailBody, 'Gmail live read', 'Review Google access in Connected Accounts.');
+  deepCheck(calendar, calendarBody, 'Calendar live read', 'Review Google access in Connected Accounts.');
   const canaryOk = canary.ok && canaryBody?.canary?.ok === true;
-  output.line(canaryOk ? 'success' : 'warning', `${canaryOk ? '✅' : '⚠️'} Workspace AI canary ${canaryOk ? `passed on ${canaryBody.canary.providerUsed || runtime.provider || 'assigned provider'}` : 'failed'}`, 'deep');
-  output.line(elevenLabs.ok ? 'success' : 'warning', `${elevenLabs.ok ? '✅' : '⚠️'} ElevenLabs live connection ${elevenLabs.ok ? `passed (${elevenLabs.latencyMs} ms)` : `failed — ${elevenLabs.error}`}`, 'deep');
-  output.line(gateway?.available ? 'success' : 'info', `${gateway?.available ? '✅' : 'ℹ️'} LLM Gateway ${gateway?.available ? 'reachable' : 'not available (optional)'}`, 'deep');
-  output.line(lmStudio?.available ? 'success' : 'info', `${lmStudio?.available ? '✅' : 'ℹ️'} LM Studio ${lmStudio?.available ? 'reachable' : 'not available (optional)'}`, 'deep');
+  if (canaryOk) {
+    output.success(`✅ Workspace AI canary passed on ${canaryBody.canary.providerUsed || runtime.provider || 'assigned provider'}`, 'deep');
+    mark('healthy');
+  } else {
+    emitHealthWarning(
+      output,
+      `${healthFailureLabel(canary)} — Workspace AI canary did not pass`,
+      'Review the assigned Workspace provider, then rerun the deep check.',
+      'deep'
+    );
+    mark('attention');
+  }
+  if (elevenLabs.ok) {
+    output.success(`✅ ElevenLabs live connection passed (${elevenLabs.latencyMs} ms)`, 'deep');
+    mark('healthy', 'optional');
+  } else {
+    const elevenLabsMessage = sanitizeDiagnostic(elevenLabs.error);
+    const elevenLabsNotConfigured = /not configured|missing .*key/i.test(elevenLabsMessage);
+    emitHealthWarning(
+      output,
+      `${elevenLabsNotConfigured ? 'Not configured' : healthFailureLabel(elevenLabs)} — ElevenLabs live connection: ${elevenLabsMessage}`,
+      'Review the ElevenLabs key and connection settings.',
+      'deep'
+    );
+    mark(elevenLabsNotConfigured ? 'notConfigured' : 'attention', 'optional');
+  }
+  output.line(gateway?.available ? 'success' : 'info', `${gateway?.available ? '✅' : 'ℹ️'} Optional — LLM Gateway ${gateway?.available ? 'reachable' : gateway ? 'unavailable' : 'not configured'}`, 'deep');
+  mark(gateway?.available ? 'healthy' : gateway ? 'attention' : 'notConfigured', 'optional');
+  output.line(lmStudio?.available ? 'success' : 'info', `${lmStudio?.available ? '✅' : 'ℹ️'} Optional — LM Studio ${lmStudio?.available ? 'reachable' : lmStudio ? 'unavailable' : 'not configured'}`, 'deep');
+  mark(lmStudio?.available ? 'healthy' : lmStudio ? 'attention' : 'notConfigured', 'optional');
   const directoriesOk = dataWrite.ok && uploadWrite.ok;
-  output.line(directoriesOk ? 'success' : 'warning', `${directoriesOk ? '✅' : '⚠️'} Data and upload folders ${directoriesOk ? 'passed write/read/delete checks' : 'are not fully writable'}`, 'deep');
+  if (directoriesOk) {
+    output.success('✅ Data and upload folders passed write/read/delete checks', 'deep');
+    mark('healthy');
+  } else {
+    emitHealthWarning(output, 'Failed — Data and upload folders are not fully writable', 'Check folder permissions under server/data and server/uploads.', 'deep');
+    mark('attention');
+  }
   if (disk.ok && Number.isFinite(disk.availableBytes)) {
     const freeGb = disk.availableBytes / (1024 ** 3);
-    output.line(freeGb >= 2 ? 'success' : 'warning', `${freeGb >= 2 ? '✅' : '⚠️'} Disk space: ${freeGb.toFixed(1)} GB available`, 'deep');
+    if (freeGb >= 2) {
+      output.success(`✅ Disk space: ${freeGb.toFixed(1)} GB available`, 'deep');
+      mark('healthy');
+    } else {
+      emitHealthWarning(output, `Failed — Low disk space: ${freeGb.toFixed(1)} GB available`, 'Free at least 2 GB before running large checks.', 'deep');
+      mark('attention');
+    }
   } else {
-    output.info(`ℹ️ Disk space could not be measured${disk.error ? ` — ${disk.error}` : ''}`, 'deep');
+    output.info(`ℹ️ Optional — Disk space unavailable${disk.error ? `: ${disk.error}` : ''}`, 'deep');
+    mark('attention');
   }
 
-  return { gmail, calendar, canary, elevenLabs, providerRefresh, dataWrite, uploadWrite, disk };
+  return { gmail, calendar, canary, elevenLabs, providerRefresh, dataWrite, uploadWrite, disk, summary: deepSummary };
 }
 
 async function runServiceHealthChecks(ports, options = {}) {
   const output = options.output || createOutput({ color: false });
   output.blank();
-  output.heading('🩺 Service health');
+  output.heading(options.postReady ? '🔄 Finishing background checks' : '🩺 Service health');
   const health = await collectServiceHealth(ports, options);
-  emitServiceHealth(output, health);
+  health.summary = emitServiceHealth(output, health);
   if (options.deep) {
     output.blank();
     output.heading('🧪 Deep external checks');
     output.write('   These checks contact connected services and use one small AI canary request.');
     health.deep = await runDeepServiceHealth(ports, output, { ...options, profile: health.profile });
+    health.summary = mergeHealthSummaries(health.summary, health.deep.summary);
   }
   return health;
 }
 
-function renderPreview(output, ports = { api: DEFAULT_API_PORT, client: DEFAULT_CLIENT_PORT }) {
+function mergeHealthSummaries(...summaries) {
+  const createGroup = () => ({ healthy: 0, attention: 0, notConfigured: 0, total: 0 });
+  const merged = { operational: createGroup(), optional: createGroup() };
+  for (const summary of summaries.filter(Boolean)) {
+    const normalized = summary.operational || summary.optional
+      ? summary
+      : { operational: summary, optional: createGroup() };
+    for (const category of ['operational', 'optional']) {
+      for (const field of ['healthy', 'attention', 'notConfigured', 'total']) {
+        merged[category][field] += Number(normalized[category]?.[field]) || 0;
+      }
+    }
+  }
+  return merged;
+}
+
+function formatReadySummary(options = {}) {
+  const health = options.healthSummary || {};
+  const operational = health.operational || {
+    healthy: Number(health.healthy) || 0,
+    attention: Number(health.attention) || 0,
+    notConfigured: Number(health.notConfigured) || 0,
+    total: Number(health.total) || 0,
+  };
+  const optional = health.optional || { healthy: 0, attention: 0, notConfigured: 0, total: 0 };
+  const parts = [
+    `core ${options.coreReady ?? 2}/${options.coreTotal ?? 2} ready`,
+    `operational ${Number(operational.healthy) || 0}/${Number(operational.total) || 0} healthy`,
+  ];
+  if (Number(operational.notConfigured) > 0) parts.push(`${operational.notConfigured} operational not configured`);
+  if (Number(operational.attention) > 0) {
+    parts.push(`${operational.attention} operational ${Number(operational.attention) === 1 ? 'needs' : 'need'} attention`);
+  }
+  if (Number(optional.total) > 0) {
+    const optionalDetails = [
+      Number(optional.healthy) > 0 ? `${optional.healthy} healthy` : '',
+      Number(optional.notConfigured) > 0 ? `${optional.notConfigured} not configured` : '',
+      Number(optional.attention) > 0 ? `${optional.attention} ${Number(optional.attention) === 1 ? 'needs' : 'need'} attention` : '',
+    ].filter(Boolean).join(', ');
+    parts.push(`optional ${optionalDetails}`);
+  } else {
+    parts.push('optional live checks deferred');
+  }
+  return `✨ Ready in ${formatDuration(options.durationMs)} — ${parts.join(' · ')}`;
+}
+
+function renderPreview(output, ports = { api: DEFAULT_API_PORT, client: DEFAULT_CLIENT_PORT }, options = {}) {
+  const identity = options.identity || { branch: 'master', commit: '417b85c', dirty: false, nodeVersion: process.versions.node };
   output.banner();
   output.blank();
   output.heading('🔎 Preflight');
+  output.info(`ℹ️ ${identity.branch} · commit ${identity.commit}${identity.dirty ? ' · local changes' : ''} · Node ${identity.nodeVersion}`);
   output.success(`✅ API port ${ports.api} is available`);
   output.success(`✅ Web port ${ports.client} is available`);
   output.blank();
@@ -809,19 +1262,27 @@ function renderPreview(output, ports = { api: DEFAULT_API_PORT, client: DEFAULT_
   output.info('🤖 AI providers ready: OpenAI, Kimi, Gemini, Claude CLI, Codex CLI', 'api');
   output.info('ℹ️ Optional connections unavailable: LLM Gateway, LM Studio', 'api');
   output.blank();
-  output.heading('🩺 Service health');
+  output.heading('✨ Core app ready in 4.2s');
+  output.write(`   App: ${colorize('36;4', `http://localhost:${ports.client}`, output.color)}`);
+  output.write(`   API: ${colorize('36;4', `http://127.0.0.1:${ports.api}`, output.color)}`);
+  output.write('   Press Ctrl+C once to stop both services.');
+  output.blank();
+  output.heading('🔄 Finishing background checks');
   output.success('✅ Realtime socket healthy through web proxy (19 ms)', 'live');
   output.success('✅ Workspace event stream connected (8 ms)', 'live');
-  output.success('✅ Local Live Call socket ready — ElevenLabs configured, external call not tested', 'call');
+  output.success('✅ Local Live Call socket ready — ElevenLabs configured; external call not tested', 'call');
   output.success('✅ No stuck requests, AI operations, Workspace sessions, or background tasks', 'jobs');
   output.success('✅ Provider evidence storage is writable and readable (12 ms)', 'data');
   output.success('✅ Connected services: Gmail just now · Calendar 2m ago', 'work');
   output.success('✅ Background systems: monitor healthy · briefing healthy · knowledge review-needed · AI catalog scheduled · agents checked just now', 'jobs');
   output.blank();
-  output.heading('✨ Core app ready');
-  output.write(`   App: ${colorize('36;4', `http://localhost:${ports.client}`, output.color)}`);
-  output.write(`   API: ${colorize('36;4', `http://127.0.0.1:${ports.api}`, output.color)}`);
-  output.write('   Press Ctrl+C once to stop both services.');
+  output.always(formatReadySummary({
+    durationMs: 4300,
+    healthSummary: {
+      operational: { healthy: 7, notConfigured: 0, attention: 0, total: 7 },
+      optional: { healthy: 0, notConfigured: 0, attention: 0, total: 0 },
+    },
+  }));
 }
 
 function buildNpmInvocation(scriptName, options = {}) {
@@ -872,42 +1333,93 @@ function explainStartupFailure(error, recentLines = []) {
 
 async function runDevLauncher(options = {}) {
   const parsed = { ...parseArgs(), ...options };
-  const output = parsed.output || createOutput({ color: parsed.color });
+  if (parsed.quiet) parsed.verbose = false;
+  const output = parsed.output || createOutput({ color: parsed.color, quiet: parsed.quiet });
   const ports = parsed.ports || resolvePorts({ env: parsed.env });
   const healthRunner = parsed.healthRunner || runServiceHealthChecks;
+  const inspectStack = parsed.inspectExistingStackFn || inspectExistingStack;
+  const browserOpener = parsed.openBrowserFn || openBrowser;
+  const now = parsed.now || Date.now;
+  const startedAt = now();
+  const identity = parsed.identity || getRuntimeIdentity({ nodeVersion: parsed.nodeVersion });
+  const showReadySummary = (healthSummary, durationMs = now() - startedAt) => {
+    output.always(formatReadySummary({ durationMs, healthSummary }));
+  };
+  const maybeOpenApp = async () => {
+    if (!parsed.open) return false;
+    try {
+      await browserOpener(`http://localhost:${ports.client}/`);
+      output.success('✅ Opened the web app in your default browser', 'web');
+      return true;
+    } catch (error) {
+      emitHealthWarning(
+        output,
+        `Failed — The browser could not be opened automatically: ${sanitizeDiagnostic(error.message)}`,
+        `Open http://localhost:${ports.client}/ manually.`,
+        'web'
+      );
+      return false;
+    }
+  };
+  const runHealthSafely = async (healthOptions = {}) => {
+    try {
+      return await healthRunner(ports, { output, deep: parsed.deep, ...healthOptions });
+    } catch (error) {
+      emitHealthWarning(
+        output,
+        `Unavailable — Background health checks could not finish: ${sanitizeDiagnostic(error.message)}`,
+        'Run npm run dev:check after startup settles.',
+        'dev'
+      );
+      return { summary: { healthy: 0, attention: 1, notConfigured: 0, total: 1 } };
+    }
+  };
 
   if (parsed.preview) {
-    renderPreview(output, ports);
+    renderPreview(output, ports, { identity });
     return { mode: 'preview', ports };
   }
 
   output.banner();
   output.blank();
   output.heading('🔎 Preflight');
-  const existing = await inspectExistingStack(ports);
+  output.info(`ℹ️ ${identity.branch} · commit ${identity.commit}${identity.dirty ? ' · local changes' : ''} · Node ${identity.nodeVersion}`);
+  const existing = await inspectStack(ports);
   if (parsed.check) {
     if (existing.apiIsQbo) output.success(`✅ QBO API is healthy on port ${ports.api}`);
-    else if (existing.apiConnected) output.warning(`⚠️ Port ${ports.api} is occupied, but it did not identify as the QBO API`);
+    else if (existing.apiConnected) {
+      output.warning(`⚠️ Port ${ports.api} is occupied, but it did not identify as the QBO API`);
+      output.action('Check the port owner before stopping any process.');
+    }
     else output.info(`ℹ️ QBO API is not running on port ${ports.api}`);
 
     if (existing.clientPage?.ok) output.success(`✅ QBO web app is available on port ${ports.client}`);
-    else if (existing.clientConnected) output.warning(`⚠️ Port ${ports.client} is occupied, but it did not return the QBO web app`);
+    else if (existing.clientConnected) {
+      output.warning(`⚠️ Port ${ports.client} is occupied, but it did not return the QBO web app`);
+      output.action('Check the port owner before stopping any process.');
+    }
     else output.info(`ℹ️ QBO web app is not running on port ${ports.client}`);
+    let health = null;
     if (existing.apiIsQbo && existing.clientPage?.ok) {
-      await healthRunner(ports, { output, deep: parsed.deep });
+      await maybeOpenApp();
+      health = await runHealthSafely();
     } else if (parsed.deep) {
       output.warning('⚠️ Deep checks need both the QBO API and web app to be running.');
+      output.action('Start the app first, then rerun npm run dev:check -- --deep.');
     }
     output.write('   Status check only — no processes were started or stopped.');
-    return { mode: 'check', ports, existing, deep: parsed.deep };
+    if (existing.apiIsQbo && existing.clientPage?.ok) showReadySummary(health?.summary);
+    return { mode: 'check', ports, existing, deep: parsed.deep, health };
   }
   if (existing.apiIsQbo && existing.clientPage?.ok) {
     output.info('ℹ️ This development stack is already running; no duplicate processes were started.');
-    await healthRunner(ports, { output, deep: parsed.deep });
+    await maybeOpenApp();
+    const health = await runHealthSafely();
     output.write(`   App: http://localhost:${ports.client}`);
     output.write(`   API: http://127.0.0.1:${ports.api}`);
     output.write('   If you expected fresh code, stop the existing dev terminal and run this command again.');
-    return { mode: 'already-running', ports };
+    showReadySummary(health?.summary);
+    return { mode: 'already-running', ports, health };
   }
   if (existing.apiConnected || existing.clientConnected) {
     if (existing.apiConnected) output.error(formatPortConflict('api', ports.api, existing.apiIsQbo));
@@ -923,21 +1435,21 @@ async function runDevLauncher(options = {}) {
 
   const state = {};
   const children = [];
+  const childDetails = new Map();
   const startupLines = [];
   let shuttingDown = false;
   let fullyReady = false;
 
   const shutdown = async (reason = 'shutdown') => {
-    if (shuttingDown) return;
+    if (shuttingDown) return { ok: false, alreadyInProgress: true };
     shuttingDown = true;
     output.blank();
     output.info(`🛑 ${reason === 'SIGINT' ? 'Stopping development services' : 'Cleaning up development services'}…`);
-    await Promise.all(children.slice().reverse().map((child) => stopProcessTree(child)));
-    output.success('✅ Client and API stopped');
+    return stopDevelopmentServices(children, childDetails, output, { reason });
   };
 
   const signalHandler = (signal) => {
-    void shutdown(signal).then(() => { process.exitCode = 0; });
+    void shutdown(signal).then((result) => { process.exitCode = result?.ok ? 0 : 1; });
   };
   process.once('SIGINT', signalHandler);
   process.once('SIGTERM', signalHandler);
@@ -957,6 +1469,7 @@ async function runDevLauncher(options = {}) {
       },
     });
     children.push(server);
+    childDetails.set(server, { label: 'API', source: 'api' });
     attachChildOutput(server, 'api', output, state, { recentLines: startupLines, verbose: parsed.verbose });
 
     const apiReady = await waitForHttp(`http://127.0.0.1:${ports.api}/api/health`, {
@@ -977,6 +1490,7 @@ async function runDevLauncher(options = {}) {
       },
     });
     children.push(client);
+    childDetails.set(client, { label: 'Web app', source: 'web' });
     attachChildOutput(client, 'web', output, state, { recentLines: startupLines, verbose: parsed.verbose });
 
     const clientReady = await waitForHttp(`http://localhost:${ports.client}/`, {
@@ -986,15 +1500,16 @@ async function runDevLauncher(options = {}) {
     });
     output.success(`✅ Web app ready at http://localhost:${ports.client} (${(clientReady.elapsedMs / 1000).toFixed(1)}s)`, 'web');
 
-    await healthRunner(ports, { output, deep: parsed.deep });
-
     fullyReady = true;
+    state.coreReady = true;
     output.blank();
-    output.heading('✨ Core app ready');
+    output.heading(`✨ Core app ready in ${formatDuration(now() - startedAt)}`);
     output.write(`   App: http://localhost:${ports.client}`);
     output.write(`   API: http://127.0.0.1:${ports.api}`);
     output.write('   Press Ctrl+C once to stop both services.');
     if (!parsed.verbose) output.write('   Need raw details? Run: npm run dev -- --verbose');
+
+    await maybeOpenApp();
 
     const onUnexpectedExit = (name) => (code, signal) => {
       if (shuttingDown) return;
@@ -1005,7 +1520,14 @@ async function runDevLauncher(options = {}) {
     server.once('exit', onUnexpectedExit('API process'));
     client.once('exit', onUnexpectedExit('Web process'));
 
-    return { mode: 'running', ports, children };
+    const health = await runHealthSafely({ postReady: true });
+
+    if (!shuttingDown) {
+      output.blank();
+      showReadySummary(health?.summary);
+    }
+
+    return { mode: 'running', ports, children, health };
   } catch (error) {
     if (!fullyReady) output.error(`❌ ${explainStartupFailure(error, startupLines)}`);
     await shutdown('startup failure');
@@ -1021,7 +1543,8 @@ async function runDevLauncher(options = {}) {
 if (require.main === module) {
   runDevLauncher().catch((error) => {
     if (error.code !== 'DEV_PORT_IN_USE') {
-      const output = createOutput({ color: parseArgs().color });
+      const parsed = parseArgs();
+      const output = createOutput({ color: parsed.color, quiet: parsed.quiet });
       output.muted(`Details: ${error.message}`);
     }
     process.exitCode = 1;
@@ -1029,6 +1552,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  buildOpenInvocation,
   buildNpmInvocation,
   buildTreeKillInvocation,
   canConnect,
@@ -1041,14 +1565,19 @@ module.exports = {
   connectionSummary,
   createOutput,
   emitServiceHealth,
+  formatDuration,
   formatPortConflict,
   formatAge,
+  formatReadySummary,
+  getRuntimeIdentity,
   inspectExistingStack,
   latestTimestamp,
+  mergeHealthSummaries,
   parseArgs,
   parseEnvValue,
   parseJsonResponse,
   parsePort,
+  openBrowser,
   renderPreview,
   requestHttp,
   resolvePorts,
@@ -1056,7 +1585,10 @@ module.exports = {
   runDeepServiceHealth,
   runServiceHealthChecks,
   safeHealthCheck,
+  sanitizeDiagnostic,
+  stopDevelopmentServices,
   stripAnsi,
   translateChildLine,
   waitForHttp,
+  retryTransientHealthCheck,
 };

@@ -44,7 +44,7 @@
       "args": ["--test", "scripts/dev-launcher.test.js", "server/test/startup-console.test.js", "server/test/service-health-status.test.js", "server/test/knowledgebase-agent-scheduler.test.js"],
       "cwd": ".",
       "timeoutMs": 30000,
-      "why": "Checks startup messaging, port safety, readiness ordering, WebSocket and event-stream health, background-service status, evidence-store reporting, Windows process handling, provider summaries, and timeout cleanup without controlling persistent services.",
+      "why": "Checks startup messaging, code identity, core-before-background ordering, safe transient retry, precise recovery guidance, quiet and browser-open modes, WebSocket and event-stream health, evidence-store reporting, and honest per-service shutdown without controlling persistent services.",
       "capabilities": ["development-startup-safety"]
     },
     "client-build": {

@@ -76,6 +76,14 @@ Before reporting:
 - Distinguish “the expected port did not answer” from “the service is not running.” Report the latter only after the configured ports and live listeners/process owners have been checked, and state what was checked.
 - Runtime discovery does not grant runtime control: do not start, stop, restart, kill, or replace any service while looking for it unless the user explicitly authorizes that action.
 
+### Friendly Development Startup Maintenance
+
+- Apply this maintenance rule only when a change affects local startup or runtime visibility: adding, removing, or renaming a service, scheduler, port, or dependency; changing readiness, health, retry, restart, or shutdown behavior; or changing what `npm run dev` should report. Unrelated feature work does not need to edit the launcher or its documentation.
+- When the rule applies, keep the friendly startup experience synchronized across the real service inventory, `scripts/dev-launcher.js`, focused launcher/startup tests, `npm run dev:preview`, and `docs/development-startup.md`.
+- Preserve the terminal contract: a concise visual status grammar; precise distinctions between required, optional, not configured, unavailable, and failed; one safe retry before reporting a transient readiness problem as final; short remediation only when action is useful; running branch/commit and Node identity; a clearly labeled late/background-check section; a final elapsed-time and core-versus-optional summary; and clean per-service shutdown reporting.
+- Keep supported quality-of-life behavior synchronized too: `--open`, `--quiet`, explicit `--no-color`, and automatic color removal when output is redirected. Never print secrets, account addresses, or raw provider payloads in normal startup output.
+- Verify applicable changes with focused tests and `npm run dev:preview`. Use `npm run dev:check` only against an already-running user-owned stack, and do not run opt-in deep external checks unless the task calls for them.
+
 ### Prototype Isolation (Default)
 
 - Build prototypes as standalone files in `prototypes/<prototype-name>/`.

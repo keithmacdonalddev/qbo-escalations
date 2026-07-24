@@ -81,6 +81,14 @@ npm start            # Production server
 
 The user owns local runtime control — never start, stop, restart, or replace the app server, client dev server, MongoDB, or any long-running local service unless the user explicitly asks in the current conversation (a PreToolUse hook also enforces this). Allowed without asking: checking ports/process owners, reading logs, calling health endpoints. If a change requires a restart, make the change and say exactly what to restart. On `EADDRINUSE`, identify the port owner and ask before killing a healthy instance. Short-lived test servers inside test runners are fine, but leave nothing running after verification.
 
+## Friendly Development Startup Maintenance
+
+- Apply this maintenance rule only when a change affects local startup or runtime visibility: adding, removing, or renaming a service, scheduler, port, or dependency; changing readiness, health, retry, restart, or shutdown behavior; or changing what `npm run dev` should report. Unrelated feature work does not need to edit the launcher or its documentation.
+- When the rule applies, keep the friendly startup experience synchronized across the real service inventory, `scripts/dev-launcher.js`, focused launcher/startup tests, `npm run dev:preview`, and `docs/development-startup.md`.
+- Preserve the terminal contract: a concise visual status grammar; precise distinctions between required, optional, not configured, unavailable, and failed; one safe retry before reporting a transient readiness problem as final; short remediation only when action is useful; running branch/commit and Node identity; a clearly labeled late/background-check section; a final elapsed-time and core-versus-optional summary; and clean per-service shutdown reporting.
+- Keep supported quality-of-life behavior synchronized too: `--open`, `--quiet`, explicit `--no-color`, and automatic color removal when output is redirected. Never print secrets, account addresses, or raw provider payloads in normal startup output.
+- Verify applicable changes with focused tests and `npm run dev:preview`. Use `npm run dev:check` only against an already-running user-owned stack, and do not run opt-in deep external checks unless the task calls for them.
+
 ## Parallel Sessions And Worktree Awareness
 
 Multiple chat sessions or coding agents may be working in this repository at the same time. Assume the worktree can change while you are working.

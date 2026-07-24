@@ -15,7 +15,17 @@ The normal output is intentionally concise:
 - `⚠️` means the app can continue, but something optional or degraded deserves attention.
 - `❌` means startup cannot safely continue.
 
-When everything is ready, the launcher prints the web and API addresses and keeps running. Press `Ctrl+C` once to stop both process trees together.
+Status wording has one meaning everywhere:
+
+- **Required** means the app cannot provide its core development workflow without it.
+- **Optional** means the app remains usable when it is absent.
+- **Not configured** means setup was intentionally omitted; this is not a connection failure.
+- **Unavailable** means a configured service could not currently be reached.
+- **Failed** means a service answered or started, but its check returned an error.
+
+Transient readiness failures receive one safe retry before they are reported as final. When action is useful, the launcher prints one short remediation line instead of a raw stack trace. It also identifies the running branch, commit, local-change state, and Node version so an older or modified terminal is easy to recognize.
+
+Checks that finish after the core app becomes usable appear under a separate background-check heading. The final summary reports elapsed time, passed core checks, and unavailable optional services. When everything is ready, the launcher prints the web and API addresses and keeps running. Press `Ctrl+C` once to stop both process trees together; shutdown reports the API and web app separately and confirms whether both stopped cleanly.
 
 ## Useful commands
 
@@ -32,9 +42,17 @@ npm run dev:check -- --deep
 # Show all raw npm, nodemon, Vite, and server output
 npm run dev -- --verbose
 
+# Open the app in the default browser after it becomes ready
+npm run dev -- --open
+
+# Show only warnings, errors, and the final result
+npm run dev -- --quiet
+
 # Disable ANSI terminal colors
 npm run dev -- --no-color
 ```
+
+Terminal colors are also disabled automatically when output is redirected to a file or another command.
 
 ## Health-check levels
 
@@ -63,3 +81,17 @@ The shared WebSocket and event-stream checks run through `localhost:5174`, which
 - A transport or optional-service warning does not kill an otherwise usable app. It remains visible so the owner knows which live capability is degraded.
 
 This output is temporary terminal information. It helps with the current development run but is not a durable incident history.
+
+## Maintenance contract for coding agents
+
+Update this startup experience only when a code change affects what local startup should know or report. Typical triggers are a service, scheduler, port, or dependency being added, removed, or renamed, or a change to readiness, health, retry, restart, or shutdown behavior. Ordinary feature work that does not affect startup needs no launcher edit.
+
+When a trigger applies, update these together:
+
+1. The launcher's real service and dependency inventory.
+2. Health/readiness checks and required-versus-optional classification.
+3. The visual grammar, precise failure wording, and short remediation text.
+4. Focused launcher/startup tests and the `npm run dev:preview` example.
+5. This document, including commands and edge cases.
+
+Keep the terminal concise and privacy-safe. Normal startup must not print secrets, connected-account addresses, or raw provider payloads. Verify with focused tests and `npm run dev:preview`; do not start or stop the user's persistent services merely to maintain this contract.
