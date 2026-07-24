@@ -23,13 +23,16 @@ Functional correctness is necessary but is not enough to call UI work complete. 
 - Use progressive disclosure: ask for the next required decision first, then reveal the controls that decision makes relevant.
 - Keep optional information collapsed or visually secondary until the user asks for it.
 - Give every interactive control intentional hover, focus-visible, active, selected, disabled, and loading behavior where those states apply.
-- Use purposeful 120–180ms motion to explain selection and disclosure changes, with a reduced-motion fallback.
+- Use purposeful 160–220ms motion to explain selection and disclosure changes, with a reduced-motion fallback.
+- Keep modals, drawers, and panels dimensionally stable while their internal content changes. Reveal or replace content inside the frame and scroll within it; do not make the outer container jump between workflow steps.
 - Use one explicit control height within a row. Labels, inputs, icons, and helper text must align; accidental height differences are a release defect.
 - Preserve 8–10px between a field label and its control unless a documented dense pattern requires otherwise.
 - Apply the space/value assessment before review. Large empty containers and decorative cards must be reduced or removed when they do not help the next action.
 - Inspect desktop and mobile renderings, interaction states, and browser console output before declaring the UI complete. If the browser surface is unavailable, report the visual gate as incomplete; do not infer a pass from source or tests.
 
 User screenshots and direct usability feedback are product evidence. Repeated criticism of density, hierarchy, interaction feedback, or alignment means the design standard or review process must be corrected, not treated as a one-off styling preference.
+
+For feedback/reporting specifically, the modal is one new-report workflow. The report-type chooser is the only initial decision. Selecting a type reveals the matching form inside the same fixed frame. Name and email remain visible as two compact, equal-height fields with a small `Optional` qualifier beside each label. Screenshot capture is one compact `Add a screenshot` row with the same small qualifier. Required technical metadata is collected silently and disclosed through a low-emphasis link to Ticket Snitch's public data-use page; it is not presented as a checkbox or a large explanatory card. Do not show placeholder history tabs or disclosures for features that are not part of the current task.
 
 ## Source of truth and implementation map
 
@@ -44,7 +47,7 @@ User screenshots and direct usability feedback are product evidence. Repeated cr
 | AI catalog workspace | `client/src/components/AiManagementSettings.jsx` | Provider/model management and new-model review |
 | Connected accounts | `client/src/components/SettingsAccountsSection.jsx` | Account health, permissions, repair, and purpose-specific defaults |
 | AI safety controls | `client/src/components/AiAssistantSettingsPanel.jsx` | Accordion-based advanced configuration |
-| Feedback and problem reporting | `client/src/components/reporting/UserReportDialog.jsx` and `.css` | Progressive type selection, report form, optional contact and evidence controls |
+| Feedback and problem reporting | `client/src/components/reporting/UserReportDialog.jsx` and `.css` | Fixed-frame new-report flow, progressive type selection, compact optional contact and screenshot controls |
 
 Prototypes under `prototypes/` are deliberately excluded from the production design contract unless a later maintained change explicitly promotes them.
 
@@ -423,7 +426,7 @@ Define unfamiliar technical terms immediately in everyday language. Prefer one s
 
 ## Motion
 
-Use 120–180ms transitions for hover, focus, switching, and small disclosure changes. A short opacity-and-position reveal is appropriate when a user choice causes the next stage of a form to appear. Motion should clarify state change. Avoid entrance animations for ordinary static settings and repeated floating/pulsing treatments. Disable nonessential motion when reduced motion is requested.
+Use 160–220ms transitions for hover, focus, switching, and small disclosure changes. A short opacity-and-position reveal is appropriate when a user choice causes the next stage of a form to appear. Motion should clarify state change without moving or resizing the surrounding modal, drawer, or panel. Avoid entrance animations for ordinary static settings and repeated floating/pulsing treatments. Disable nonessential motion when reduced motion is requested.
 
 ## Quality checklist
 
@@ -434,14 +437,15 @@ Before merging a UI change:
 3. Use the canonical tokens; search for new hard-coded colors.
 4. Confirm title, copy, and action hierarchy.
 5. Confirm progressive disclosure: only controls needed for the current decision are prominent.
-6. Check hover, focus-visible, active, selected, disabled, loading, empty, warning, error, dirty, and saved states as applicable.
-7. Verify equal control heights, label gaps, alignment, keyboard focus, and accessible names.
-8. Build the client and run focused interaction tests.
-9. Inspect the live desktop route at a typical laptop viewport.
-10. Inspect a mobile viewport.
-11. Check browser console errors.
-12. If visual inspection was blocked, mark the visual gate incomplete instead of declaring a visual pass.
-13. Re-read changed files before reporting current state.
+6. Verify that internal state changes do not resize or reposition the containing modal, drawer, or panel.
+7. Check hover, focus-visible, active, selected, disabled, loading, empty, warning, error, dirty, and saved states as applicable.
+8. Verify equal control heights, label gaps, alignment, keyboard focus, and accessible names.
+9. Build the client and run focused interaction tests.
+10. Inspect the live desktop route at a typical laptop viewport.
+11. Inspect a mobile viewport.
+12. Check browser console errors.
+13. If visual inspection was blocked, mark the visual gate incomplete instead of declaring a visual pass.
+14. Re-read changed files before reporting current state.
 
 ## Known design debt
 
@@ -453,7 +457,7 @@ Before merging a UI change:
 
 Use this context when requesting implementation:
 
-> Build this as a compact operational interface using the repository's existing Slate design tokens from `client/src/App.css`. Put the user's actual task in the first viewport and use progressive disclosure so each step shows only what is relevant now. Apply the space/value assessment from `DESIGN.md` to every visible element. Prefer one organized surface with dividers over a collection of cards. Give controls deliberate hover, focus-visible, active, selected, disabled, and loading states; keep aligned inputs equal in height; and use 120–180ms purposeful motion with reduced-motion support. Verify desktop and mobile in the live app. If browser verification is unavailable, say the visual gate is incomplete rather than inferring a pass from tests or build output.
+> Build this as a compact operational interface using the repository's existing Slate design tokens from `client/src/App.css`. Put the user's actual task in the first viewport and use progressive disclosure so each step shows only what is relevant now. Apply the space/value assessment from `DESIGN.md` to every visible element. Prefer one organized surface with dividers over a collection of cards. Keep the outer frame of modals, drawers, and panels stable while content changes inside it. Give controls deliberate hover, focus-visible, active, selected, disabled, and loading states; keep aligned inputs equal in height; and use 160–220ms purposeful motion with reduced-motion support. Verify desktop and mobile in the live app. If browser verification is unavailable, say the visual gate is incomplete rather than inferring a pass from tests or build output.
 
 For Settings work, add:
 

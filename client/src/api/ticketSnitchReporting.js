@@ -87,7 +87,6 @@ export async function submitUserReport({
   explanation,
   reporterName = '',
   reporterEmail = '',
-  includeDiagnostics,
   errorCode = '',
   screenshot = null,
 }) {
@@ -113,18 +112,16 @@ export async function submitUserReport({
           ...(reporterEmail.trim() ? { email: reporterEmail.trim().toLowerCase() } : {}),
         },
       } : {}),
-      includeDiagnostics,
       ...(screenshotPayload ? { screenshot: screenshotPayload } : {}),
       context: {
         pageUrl,
         routeName,
         appVersion: import.meta.env.VITE_APP_VERSION || '1.0.0',
-        ...(includeDiagnostics ? {
-          browser: navigator.userAgent,
-          viewport: `${window.innerWidth}x${window.innerHeight}`,
-          locale: navigator.language,
-          errorCode,
-        } : {}),
+        browser: navigator.userAgent,
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        locale: navigator.language,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+        errorCode,
       },
     }),
   });

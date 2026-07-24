@@ -33,6 +33,7 @@ beforeEach(() => {
     reporterScope: 'qrv_test-browser-scope',
     requestId: 'bootstrap-request',
     screenshotAvailable: true,
+    dataUseUrl: 'https://tickets.example.test/api/v1/data-use',
   });
   reportingMocks.submitUserReport.mockReset().mockResolvedValue({
     ok: true,
@@ -82,11 +83,17 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   expect(screen.getByRole('radio', { name: 'Feedback' })).not.toBeChecked();
   expect(screen.queryByLabelText('Short title')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Send report' })).not.toBeInTheDocument();
+  expect(screen.queryByText('New report')).not.toBeInTheDocument();
+  expect(screen.queryByText('My reports')).not.toBeInTheDocument();
 
   await user.click(screen.getByRole('radio', { name: 'Feature request' }));
   expect(screen.getByLabelText('What would help?')).toHaveAttribute('placeholder', expect.stringMatching(/capability/i));
-  expect(screen.getByText('Add contact details')).toBeVisible();
-  expect(screen.getByLabelText('Name')).not.toBeVisible();
+  expect(screen.getByLabelText(/^Name/)).toBeVisible();
+  expect(screen.getByLabelText(/^Email/)).toBeVisible();
+  expect(screen.getByRole('heading', { name: /^Add a screenshot/ })).toBeVisible();
+  expect(screen.queryByRole('checkbox', { name: /diagnostics/i })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'here' })).toHaveAttribute('href', 'https://tickets.example.test/api/v1/data-use');
+  expect(screen.getByRole('link', { name: 'here' })).toHaveAttribute('target', '_blank');
 
   await user.click(screen.getByRole('radio', { name: 'Feedback' }));
   expect(screen.getByLabelText('What should we improve?')).toBeVisible();
@@ -100,13 +107,12 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   expect(reportingMocks.submitUserReport).not.toHaveBeenCalled();
 });
 
-it('submits consented feedback and shows the returned Ticket Snitch case key', async () => {
+it('submits feedback with mandatory metadata handled outside the form and shows the returned Ticket Snitch case key', async () => {
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} errorCode="SAFE_ERROR" />);
   await chooseType(user, 'Feedback');
   await user.type(screen.getByLabelText('Short title'), 'Make filters easier to scan');
   await user.type(screen.getByLabelText('What should we improve?'), 'Grouping the filters would make review much faster.');
-  await user.click(screen.getByRole('checkbox', { name: /Include basic diagnostics/ }));
   await user.click(screen.getByRole('button', { name: 'Send report' }));
 
   await waitFor(() => expect(reportingMocks.submitUserReport).toHaveBeenCalledWith({
@@ -118,7 +124,6 @@ it('submits consented feedback and shows the returned Ticket Snitch case key', a
     explanation: 'Grouping the filters would make review much faster.',
     reporterName: '',
     reporterEmail: '',
-    includeDiagnostics: true,
     errorCode: 'SAFE_ERROR',
     screenshot: null,
   }));
@@ -130,20 +135,20 @@ it('submits optional contact details and rejects a malformed email without losin
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
   await chooseType(user);
-  expect(screen.getByText(/stay anonymous if left blank/i)).toBeVisible();
-  expect(screen.getByLabelText('Name')).not.toBeVisible();
-  await user.click(screen.getByText('Add contact details'));
+  expect(screen.getAllByText('Optional')).toHaveLength(3);
+  expect(screen.getByLabelText(/^Name/)).toBeVisible();
+  expect(screen.getByLabelText(/^Email/)).toBeVisible();
   await user.type(screen.getByLabelText('Short title'), 'Contact details test');
   await user.type(screen.getByLabelText('What happened?'), 'Please follow up with me about this report in the future.');
-  await user.type(screen.getByLabelText('Name'), 'Ada Lovelace');
-  await user.type(screen.getByLabelText('Email'), 'not-an-email');
+  await user.type(screen.getByLabelText(/^Name/), 'Ada Lovelace');
+  await user.type(screen.getByLabelText(/^Email/), 'not-an-email');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   expect(screen.getByText(/Enter a valid email address/i)).toBeVisible();
   expect(reportingMocks.submitUserReport).not.toHaveBeenCalled();
   expect(screen.getByLabelText('Short title')).toHaveValue('Contact details test');
 
-  await user.clear(screen.getByLabelText('Email'));
-  await user.type(screen.getByLabelText('Email'), 'ADA@Example.TEST');
+  await user.clear(screen.getByLabelText(/^Email/));
+  await user.type(screen.getByLabelText(/^Email/), 'ADA@Example.TEST');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   await waitFor(() => expect(reportingMocks.submitUserReport).toHaveBeenCalledWith(expect.objectContaining({
     reporterName: 'Ada Lovelace',
@@ -319,7 +324,7 @@ it('keeps text reporting usable when the separate screenshot credential is unava
   expect(screen.queryByRole('button', { name: 'Capture screenshot' })).not.toBeInTheDocument();
 });
 
-it('saves an opaque report handle and supports public replies and fixed confirmation', async () => {
+it('always opens as a new report and does not expose report-history navigation', async () => {
   const receiptHandle = `qtr_${'a'.repeat(16)}.${'b'.repeat(112)}.${'c'.repeat(22)}`;
   reportingMocks.submitUserReport.mockResolvedValue({
     ok: true,
@@ -338,26 +343,8 @@ it('saves an opaque report handle and supports public replies and fixed confirma
   await user.type(screen.getByLabelText('Short title'), 'Customer follow-up test');
   await user.type(screen.getByLabelText('What happened?'), 'I need to return and confirm whether the repair works.');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
-  await user.click(await screen.findByRole('button', { name: 'View report status' }));
-  expect(await screen.findByText('The repair is ready for confirmation.')).toBeVisible();
-  expect(reportingMocks.loadCustomerReceipt).toHaveBeenCalledWith({
-    reportToken: 'report-token',
-    receiptHandle,
-  });
-  await user.type(screen.getByLabelText('Add information or ask a question'), 'I can verify this on the same page.');
-  await user.click(screen.getByRole('button', { name: 'Send reply' }));
-  await waitFor(() => expect(reportingMocks.replyToCustomerReceipt).toHaveBeenCalledWith(expect.objectContaining({
-    reportToken: 'report-token',
-    receiptHandle,
-    body: 'I can verify this on the same page.',
-  })));
-  await user.type(screen.getByLabelText('Optional note'), 'The repaired path now works.');
-  await user.click(screen.getByRole('button', { name: 'Fixed' }));
-  await waitFor(() => expect(reportingMocks.validateCustomerReceipt).toHaveBeenCalledWith(expect.objectContaining({
-    reportToken: 'report-token',
-    receiptHandle,
-    workItemVersion: 4,
-    outcome: 'fixed',
-    note: 'The repaired path now works.',
-  })));
+  expect(await screen.findByText('QBO-71')).toBeVisible();
+  expect(screen.queryByRole('button', { name: 'View report status' })).not.toBeInTheDocument();
+  expect(screen.queryByText('My reports')).not.toBeInTheDocument();
+  expect(reportingMocks.loadCustomerReceipt).not.toHaveBeenCalled();
 });

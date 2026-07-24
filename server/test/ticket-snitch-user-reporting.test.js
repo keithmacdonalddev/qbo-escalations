@@ -82,6 +82,7 @@ test('browser report derives anonymous identity from a signed cookie, filters co
       .expect(200);
     assert.equal(bootstrap.body.available, true);
     assert.ok(bootstrap.body.reportToken);
+    assert.equal(bootstrap.body.dataUseUrl, 'https://tickets.example.test/api/v1/data-use');
     assert.match(bootstrap.body.reporterScope, /^qrv_[A-Za-z0-9_-]{32}$/);
     assert.match(bootstrap.headers['set-cookie']?.[0] || '', /qbo_reporting_visitor=/);
     assert.match(bootstrap.headers['set-cookie']?.[0] || '', /HttpOnly/);
@@ -101,13 +102,14 @@ test('browser report derives anonymous identity from a signed cookie, filters co
         pageUrl: 'http://qbo.example.test/escalations?token=secret#private',
         routeName: '#/escalations?customer=secret',
         appVersion: '1.0.0',
-        browser: 'Should not be included without consent',
+        browser: 'Mandatory Test Browser',
         password: 'must-not-leak',
       },
     };
     const first = await agent
       .post('/api/ticket-snitch/reporting/reports')
       .set('Origin', 'http://qbo.example.test')
+      .set('X-Forwarded-For', '198.51.100.25')
       .set('X-QBO-Report-Token', bootstrap.body.reportToken)
       .send(payload)
       .expect(201);
@@ -132,7 +134,10 @@ test('browser report derives anonymous identity from a signed cookie, filters co
     assert.equal(calls[0].body.source.url, 'http://qbo.example.test/escalations');
     assert.equal(calls[0].body.details.routeName, '#/escalations');
     assert.equal(calls[0].body.details.environment.appVersion, '1.0.0');
-    assert.equal(calls[0].body.details.environment.browser, undefined);
+    assert.equal(calls[0].body.details.environment.browser, 'Mandatory Test Browser');
+    assert.equal(calls[0].body.details.environment.ipAddress, '127.0.0.1');
+    assert.equal(calls[0].body.details.diagnosticsRequired, true);
+    assert.equal(calls[0].body.details.consent.diagnostics, false);
     assert.equal(calls[0].body.details.password, undefined);
     assert.equal(calls[0].options.headers.Authorization, 'Bearer ts_test.secret');
     assert.equal(calls[0].options.headers['X-Ticket-Snitch-Issue-Receipt'], 'true');
@@ -230,7 +235,7 @@ test('trusted automation reports remain compatible and do not request customer r
   }
 }));
 
-test('feedback maps to improvement and diagnostics require explicit approval', async () => withEnvironment(reportEnvironment(), async () => {
+test('feedback maps to improvement and mandatory diagnostics cannot be disabled by the browser', async () => withEnvironment(reportEnvironment(), async () => {
   const originalFetch = global.fetch;
   let body;
   global.fetch = async (_url, options) => {
@@ -254,23 +259,28 @@ test('feedback maps to improvement and diagnostics require explicit approval', a
         kind: 'feedback',
         title: 'Make filters easier to scan',
         explanation: 'The filters work, but grouping them would make review faster.',
-        includeDiagnostics: true,
+        includeDiagnostics: false,
         context: {
           pageUrl: 'http://qbo.example.test/escalations',
           routeName: '#/escalations',
           browser: 'Test Browser 1',
           viewport: '390x844',
           locale: 'en-CA',
+          timezone: 'America/Halifax',
           errorCode: 'SAFE_CODE',
+          ipAddress: '203.0.113.99',
         },
       })
       .expect(201);
     assert.equal(body.type, 'improvement');
-    assert.equal(body.details.consent.diagnostics, true);
+    assert.equal(body.details.consent.diagnostics, false);
+    assert.equal(body.details.diagnosticsRequired, true);
     assert.equal(body.details.environment.browser, 'Test Browser 1');
     assert.equal(body.details.environment.viewport, '390x844');
     assert.equal(body.details.environment.locale, 'en-CA');
     assert.equal(body.details.environment.errorCode, 'SAFE_CODE');
+    assert.equal(body.details.environment.ipAddress, '127.0.0.1');
+    assert.equal(body.details.timezone, 'America/Halifax');
   } finally { global.fetch = originalFetch; }
 }));
 

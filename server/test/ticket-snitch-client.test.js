@@ -67,18 +67,20 @@ test('trusted server identity can be attached without accepting caller spoofing'
   assert.equal(report.details.reportingUserId, undefined);
 }));
 
-test('user-approved diagnostics follow the Ticket Snitch contract and secret-bearing URLs are stripped', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1/', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1', NODE_ENV: 'test' }, () => {
+test('mandatory diagnostics follow the Ticket Snitch contract and secret-bearing URLs are stripped', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1/', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1', NODE_ENV: 'test' }, () => {
   const report = buildReport(
     { type: 'problem_report', title: 'Save failed', originalReport: 'Save did not work.' },
     {
       pageUrl: 'https://qbo.example.test/escalations?token=secret#private',
       routeName: '#/escalations',
       sourceRequestId: 'request-42',
-      diagnosticsApproved: true,
+      diagnosticsRequired: true,
       screenshotApproved: true,
       browser: 'Test Browser',
       viewport: '1280x720',
       locale: 'en-CA',
+      timezone: 'America/Halifax',
+      ipAddress: '203.0.113.42',
       errorCode: 'SAVE_FAILED',
       password: 'must-not-leak',
     },
@@ -89,10 +91,23 @@ test('user-approved diagnostics follow the Ticket Snitch contract and secret-bea
   assert.equal(report.details.environment.browser, 'Test Browser');
   assert.equal(report.details.environment.viewport, '1280x720');
   assert.equal(report.details.environment.locale, 'en-CA');
+  assert.equal(report.details.environment.ipAddress, '203.0.113.42');
   assert.equal(report.details.environment.errorCode, 'SAVE_FAILED');
-  assert.equal(report.details.consent.diagnostics, true);
+  assert.equal(report.details.timezone, 'America/Halifax');
+  assert.equal(report.details.diagnosticsRequired, true);
+  assert.equal(report.details.consent.diagnostics, false);
   assert.equal(report.details.consent.screenshot, true);
   assert.equal(report.details.password, undefined);
+}));
+
+test('connector publishes a safe Ticket Snitch data-use URL without exposing credentials', async () => withEnvironment({
+  TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1/',
+  TICKET_SNITCH_API_KEY: 'ts_key.secret',
+  TICKET_SNITCH_PROJECT_ID: 'project-1',
+}, () => {
+  const config = getConnectorConfig();
+  assert.equal(config.dataUseUrl, 'https://tickets.example.test/api/v1/data-use');
+  assert.doesNotMatch(config.dataUseUrl, /ts_key|secret/);
 }));
 
 test('stable submission identity creates a stable connector idempotency key', async () => withEnvironment({ TICKET_SNITCH_API_URL: 'https://tickets.example.test/api/v1', TICKET_SNITCH_API_KEY: 'ts_key.secret', TICKET_SNITCH_PROJECT_ID: 'project-1' }, async () => {

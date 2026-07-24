@@ -9,9 +9,12 @@
 }
 
 .user-report-dialog {
+  display: flex;
+  height: min(760px, calc(100vh - 40px));
   width: min(680px, 100%);
-  max-height: min(860px, calc(100vh - 40px));
-  overflow: auto;
+  max-height: calc(100vh - 40px);
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius-xl, 16px);
   background: var(--bg-raised);
@@ -26,6 +29,7 @@
   gap: 20px;
   padding: 22px 24px 18px;
   border-bottom: 1px solid var(--line-subtle);
+  flex: none;
 }
 
 .user-report-header h2,
@@ -360,14 +364,21 @@
 
 .user-report-dialog form {
   display: grid;
+  flex: 1;
+  align-content: start;
   gap: 18px;
+  min-height: 0;
   padding: 20px 24px 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .user-report-form-details {
   display: grid;
   gap: 18px;
-  animation: user-report-reveal 170ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+  animation: user-report-reveal 220ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+  will-change: opacity, transform;
 }
 
 @keyframes user-report-reveal {
@@ -468,15 +479,7 @@
   line-height: 1.2;
 }
 
-.user-report-consent small {
-  color: var(--ink-secondary);
-  font-size: 11px;
-  line-height: 1.45;
-}
-
 .user-report-type:has(input:focus-visible),
-.user-report-consent:has(input:focus-visible),
-.user-report-screenshot:focus-visible,
 .user-report-dialog button:focus-visible,
 .user-report-dialog input:focus-visible,
 .user-report-dialog textarea:focus-visible,
@@ -525,66 +528,10 @@
 .user-report-field-error { color: var(--danger); }
 
 .user-report-contact {
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
-  overflow: hidden;
-  transition: border-color 150ms ease, background-color 150ms ease;
-}
-
-.user-report-contact[open] {
-  border-color: var(--line);
-  background: var(--bg-raised);
-}
-
-.user-report-contact summary {
-  position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 9px;
-  align-items: center;
-  min-height: 42px;
-  padding: 0 12px;
-  color: var(--ink);
-  cursor: pointer;
-  list-style: none;
-  transition: background-color 150ms ease, color 150ms ease;
-}
-
-.user-report-contact summary::-webkit-details-marker { display: none; }
-
-.user-report-contact summary > span:first-child {
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.user-report-contact summary small {
-  color: var(--ink-tertiary);
-  font-size: 11px;
-}
-
-.user-report-contact-chevron {
-  color: var(--ink-secondary);
-  font-size: 17px;
-  line-height: 1;
-  transform: translateY(-1px);
-  transition: transform 150ms ease;
-}
-
-.user-report-contact[open] .user-report-contact-chevron {
-  transform: rotate(180deg) translateY(1px);
-}
-
-@media (hover: hover) {
-  .user-report-contact summary:hover {
-    background: var(--bg-elevated);
-  }
-}
-
-.user-report-contact-body {
-  padding: 12px;
-  border-top: 1px solid var(--line-subtle);
-  animation: user-report-reveal 150ms ease-out both;
+  gap: 0;
+  margin: 0;
+  padding: 0;
 }
 
 .user-report-contact-grid {
@@ -599,56 +546,31 @@
   appearance: none;
 }
 
+.user-report-contact .user-report-field label small,
+.user-report-screenshot-heading h3 small {
+  margin-left: 5px;
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  font-weight: 500;
+}
+
 .user-report-contact .user-report-help {
   margin: 9px 0 0;
 }
 
-.user-report-consent {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--line-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
-  cursor: pointer;
-}
-
-.user-report-consent input {
-  width: 16px;
-  height: 16px;
-  margin: 2px 0 0;
-  accent-color: var(--accent);
-}
-
-.user-report-consent span {
-  display: grid;
-  gap: 4px;
-}
-
-.user-report-consent strong {
-  font-size: 12px;
-}
-
 .user-report-screenshot {
   display: grid;
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: var(--bg);
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 
 .user-report-screenshot-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
+  display: block;
 }
 
 .user-report-screenshot-heading h3,
-.user-report-screenshot-heading p,
-.user-report-screenshot-explainer,
 .user-report-screenshot-unavailable {
   margin: 0;
 }
@@ -658,25 +580,10 @@
   font-size: 13px;
 }
 
-.user-report-screenshot-heading p,
-.user-report-screenshot-explainer,
-.user-report-screenshot-unavailable,
-.user-report-screenshot-empty small {
+.user-report-screenshot-unavailable {
   color: var(--ink-secondary);
   font-size: 11px;
   line-height: 1.5;
-}
-
-.user-report-screenshot-heading > span {
-  flex: none;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: var(--bg-elevated);
-  color: var(--ink-tertiary);
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .user-report-file-input {
@@ -690,12 +597,20 @@
 
 .user-report-screenshot-empty,
 .user-report-screenshot-preview {
+  gap: 8px;
+}
+
+.user-report-screenshot-empty {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.user-report-screenshot-preview {
   display: grid;
-  gap: 10px;
   padding: 10px;
-  border: 1px dashed var(--line);
+  border: 1px solid var(--line-subtle);
   border-radius: var(--radius-md);
-  background: var(--bg-raised);
+  background: var(--bg);
 }
 
 .user-report-screenshot-preview {
@@ -741,6 +656,12 @@
   font-size: 11px;
 }
 
+.user-report-screenshot-empty .user-report-secondary {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+
 .user-report-secondary.is-danger { color: var(--danger); }
 
 .user-report-screenshot-message,
@@ -768,21 +689,24 @@
   color: var(--warning);
 }
 
-.user-report-disclosure {
-  color: var(--ink-secondary);
-  font-size: 12px;
+.user-report-data-use {
+  margin: -2px 0 0;
+  color: var(--ink-tertiary);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
-.user-report-disclosure summary {
-  width: fit-content;
+.user-report-data-use a {
   color: var(--ink-secondary);
-  cursor: pointer;
-  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ink-secondary) 55%, transparent);
+  text-underline-offset: 2px;
+  transition: color 150ms ease, text-decoration-color 150ms ease;
 }
 
-.user-report-disclosure p {
-  margin: 8px 0 0;
-  line-height: 1.55;
+.user-report-data-use a:hover {
+  color: var(--accent);
+  text-decoration-color: var(--accent);
 }
 
 .user-report-actions {
@@ -801,6 +725,11 @@
   font-size: 13px;
   font-weight: 650;
   cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
 }
 
 .user-report-primary {
@@ -813,6 +742,23 @@
   border: 1px solid var(--line);
   background: var(--bg-elevated);
   color: var(--ink);
+}
+
+@media (hover: hover) {
+  .user-report-primary:not(:disabled):hover {
+    border-color: var(--accent-hover);
+    background: var(--accent-hover);
+  }
+
+  .user-report-secondary:not(:disabled):hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+    background: var(--bg-raised);
+  }
+}
+
+.user-report-primary:not(:disabled):active,
+.user-report-secondary:not(:disabled):active {
+  transform: scale(0.985);
 }
 
 .user-report-primary:disabled,
@@ -892,6 +838,7 @@
   }
 
   .user-report-dialog {
+    height: 94vh;
     width: 100%;
     max-height: 94vh;
     border-right: 0;
@@ -901,10 +848,7 @@
   }
 
   .user-report-header,
-  .user-report-dialog form,
-  .user-report-view-tabs,
-  .user-report-receipts,
-  .user-report-receipt-detail { padding-right: 16px; padding-left: 16px; }
+  .user-report-dialog form { padding-right: 16px; padding-left: 16px; }
   .user-report-contact-grid { grid-template-columns: 1fr; }
   .user-report-type { min-height: 42px; padding: 6px; }
   .user-report-actions { flex-direction: column-reverse; }
@@ -913,11 +857,6 @@
   .user-report-screenshot-preview { grid-template-columns: 1fr; }
   .user-report-screenshot-preview img { width: 100%; height: min(42vw, 190px); }
   .user-report-screenshot-actions { display: grid; grid-template-columns: 1fr; }
-  .user-report-receipt-row { align-items: flex-start; flex-direction: column; gap: 7px; }
-  .user-report-public-status-heading { flex-direction: column; }
-  .user-report-update-list article.is-customer,
-  .user-report-update-list article.is-team { margin: 0; }
-  .user-report-validation-actions { display: grid; grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -29,6 +29,7 @@ function createApp() {
   }
 
   const app = express();
+  if (process.env.QBO_TRUST_PROXY === '1') app.set('trust proxy', 1);
   app.use(cors(buildCorsOptions()));
   app.use(requestId);
   app.use(registerRequestRuntime);

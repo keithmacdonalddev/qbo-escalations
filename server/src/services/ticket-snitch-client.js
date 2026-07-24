@@ -20,12 +20,26 @@ function sanitizePageUrl(value) {
   }
 }
 
+function safePublicUrl(value) {
+  const raw = cleanText(value, 2048);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return '';
+  }
+}
+
 function configuration(env = process.env) {
   const baseUrl = String(env.TICKET_SNITCH_API_URL || '').trim().replace(/\/+$/, '');
   const apiKey = String(env.TICKET_SNITCH_API_KEY || '').trim();
   const evidenceApiKey = String(env.TICKET_SNITCH_EVIDENCE_API_KEY || '').trim();
   const agentApiKey = String(env.TICKET_SNITCH_AGENT_API_KEY || '').trim();
   const projectId = String(env.TICKET_SNITCH_PROJECT_ID || '').trim();
+  const configuredDataUseUrl = safePublicUrl(env.TICKET_SNITCH_DATA_USE_URL);
+  const dataUseUrl = configuredDataUseUrl || (safePublicUrl(baseUrl) ? `${baseUrl}/data-use` : '');
   const parsedTimeout = Number.parseInt(env.TICKET_SNITCH_TIMEOUT_MS || '8000', 10);
   return {
     baseUrl,
@@ -33,6 +47,7 @@ function configuration(env = process.env) {
     evidenceApiKey,
     agentApiKey,
     projectId,
+    dataUseUrl,
     timeoutMs: Number.isFinite(parsedTimeout) ? Math.min(30_000, Math.max(1_000, parsedTimeout)) : 8_000,
     configured: Boolean(baseUrl && apiKey && projectId),
     evidenceConfigured: Boolean(baseUrl && evidenceApiKey && projectId),
@@ -154,7 +169,7 @@ async function callCustomerReceipt(path, { method = 'GET', body, requestId, idem
 
 function buildReport(input, context = {}, trustedReporter = {}) {
   const config = configuration();
-  const diagnosticsApproved = context.diagnosticsApproved === true;
+  const diagnosticsRequired = context.diagnosticsRequired === true;
   const pageUrl = sanitizePageUrl(context.pageUrl);
   const capturedAt = cleanText(context.observedAt, 100);
   const reporterActorId = cleanText(trustedReporter.actorId, 128);
@@ -165,20 +180,21 @@ function buildReport(input, context = {}, trustedReporter = {}) {
     routeName: cleanText(context.routeName, 200),
     sourceRequestId: cleanText(context.sourceRequestId, 128),
     captureEnvironment: cleanText(process.env.NODE_ENV || 'development', 40),
+    timezone: cleanText(context.timezone, 120),
+    diagnosticsRequired,
     consent: {
-      diagnostics: diagnosticsApproved,
+      diagnostics: false,
       screenshot: context.screenshotApproved === true,
       reply: hasTrustedReporter,
     },
     environment: {
       appVersion: cleanText(context.appVersion || process.env.npm_package_version, 120),
       requestId: cleanText(context.sourceRequestId, 128),
-      ...(diagnosticsApproved ? {
-        browser: cleanText(context.browser, 500),
-        viewport: cleanText(context.viewport, 80),
-        locale: cleanText(context.locale, 80),
-        errorCode: cleanText(context.errorCode, 200),
-      } : {}),
+      browser: cleanText(context.browser, 500),
+      viewport: cleanText(context.viewport, 80),
+      locale: cleanText(context.locale, 80),
+      errorCode: cleanText(context.errorCode, 200),
+      ipAddress: cleanText(context.ipAddress, 80),
     },
   };
   return {

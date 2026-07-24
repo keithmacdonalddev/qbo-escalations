@@ -28,7 +28,7 @@ it('loads reporting availability without exposing a credential', async () => {
   expect(JSON.stringify(result)).not.toContain('ts_');
 });
 
-it('submits only allow-listed browser context and removes route query data', async () => {
+it('submits mandatory allow-listed browser context and removes route query data', async () => {
   window.location.hash = '#/escalations?customer=private';
   const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok: true,
@@ -43,14 +43,16 @@ it('submits only allow-listed browser context and removes route query data', asy
     kind: 'problem',
     title: 'Save failed',
     explanation: 'The save operation did not update the record.',
-    includeDiagnostics: false,
   });
   const options = fetchMock.mock.calls[0][1];
   const body = JSON.parse(options.body);
   expect(options.headers['X-QBO-Report-Token']).toBe('form-token');
   expect(body.context.routeName).toBe('#/escalations');
-  expect(body.context.browser).toBeUndefined();
-  expect(body.context.viewport).toBeUndefined();
+  expect(body.context.browser).toBe(navigator.userAgent);
+  expect(body.context.viewport).toBe(`${window.innerWidth}x${window.innerHeight}`);
+  expect(body.context.locale).toBe(navigator.language);
+  expect(body.context.timezone).toEqual(expect.any(String));
+  expect(body).not.toHaveProperty('includeDiagnostics');
   expect(body).not.toHaveProperty('reporter');
   expect(body).not.toHaveProperty('projectId');
   expect(body).not.toHaveProperty('contact');
@@ -72,7 +74,6 @@ it('includes only optional self-reported contact details when the user supplies 
     explanation: 'I would like to be contacted about this feedback in the future.',
     reporterName: '  Ada Lovelace  ',
     reporterEmail: ' ADA@Example.TEST ',
-    includeDiagnostics: false,
   });
   const body = JSON.parse(fetchMock.mock.calls[0][1].body);
   expect(body.contact).toEqual({ name: 'Ada Lovelace', email: 'ada@example.test' });
@@ -102,7 +103,6 @@ it('encodes only the explicitly approved screenshot in the report request', asyn
     kind: 'feedback',
     title: 'Screenshot feedback',
     explanation: 'This screenshot was deliberately selected for the report.',
-    includeDiagnostics: false,
     screenshot,
   });
   const body = JSON.parse(fetchMock.mock.calls[0][1].body);

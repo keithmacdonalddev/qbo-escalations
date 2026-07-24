@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const express = require('express');
+const net = require('net');
 const {
   attachEvidence,
   checkConnection,
@@ -73,6 +74,12 @@ function openReceiptHandle(handle, userId) {
 
 function cleanText(value, max) {
   return String(value || '').trim().slice(0, max);
+}
+
+function requestIpAddress(req) {
+  const raw = cleanText(req.ip || req.socket?.remoteAddress, 80);
+  const normalized = raw.startsWith('::ffff:') ? raw.slice(7) : raw;
+  return net.isIP(normalized) ? normalized : '';
 }
 
 function allowedReportOrigins(env = process.env) {
@@ -196,6 +203,7 @@ router.get('/reporting/bootstrap', requireReportOrigin, ensureReportingVisitor, 
     reportToken: available ? issueReportToken(req.reportOrigin, req.reportingVisitor.id) : '',
     reporterScope: req.reportingVisitor.scope,
     screenshotAvailable: available && connector.evidenceConfigured,
+    dataUseUrl: available ? connector.dataUseUrl : '',
     expiresInSeconds: available ? Math.floor(REPORT_TOKEN_TTL_MS / 1000) : 0,
     requestId: req.requestId,
   });
@@ -258,7 +266,6 @@ router.post('/reporting/reports', requireReportOrigin, ensureReportingVisitor, u
   }
 
   const suppliedContext = input.context && typeof input.context === 'object' ? input.context : {};
-  const diagnosticsApproved = input.includeDiagnostics === true;
   const reporter = {
     actorId: req.reportingVisitor.id,
     displayName: reporterName || (reporterEmail ? 'QBO reporter' : 'Anonymous QBO reporter'),
@@ -270,13 +277,13 @@ router.post('/reporting/reports', requireReportOrigin, ensureReportingVisitor, u
     appVersion: cleanText(process.env.npm_package_version || '1.0.0', 120),
     observedAt: new Date(observedAt).toISOString(),
     sourceRequestId: submissionId,
-    diagnosticsApproved,
-    ...(diagnosticsApproved ? {
-      browser: cleanText(suppliedContext.browser, 500),
-      viewport: cleanText(suppliedContext.viewport, 80),
-      locale: cleanText(suppliedContext.locale, 80),
-      errorCode: cleanText(suppliedContext.errorCode, 200),
-    } : {}),
+    diagnosticsRequired: true,
+    browser: cleanText(suppliedContext.browser, 500),
+    viewport: cleanText(suppliedContext.viewport, 80),
+    locale: cleanText(suppliedContext.locale, 80),
+    timezone: cleanText(suppliedContext.timezone, 120),
+    errorCode: cleanText(suppliedContext.errorCode, 200),
+    ipAddress: requestIpAddress(req),
   };
 
   try {

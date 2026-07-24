@@ -106,6 +106,17 @@ Before reporting:
 - Client behavior tests use Vitest and React Testing Library. Passing existing tests is evidence for the configured checks, not proof that the full app is sufficiently tested.
 - When a material user capability or mapped source path changes, update or run its mapped tests and keep `testing/app-capabilities.json` honest. If coverage is intentionally deferred, record the gap instead of claiming the feature is fully tested.
 
+### UI/UX Acceptance Gate
+
+- Premium UI/UX is a product requirement, not optional polish. Functional code, passing tests, and a successful build do not prove that a UI change is acceptable.
+- Before changing a user-facing flow, state the primary user task, the stable frame or layout invariant, what is visible initially, what is revealed after each choice, and which states require motion or feedback.
+- Preserve the outer size and position of modals, drawers, and panels while their internal content changes unless the user explicitly asks for adaptive sizing. Scroll content inside the stable frame.
+- Every visible element must earn its space. Remove duplicate navigation, placeholder tabs, verbose disclosures, large optional cards, and implementation explanations when they do not help the next action.
+- Related controls must have deliberate hover, focus-visible, active, selected, disabled, loading, and reduced-motion behavior where applicable. Equal controls must use one explicit height and aligned label spacing.
+- Treat user screenshots and direct design criticism as acceptance evidence. Address every marked issue and check the surrounding flow for the same class of defect.
+- Substantial UI work is not complete until the rendered desktop and mobile experience has been compared against the request, including transition behavior and browser console output. If browser verification is unavailable, report the visual gate as incomplete; never infer a visual pass from source, tests, or build output.
+- Read and follow `DESIGN.md` before user-facing UI work. Update `DESIGN.md` and `DESIGN.HTML` when feedback establishes a durable design rule.
+
 ### Browser Automation
 
 Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.

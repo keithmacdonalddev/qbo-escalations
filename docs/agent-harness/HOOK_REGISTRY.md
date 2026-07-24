@@ -1,14 +1,14 @@
 # Coding-Agent Hook Registry
 
-Last verified: 2026-07-11.
+Last verified: 2026-07-23.
 
 | Hook | Provider/event | Purpose | Side effects | Failure behavior |
 | --- | --- | --- | --- | --- |
-| `.claude/hooks/pm-rules.sh` | Claude `UserPromptSubmit` | Repeats critical behavior and communication rules | Appends timestamp only to `.claude/logs/pm-rules.log` | Prints no private prompt content; a hook failure does not replace root rules |
+| `.claude/hooks/pm-rules.sh` | Claude `UserPromptSubmit` | Repeats critical behavior, communication, and rendered UI/UX acceptance rules | Appends timestamp only to `.claude/logs/pm-rules.log` | Prints no private prompt content; a hook failure does not replace root rules |
 | `.claude/hooks/runtime-guard.mjs` | Claude `PreToolUse` for shell tools | Blocks common service start, restart, and kill commands | None | Fails open on malformed input |
 | `.claude/hooks/workspace-guard.mjs` | Claude `PreToolUse` for shell tools | Blocks destructive Git commands and direct full reads of common secret files | None | Fails open on malformed input |
 | `.claude/hooks/config-freshness.mjs` | Claude `SessionStart` | Warns about documented architecture drift, missing harness files, and stale curated memory | None | Silent on internal errors |
-| `.codex/hooks/pm-rules.ps1` | Codex `UserPromptSubmit` | Repeats critical behavior and communication rules | Appends timestamp only to `.codex/logs/pm-rules.log` | Root rules remain authoritative |
+| `.codex/hooks/pm-rules.ps1` | Codex `UserPromptSubmit` | Repeats critical behavior, communication, and rendered UI/UX acceptance rules | Appends timestamp only to `.codex/logs/pm-rules.log` | Root rules remain authoritative |
 
 ## Hook Change Checklist
 
