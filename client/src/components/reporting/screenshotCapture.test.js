@@ -36,6 +36,29 @@ it('captures one frame without audio and stops every sharing track immediately',
   expect(file.type).toBe('image/png');
 });
 
+it('lets the caller hide private UI for the frame and always restores it', async () => {
+  const events = [];
+  const video = {
+    readyState: 2,
+    videoWidth: 800,
+    videoHeight: 600,
+    play: vi.fn().mockResolvedValue(undefined),
+    pause: vi.fn(),
+    srcObject: null,
+  };
+  const canvas = {
+    getContext: () => ({ drawImage: () => events.push('draw') }),
+    toBlob: (callback, type) => callback(new Blob(['image'], { type })),
+  };
+  await captureScreenFrame({
+    mediaDevices: { getDisplayMedia: vi.fn().mockResolvedValue({ getTracks: () => [] }) },
+    documentRef: { createElement: (name) => (name === 'video' ? video : canvas) },
+    beforeFrame: async () => events.push('hide'),
+    afterFrame: async () => events.push('restore'),
+  });
+  expect(events).toEqual(['hide', 'draw', 'restore']);
+});
+
 it('treats permission cancellation as a recoverable, plain-language state', async () => {
   const denied = Object.assign(new Error('denied'), { name: 'NotAllowedError' });
   await expect(captureScreenFrame({

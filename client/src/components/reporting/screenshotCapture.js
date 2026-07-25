@@ -69,6 +69,8 @@ export function screenCaptureSupported(mediaDevices = navigator.mediaDevices) {
 export async function captureScreenFrame({
   mediaDevices = navigator.mediaDevices,
   documentRef = document,
+  beforeFrame,
+  afterFrame,
 } = {}) {
   if (!screenCaptureSupported(mediaDevices)) {
     throw new ScreenshotCaptureError(
@@ -78,6 +80,7 @@ export async function captureScreenFrame({
   }
 
   let stream;
+  let framePrepared = false;
   const video = documentRef.createElement('video');
   try {
     stream = await mediaDevices.getDisplayMedia({
@@ -103,7 +106,16 @@ export async function captureScreenFrame({
     canvas.height = height;
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new ScreenshotCaptureError('The screenshot could not be prepared.');
+    if (beforeFrame) {
+      await beforeFrame();
+      framePrepared = true;
+    }
     context.drawImage(video, 0, 0, width, height);
+
+    if (afterFrame) {
+      await afterFrame();
+      framePrepared = false;
+    }
 
     let type = 'image/png';
     let blob = await canvasBlob(canvas, type);
@@ -130,6 +142,7 @@ export async function captureScreenFrame({
       'The screenshot could not be captured. Try again or add an image instead.',
     );
   } finally {
+    if (framePrepared && afterFrame) await afterFrame();
     for (const track of stream?.getTracks?.() || []) track.stop();
     video.pause?.();
     video.srcObject = null;

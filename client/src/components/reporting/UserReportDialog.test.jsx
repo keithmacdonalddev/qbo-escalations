@@ -5,6 +5,13 @@ import UserReportDialog from './UserReportDialog.jsx';
 
 const reportingMocks = vi.hoisted(() => ({
   createSubmissionId: vi.fn(() => 'submission-component-001'),
+  getReportingContext: vi.fn(() => ({
+    routeName: '#/escalations',
+    appVersion: '1.0.0',
+    viewport: '1280x720',
+    locale: 'en-CA',
+    timezone: 'America/Halifax',
+  })),
   loadReportingBootstrap: vi.fn(),
   loadCustomerReceipt: vi.fn(),
   replyToCustomerReceipt: vi.fn(),
@@ -20,6 +27,7 @@ vi.mock('../../api/ticketSnitchReporting.js', () => reportingMocks);
 vi.mock('./screenshotCapture.js', () => screenshotMocks);
 
 beforeEach(() => {
+  sessionStorage.clear();
   const values = new Map();
   vi.stubGlobal('localStorage', {
     getItem: (key) => values.get(key) || null,
@@ -76,7 +84,7 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
 
-  const dialog = await screen.findByRole('dialog', { name: 'Help us make QBO better' });
+  const dialog = await screen.findByRole('dialog', { name: 'Help us improve QBO' });
   expect(dialog).toBeVisible();
   expect(dialog.closest('.user-report-backdrop').parentElement).toBe(document.body);
   expect(screen.queryByText('Tell us what happened or what would make QBO Escalations better.')).not.toBeInTheDocument();
@@ -94,26 +102,19 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
   expect(screen.queryByText('My reports')).not.toBeInTheDocument();
 
   await user.click(screen.getByRole('radio', { name: 'Request a Feature' }));
-  expect(screen.getByLabelText('What would help?')).toHaveAttribute('placeholder', expect.stringMatching(/capability/i));
+  expect(screen.getByLabelText('What would help?')).toHaveAttribute('placeholder', expect.stringMatching(/what do you need/i));
   expect(screen.queryByRole('heading', { name: 'Share the details' })).not.toBeInTheDocument();
-  expect(screen.getByText('Make it easy to recognize in a work queue.').closest('.user-report-field-heading')).toContainElement(screen.getByText('Short title'));
+  expect(screen.getByText('Easy to spot later').closest('.user-report-field-heading')).toContainElement(screen.getByText('Short title'));
   expect(screen.getByRole('note', { name: /Privacy reminder: Leave out passwords/ })).toBeVisible();
-  expect(screen.getByLabelText(/^Name/)).toBeVisible();
-  expect(screen.getByLabelText(/^Email/)).toBeVisible();
-  expect(screen.getByRole('heading', { name: /^Add a screenshot/ })).toBeVisible();
-  expect(screen.getByText('Best for visual or hard-to-reproduce issues.')).toBeVisible();
-  expect(screen.getByRole('heading', { name: /^Contact/ })).toBeVisible();
-  expect(screen.getByText('Add your email if you’d like a reply.')).toBeVisible();
+  expect(screen.queryByLabelText(/^Name/)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/^Email/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /Add a screenshot/ })).toHaveAttribute('aria-expanded', 'false');
+  expect(screen.getByRole('button', { name: /Get a reply/ })).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByText(/Used only for this report and future follow-up/)).not.toBeInTheDocument();
   expect(screen.queryByRole('checkbox', { name: /diagnostics/i })).not.toBeInTheDocument();
-  expect(screen.getByRole('link', { name: 'How report data is used' })).toHaveAttribute('href', 'https://tickets.example.test/api/v1/data-use');
-  expect(screen.getByRole('link', { name: 'How report data is used' })).toHaveAttribute('target', '_blank');
-  const screenshotSection = screen.getByRole('heading', { name: /^Add a screenshot/ }).closest('section');
-  const contactSection = screen.getByRole('region', { name: /^Contact/ });
-  const dataUse = screen.getByRole('link', { name: 'How report data is used' }).closest('p');
-  const actions = screen.getByRole('button', { name: 'Cancel' }).parentElement;
-  expect(screenshotSection.compareDocumentPosition(contactSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(dataUse.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole('link', { name: 'Data use' })).toHaveAttribute('href', 'https://tickets.example.test/api/v1/data-use');
+  expect(screen.getByRole('link', { name: 'Data use' })).toHaveAttribute('target', '_blank');
+  expect(screen.getByText('Draft saved in this browser session')).toBeVisible();
 
   await user.click(screen.getByRole('radio', { name: 'Submit Feedback' }));
   expect(screen.getByLabelText('What should we improve?')).toBeVisible();
@@ -123,7 +124,7 @@ it('shows only the type choice first, then reveals the corresponding form', asyn
 
   await user.click(screen.getByRole('button', { name: 'Send report' }));
   expect(screen.getByText('Enter at least 3 characters.')).toBeVisible();
-  expect(screen.getByText(/Enter at least 10 characters/)).toBeVisible();
+  expect(screen.getByText(/Add a little more detail/)).toBeVisible();
   expect(reportingMocks.submitUserReport).not.toHaveBeenCalled();
 });
 
@@ -148,14 +149,15 @@ it('submits feedback with mandatory metadata handled outside the form and shows 
     screenshot: null,
   }));
   expect(await screen.findByText('QBO-51')).toBeVisible();
-  expect(screen.getByText(/ready for human review/i)).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'You’re in the loop' })).toBeVisible();
 });
 
 it('submits optional contact details and rejects a malformed email without losing the draft', async () => {
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
   await chooseType(user);
-  expect(screen.getAllByText('Optional')).toHaveLength(2);
+  expect(screen.queryByText('Optional')).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: /Get a reply/ }));
   expect(screen.getByLabelText(/^Name/)).toBeVisible();
   expect(screen.getByLabelText(/^Email/)).toBeVisible();
   await user.type(screen.getByLabelText('Short title'), 'Contact details test');
@@ -228,7 +230,7 @@ it('preserves a valid draft while offline and does not attempt submission', asyn
     const user = userEvent.setup();
     render(<UserReportDialog open onClose={() => {}} />);
     await chooseType(user);
-    await screen.findByText(/You are offline. Your draft is preserved/i);
+    await screen.findByText(/You are offline. This draft will be ready/i);
     await user.type(screen.getByLabelText('Short title'), 'Offline report draft');
     await user.type(screen.getByLabelText('What happened?'), 'This explanation must remain available while offline.');
     expect(screen.getByRole('button', { name: 'Send report' })).toBeDisabled();
@@ -257,6 +259,7 @@ it('captures only after an explicit action and lets the user preview, replace, a
   await chooseType(user);
   expect(screenshotMocks.captureScreenFrame).not.toHaveBeenCalled();
 
+  await user.click(screen.getByRole('button', { name: /Add a screenshot/ }));
   await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
   expect(screenshotMocks.captureScreenFrame).toHaveBeenCalledOnce();
   expect(await screen.findByText('capture.png')).toBeVisible();
@@ -265,7 +268,7 @@ it('captures only after an explicit action and lets the user preview, replace, a
 
   await user.click(screen.getByRole('button', { name: 'Remove' }));
   expect(screen.queryByText('capture.png')).not.toBeInTheDocument();
-  expect(screen.getByText('Screenshot removed from this report.')).toBeVisible();
+  expect(screen.getByText('Screenshot removed.')).toBeVisible();
 });
 
 it('submits an approved screenshot and confirms that it became case evidence', async () => {
@@ -281,6 +284,7 @@ it('submits an approved screenshot and confirms that it became case evidence', a
   await chooseType(user);
   await user.type(screen.getByLabelText('Short title'), 'Screenshot evidence report');
   await user.type(screen.getByLabelText('What happened?'), 'The selected screenshot shows the reported layout problem.');
+  await user.click(screen.getByRole('button', { name: /Add a screenshot/ }));
   await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
   await user.click(screen.getByRole('button', { name: 'Send report' }));
 
@@ -288,7 +292,7 @@ it('submits an approved screenshot and confirms that it became case evidence', a
     screenshot: expect.objectContaining({ name: 'capture.png', type: 'image/png' }),
   })));
   expect(await screen.findByText('QBO-63')).toBeVisible();
-  expect(screen.getByText('Your approved screenshot is attached as case evidence.')).toBeVisible();
+  expect(screen.getByText('Your reviewed screenshot is attached.')).toBeVisible();
 });
 
 it('preserves a created case and retries only with the same duplicate-safe draft identity after evidence failure', async () => {
@@ -312,14 +316,15 @@ it('preserves a created case and retries only with the same duplicate-safe draft
   await chooseType(user);
   await user.type(screen.getByLabelText('Short title'), 'Partial evidence retry');
   await user.type(screen.getByLabelText('What happened?'), 'The case must remain safe while the screenshot attachment is retried.');
+  await user.click(screen.getByRole('button', { name: /Add a screenshot/ }));
   await user.click(screen.getByRole('button', { name: 'Capture screenshot' }));
   await user.click(screen.getByRole('button', { name: 'Send report' }));
 
   expect(await screen.findByText('Report received; screenshot needs another try')).toBeVisible();
   expect(screen.getByText('QBO-64')).toBeVisible();
-  expect(screen.getByText(/will not create a duplicate case/i)).toBeVisible();
+  expect(screen.getByText(/will not create a duplicate/i)).toBeVisible();
   await user.click(screen.getByRole('button', { name: 'Retry screenshot' }));
-  expect(await screen.findByText('Your approved screenshot is attached as case evidence.')).toBeVisible();
+  expect(await screen.findByText('Your reviewed screenshot is attached.')).toBeVisible();
   expect(reportingMocks.submitUserReport).toHaveBeenCalledTimes(2);
   const first = reportingMocks.submitUserReport.mock.calls[0][0];
   const second = reportingMocks.submitUserReport.mock.calls[1][0];
@@ -339,12 +344,13 @@ it('keeps text reporting usable when the separate screenshot credential is unava
   const user = userEvent.setup();
   render(<UserReportDialog open onClose={() => {}} />);
   await chooseType(user);
-  expect(await screen.findByText(/Screenshot attachments are not connected/i)).toBeVisible();
+  await user.click(screen.getByRole('button', { name: /Add a screenshot/ }));
+  expect(await screen.findByText(/Screenshots are unavailable on this server/i)).toBeVisible();
   expect(screen.getByRole('button', { name: 'Send report' })).toBeVisible();
   expect(screen.queryByRole('button', { name: 'Capture screenshot' })).not.toBeInTheDocument();
 });
 
-it('always opens as a new report and does not expose report-history navigation', async () => {
+it('keeps a private living receipt without exposing an internal report-history workspace', async () => {
   const receiptHandle = `qtr_${'a'.repeat(16)}.${'b'.repeat(112)}.${'c'.repeat(22)}`;
   reportingMocks.submitUserReport.mockResolvedValue({
     ok: true,
@@ -363,8 +369,48 @@ it('always opens as a new report and does not expose report-history navigation',
   await user.type(screen.getByLabelText('Short title'), 'Customer follow-up test');
   await user.type(screen.getByLabelText('What happened?'), 'I need to return and confirm whether the repair works.');
   await user.click(screen.getByRole('button', { name: 'Send report' }));
-  expect(await screen.findByText('QBO-71')).toBeVisible();
-  expect(screen.queryByRole('button', { name: 'View report status' })).not.toBeInTheDocument();
+  expect((await screen.findAllByText('QBO-71')).length).toBeGreaterThan(0);
+  expect(screen.getByRole('button', { name: 'View live status' })).toBeVisible();
   expect(screen.queryByText('My reports')).not.toBeInTheDocument();
-  expect(reportingMocks.loadCustomerReceipt).not.toHaveBeenCalled();
+  await user.click(screen.getByRole('button', { name: 'View live status' }));
+  expect(await screen.findByText('The repair is ready for confirmation.')).toBeVisible();
+  expect(screen.getByText('Please verify the repair.')).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Fixed for me' })).toBeVisible();
+  expect(reportingMocks.loadCustomerReceipt).toHaveBeenCalledWith({
+    reportToken: 'report-token',
+    receiptHandle,
+  });
+  await user.type(screen.getByLabelText('Add a reply'), 'I tested the latest change.');
+  await user.click(screen.getByRole('button', { name: 'Send reply' }));
+  await waitFor(() => expect(reportingMocks.replyToCustomerReceipt).toHaveBeenCalledWith({
+    reportToken: 'report-token',
+    receiptHandle,
+    actionId: 'submission-component-001',
+    body: 'I tested the latest change.',
+  }));
+  await user.type(screen.getByLabelText('Optional outcome note'), 'The original workflow now works.');
+  await user.click(screen.getByRole('button', { name: 'Fixed for me' }));
+  await waitFor(() => expect(reportingMocks.validateCustomerReceipt).toHaveBeenCalledWith({
+    reportToken: 'report-token',
+    receiptHandle,
+    actionId: 'submission-component-001',
+    workItemVersion: 4,
+    outcome: 'fixed',
+    note: 'The original workflow now works.',
+  }));
+});
+
+it('restores an unfinished text draft for the same private browser session', async () => {
+  const user = userEvent.setup();
+  const first = render(<UserReportDialog open onClose={() => {}} />);
+  await chooseType(user, 'Request a Feature');
+  await user.type(screen.getByLabelText('Short title'), 'Keep this draft');
+  await user.type(screen.getByLabelText('What would help?'), 'A saved draft keeps an interruption from wasting this feedback.');
+  await waitFor(() => expect(screen.getByText('Draft saved in this browser session')).toBeVisible());
+  first.unmount();
+
+  render(<UserReportDialog open onClose={() => {}} />);
+  expect(await screen.findByDisplayValue('Keep this draft')).toBeVisible();
+  expect(screen.getByDisplayValue('A saved draft keeps an interruption from wasting this feedback.')).toBeVisible();
+  expect(screen.getByText('Draft restored from this session')).toBeVisible();
 });

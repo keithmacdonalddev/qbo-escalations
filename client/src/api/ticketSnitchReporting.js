@@ -78,6 +78,19 @@ export function fileToBase64(file) {
   });
 }
 
+export function getReportingContext(errorCode = '') {
+  return {
+    pageUrl: `${window.location.origin}${window.location.pathname}`,
+    routeName: String(window.location.hash || '#/').split('?')[0].slice(0, 200),
+    appVersion: import.meta.env.VITE_APP_VERSION || '1.0.0',
+    browser: navigator.userAgent,
+    viewport: `${window.innerWidth}x${window.innerHeight}`,
+    locale: navigator.language,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+    errorCode,
+  };
+}
+
 export async function submitUserReport({
   reportToken,
   submissionId,
@@ -90,8 +103,6 @@ export async function submitUserReport({
   errorCode = '',
   screenshot = null,
 }) {
-  const routeName = String(window.location.hash || '#/').split('?')[0].slice(0, 200);
-  const pageUrl = `${window.location.origin}${window.location.pathname}`;
   const screenshotPayload = screenshot ? {
     filename: screenshot.name,
     contentType: screenshot.type,
@@ -113,16 +124,7 @@ export async function submitUserReport({
         },
       } : {}),
       ...(screenshotPayload ? { screenshot: screenshotPayload } : {}),
-      context: {
-        pageUrl,
-        routeName,
-        appVersion: import.meta.env.VITE_APP_VERSION || '1.0.0',
-        browser: navigator.userAgent,
-        viewport: `${window.innerWidth}x${window.innerHeight}`,
-        locale: navigator.language,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
-        errorCode,
-      },
+      context: getReportingContext(errorCode),
     }),
   });
 }

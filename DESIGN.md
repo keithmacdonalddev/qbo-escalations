@@ -1,6 +1,6 @@
 # QBO Escalations Design System
 
-> Source-backed product UI guidance. Last verified against the production client source on 2026-07-23. Rendered browser verification is a required release gate whenever the browser test surface is available.
+> Source-backed product UI guidance. Last verified against the production client source and rendered at desktop and 390px mobile widths on 2026-07-25. Rendered browser verification is a required release gate whenever the browser test surface is available.
 
 ## Product and interface purpose
 
@@ -24,7 +24,7 @@ Functional correctness is necessary but is not enough to call UI work complete. 
 - Keep optional information collapsed or visually secondary until the user asks for it.
 - Give every interactive control intentional hover, focus-visible, active, selected, disabled, and loading behavior where those states apply.
 - Use purposeful 160–220ms motion to explain selection and disclosure changes, with a reduced-motion fallback.
-- Keep modals, drawers, and panels dimensionally stable while their internal content changes. Reveal or replace content inside the frame and scroll within it; do not make the outer container jump between workflow steps.
+- Size each workflow mode to the work it contains. An intentional one-time transition from a compact invitation to a writing frame is useful; reserving the final workflow height before it is needed is not. Once the user is writing, keep the frame stable, let disclosures add natural scroll inside it, and do not clip or compress their contents.
 - Use one explicit control height within a row. Labels, inputs, icons, and helper text must align; accidental height differences are a release defect.
 - Preserve 8–10px between a field label and its control unless a documented dense pattern requires otherwise.
 - Apply the space/value assessment before review. Large empty containers and decorative cards must be reduced or removed when they do not help the next action.
@@ -50,7 +50,17 @@ Future UI work must apply these corrections before styling:
 8. **Do not use pills for static optionality.** Pills and chips imply status, filtering, or interaction. Use quiet inline text for simple qualifiers such as optional input.
 9. **Prove the space/value result from screenshots.** Review focused crops at desktop and mobile sizes. For every visible line and container, ask what the user loses if it disappears and whether the layout actually contracts when content is removed.
 
-For feedback/reporting specifically, the modal is one new-report workflow. Open with one collaborative header line and a compact, expressive chooser—not a full-height empty form frame. The chooser does not need a separate visible `Type` label. Preserve the established user-facing choices (`Found a bug?` / `Report a Problem`, `Have an idea?` / `Request a Feature`, and `Want to chat?` / `Submit Feedback`) unless the product owner explicitly requests copy changes. Give each path a recognizable icon and a deliberate hover, focus, active, and selected state. On selection, expand into the writing frame and compress the chooser so the form becomes the priority; keep that expanded frame stable when the user switches report paths. Begin immediately with the required title and explanation fields. Keep short guidance on the same line as its label; move the privacy warning into an accessible tooltip beside the relevant field. Put screenshot evidence and optional contact in one divided support surface. Give each one concise copy that helps the user decide whether it adds value, render `Optional` as quiet inline text rather than a badge, and align both control rows without artificial spacer tracks. Anchor submission in a calm footer that pairs the human-review/data-use message with the cancel and send actions. Required technical metadata is collected silently; it is not presented as a checkbox or a large explanatory card. Do not show placeholder history tabs or disclosures for features that are not part of the current task.
+### July 25 rendered correction proof
+
+The implementation pass was not accepted from source review alone. Live rendering exposed three defects that the component tests and build did not:
+
+- A fixed 690px modal height left a large dead field beneath a short form. The workflow now uses a compact chooser frame, a task-sized writing frame, and a larger receipt frame only when the receipt content requires it.
+- Expanded optional panels existed in the DOM but their grid tracks were shrinking and clipping the controls. Writing rows now retain their intrinsic height and the frame scrolls naturally when disclosures are open.
+- The compact report-type selector wrapped into multiple lines and created horizontal overflow at 390px. It now stays as three equal, single-line choices with no horizontal page or modal overflow.
+
+These are release regressions, not cosmetic preferences. A modal fails review if hidden overflow makes controls unreachable, if a compact state reserves unused workflow height, or if mobile labels create horizontal scrolling.
+
+For feedback/reporting specifically, the modal is one new-report workflow. Open with one collaborative header line and a compact, expressive chooser—not a full-height empty form frame. The chooser does not need a separate visible `Type` label. Preserve the established user-facing choices (`Found a bug?` / `Report a Problem`, `Have an idea?` / `Request a Feature`, and `Want to chat?` / `Submit Feedback`) unless the product owner explicitly requests copy changes. Give each path a recognizable icon and a deliberate hover, focus, active, and selected state. On selection, transition once into the writing frame and compress the chooser so the form becomes the priority; keep that writing frame stable when the user switches report paths. Begin immediately with the required title and explanation fields. Keep short decision-helping guidance on the same line as its label; move the privacy warning into an accessible tooltip beside the relevant field. Present screenshot evidence and contact as concise disclosure rows that state the value of opening them. When opened, integrate their controls into the same surface with dividers and intrinsic-height rows; do not use `Optional` pills, empty spacer tracks, or equal-height cards. Let users review a screenshot locally, crop it, or cover private details with opaque redaction before upload. Anchor submission in a calm footer that pairs the human-review/data-use message with the cancel and send actions. Required technical metadata is collected silently and explained only through a compact “What’s included” disclosure. Save unfinished text in the browser session and offer an explicit discard route. After submission, use the existing private receipt as the living continuation of the report: public-safe status, owner-approved updates, reporter replies, and fixed/not-fixed validation belong in the receipt, while owner-only close and reopen authority remains absent. Do not add a generic report-history workspace or make receipt features compete with writing the first report.
 
 ## Source of truth and implementation map
 
@@ -65,7 +75,7 @@ For feedback/reporting specifically, the modal is one new-report workflow. Open 
 | AI catalog workspace | `client/src/components/AiManagementSettings.jsx` | Provider/model management and new-model review |
 | Connected accounts | `client/src/components/SettingsAccountsSection.jsx` | Account health, permissions, repair, and purpose-specific defaults |
 | AI safety controls | `client/src/components/AiAssistantSettingsPanel.jsx` | Accordion-based advanced configuration |
-| Feedback and problem reporting | `client/src/components/reporting/UserReportDialog.jsx` and `.css` | Fixed-frame new-report flow, progressive type selection, compact optional contact and screenshot controls |
+| Feedback and problem reporting | `client/src/components/reporting/UserReportDialog.jsx`, `ScreenshotEditor.jsx`, `customerReceipts.js`, `screenshotCapture.js`, `ticketSnitchReporting.js`, and `UserReportDialog.css` | Progressive chooser-to-writing flow, session draft recovery, local crop and opaque redaction review, optional contact, safe context disclosure, and living private receipt |
 
 Prototypes under `prototypes/` are deliberately excluded from the production design contract unless a later maintained change explicitly promotes them.
 
@@ -444,7 +454,7 @@ Define unfamiliar technical terms immediately in everyday language. Prefer one s
 
 ## Motion
 
-Use 160–220ms transitions for hover, focus, switching, and small disclosure changes. A short opacity-and-position reveal is appropriate when a user choice causes the next stage of a form to appear. Motion should clarify state change without moving or resizing the surrounding modal, drawer, or panel. Avoid entrance animations for ordinary static settings and repeated floating/pulsing treatments. Disable nonessential motion when reduced motion is requested.
+Use 160–220ms transitions for hover, focus, switching, and small disclosure changes. A short opacity-and-position reveal is appropriate when a user choice causes the next stage of a form to appear. Motion should clarify state change. A single compact-to-working-frame transition may resize a modal when the new task genuinely needs more room; repeated field, validation, or disclosure changes should not make the outer shell jump. Avoid entrance animations for ordinary static settings and repeated floating/pulsing treatments. Disable nonessential motion when reduced motion is requested.
 
 ## Quality checklist
 
@@ -455,12 +465,12 @@ Before merging a UI change:
 3. Use the canonical tokens; search for new hard-coded colors.
 4. Confirm title, copy, and action hierarchy.
 5. Confirm progressive disclosure: only controls needed for the current decision are prominent.
-6. Verify that internal state changes do not resize or reposition the containing modal, drawer, or panel.
+6. Verify that each workflow mode earns its frame size, the writing frame stays stable, and expanded content uses intrinsic height plus reachable scrolling instead of clipping.
 7. Check hover, focus-visible, active, selected, disabled, loading, empty, warning, error, dirty, and saved states as applicable.
 8. Verify equal control heights, label gaps, alignment, keyboard focus, and accessible names.
 9. Build the client and run focused interaction tests.
 10. Inspect the live desktop route at a typical laptop viewport.
-11. Inspect a mobile viewport.
+11. Inspect a mobile viewport, including every compact selector and expanded disclosure; confirm `scrollWidth` does not exceed the available width.
 12. Check browser console errors.
 13. If visual inspection was blocked, mark the visual gate incomplete instead of declaring a visual pass.
 14. Re-read changed files before reporting current state.
@@ -475,7 +485,7 @@ Before merging a UI change:
 
 Use this context when requesting implementation:
 
-> Build this as a compact operational interface using the repository's existing Slate design tokens from `client/src/App.css`. Put the user's actual task in the first viewport and use progressive disclosure so each step shows only what is relevant now. Apply the space/value assessment from `DESIGN.md` to every visible element. Prefer one organized surface with dividers over a collection of cards. Keep the outer frame of modals, drawers, and panels stable while content changes inside it. Give controls deliberate hover, focus-visible, active, selected, disabled, and loading states; keep aligned inputs equal in height; and use 160–220ms purposeful motion with reduced-motion support. Verify desktop and mobile in the live app. If browser verification is unavailable, say the visual gate is incomplete rather than inferring a pass from tests or build output.
+> Build this as a compact operational interface using the repository's existing Slate design tokens from `client/src/App.css`. Put the user's actual task in the first viewport and use progressive disclosure so each step shows only what is relevant now. Apply the space/value assessment from `DESIGN.md` to every visible element. Prefer one organized surface with dividers over a collection of cards. Size each workflow mode to its real content; allow one purposeful compact-to-working transition, then keep the working frame stable and make expanded content reachable through intrinsic sizing and natural scroll. Give controls deliberate hover, focus-visible, active, selected, disabled, and loading states; keep aligned inputs equal in height; and use 160–220ms purposeful motion with reduced-motion support. Verify desktop and mobile in the live app, including overflow and clipped-content checks. If browser verification is unavailable, say the visual gate is incomplete rather than inferring a pass from tests or build output.
 
 For Settings work, add:
 
