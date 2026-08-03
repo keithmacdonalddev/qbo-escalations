@@ -18,7 +18,7 @@
       "cwd": ".",
       "timeoutMs": 1800000,
       "why": "Checks persistence, permissions, evidence, and route contracts.",
-      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting", "workspace-primary-operations-agent"]
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "qbo-orchestration", "conversation-persistence", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting", "shared-agent-tool-authority", "workspace-primary-operations-agent", "agent-execution-safety"]
     },
     "stress-harness-tests": {
       "label": "Stress harness infrastructure tests",

@@ -10,6 +10,7 @@ const { emitRoomEvent } = require('../../services/room-realtime-runtime');
 const { clearRoomOrchestration, interruptRoomOrchestration, registerRoomOrchestration } = require('../../services/room-orchestration-runtime');
 const { normalizeRoomAgentRuntimeSelections } = require('../../services/room-agent-runtime');
 const { createRateLimiter } = require('../../middleware/rate-limit');
+const { createDurableAgentExecution } = require('../../services/durable-agent-dispatcher');
 const { requireValidId } = require('./middleware');
 
 const router = express.Router();
@@ -132,6 +133,52 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
     });
   }
 
+  let durableExecution;
+  try {
+    durableExecution = await createDurableAgentExecution({
+      idempotencyKey: `room:${req.requestId}:orchestration`,
+      manifest: {
+        agentId: 'room-coordinator',
+        useCase: 'room-orchestration',
+        surface: 'rooms',
+        purpose: 'product-room-response',
+        trigger: isSystemInitiated ? 'system-continuation' : 'operator-request',
+        requestId: req.requestId,
+        promptId: 'room-orchestration',
+        promptVersion: 'runtime-assembled-v1',
+        actor: isSystemInitiated ? 'system:room-autonomy' : 'local-operator',
+        refs: {
+          roomId,
+          contextRef: `room:${roomId}:messages:${room.messages?.length || 0}`,
+        },
+      },
+      inputs: {
+        prompt: messageContent,
+        provider: agentRuntimeSelections,
+        context: {
+          roomId,
+          activeAgents: room.activeAgents || [],
+          messageCount: room.messages?.length || 0,
+          messages: room.messages || [],
+          parsedImageContext: parsedImageContext || null,
+        },
+        request: {
+          mentions,
+          orchestrationMode: room.settings?.orchestrationMode || 'auto',
+          maxRoundsPerTurn: room.settings?.maxRoundsPerTurn || 1,
+          systemInitiated: isSystemInitiated,
+        },
+      },
+    });
+  } catch (error) {
+    return res.status(error.status || 500).json({
+      ok: false,
+      code: error.code || 'AGENT_RUN_START_FAILED',
+      error: error.message || 'The durable room run could not be started.',
+      agentRun: error.run || null,
+    });
+  }
+
   // --- SSE setup ---
   // Pattern from routes/chat/send.js lines 321-328
   res.writeHead(200, {
@@ -144,6 +191,8 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
   let streamSettled = false;
   let cleanupFn = null;
   let settledReason = null;
+  const roomAttemptNumbers = new Map();
+  const roomEvidenceRefs = [];
 
   function finishStream(reason = 'completed') {
     if (streamSettled) return false;
@@ -159,9 +208,10 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
     const reason = payload.reason || 'superseded';
     if (!finishStream(reason)) return;
 
-    if (cleanupFn) {
-      try { cleanupFn(); } catch { /* ignore */ }
-    }
+    durableExecution.requestCancellation({
+      requestedBy: payload.actor || 'system',
+      reason: `Room run superseded: ${reason}`,
+    }).catch(() => {});
 
     emitRoomEvent(roomId, 'room-interrupt', {
       roomId,
@@ -189,20 +239,23 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
     try { res.write(':heartbeat\n\n'); } catch { /* client gone */ }
   }, HEARTBEAT_MS);
 
-  // Safety timeout — force-close hung streams
+  // The live stream may time out while the durable room run continues.
   const safetyTimeout = setTimeout(() => {
-    if (!finishStream('timeout')) return;
-    console.error('[room/send] SSE safety timeout hit after %dms — force-closing', SAFETY_TIMEOUT_MS);
+    if (streamSettled) return;
+    streamSettled = true;
+    settledReason = 'presentation-timeout';
+    durableExecution.detachClient();
+    clearInterval(heartbeat);
+    clearRoomOrchestration(roomId, requestId);
+    console.warn('[room/send] SSE presentation timeout hit after %dms; durable run continues', SAFETY_TIMEOUT_MS);
     try {
       res.write('event: error\ndata: ' + JSON.stringify({
-        error: 'Request timed out — please try again',
-        code: 'SSE_STREAM_TIMEOUT',
+        error: 'The live stream closed, but the room agents are still working in the background.',
+        code: 'SSE_PRESENTATION_TIMEOUT',
+        agentRunId: durableExecution.run.id,
       }) + '\n\n');
       res.end();
     } catch { /* client gone */ }
-    if (cleanupFn) {
-      try { cleanupFn(); } catch { /* ignore */ }
-    }
   }, SAFETY_TIMEOUT_MS);
 
   interruptRoomOrchestration(roomId, 'superseded-by-new-message', {
@@ -219,6 +272,7 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
     agentRuntimeSelections,
 
     onRoomStart: (data) => {
+      const payload = { ...data, agentRunId: durableExecution.run.id };
       if (isSystemInitiated) {
         emitRoomEvent(roomId, 'agent-status', {
           type: 'autonomous-room-turn',
@@ -226,13 +280,20 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
           message: 'The room picked the conversation back up on its own.',
         });
       }
-      emitRoomEvent(roomId, 'room-start', data);
+      emitRoomEvent(roomId, 'room-start', payload);
       try {
-        res.write('event: room_start\ndata: ' + JSON.stringify(data) + '\n\n');
+        res.write('event: room_start\ndata: ' + JSON.stringify(payload) + '\n\n');
       } catch { /* client gone */ }
     },
 
-    onAgentStart: (data) => {
+    onAgentStart: async (data) => {
+      const attempt = await durableExecution.beginAttempt({
+        agentId: data.agentId,
+        provider: data.provider,
+        model: data.model || 'provider-default',
+        role: 'room-agent',
+      });
+      roomAttemptNumbers.set(data.agentId, attempt.attemptNumber);
       emitRoomEvent(roomId, 'agent-start', data);
       recordAgentActivity(data.agentId, {
         type: 'lifecycle',
@@ -319,7 +380,9 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
       };
 
       try {
-        await pushRoomMessage(roomId, agentMsg);
+        const savedRoom = await pushRoomMessage(roomId, agentMsg);
+        const savedIndex = Math.max(0, (savedRoom.messages?.length || 1) - 1);
+        roomEvidenceRefs.push({ kind: 'room-message', id: `${roomId}:${savedIndex}` });
         await captureRoomMemory(roomId, agentMsg);
         emitRoomEvent(roomId, 'message-posted', {
           roomId,
@@ -342,6 +405,15 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
         }, { surface: 'rooms', roomId });
         if (normalizedActions.length > 0 && data.agentId) {
           await recordAgentToolUsage(data.agentId, normalizedActions, { surface: 'rooms', roomId });
+        }
+        const attemptNumber = roomAttemptNumbers.get(data.agentId);
+        if (attemptNumber) {
+          await durableExecution.finishAttempt(attemptNumber, {
+            status: 'ok',
+            provider: data.provider,
+            model: data.model || data.usage?.model || '',
+            usage: data.usage || null,
+          });
         }
       } catch (saveErr) {
         console.warn('[room/send] Failed to save agent message for %s: %s', data.agentId, saveErr.message);
@@ -370,7 +442,7 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
       } catch { /* client gone */ }
     },
 
-    onAgentError: (data) => {
+    onAgentError: async (data) => {
       emitRoomEvent(roomId, 'agent-error', data);
       if (data?.agentId) {
         recordAgentActivity(data.agentId, {
@@ -381,12 +453,32 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
           detail: data,
         }, { surface: 'rooms', roomId }).catch(() => {});
       }
+      const attemptNumber = roomAttemptNumbers.get(data?.agentId);
+      if (attemptNumber) {
+        await durableExecution.finishAttempt(attemptNumber, {
+          status: 'error',
+          errorCode: data.code || 'AGENT_FAILED',
+          errorMessage: data.error || data.message || 'Room agent failed.',
+        }).catch(() => {});
+      }
       try {
         res.write('event: agent_error\ndata: ' + JSON.stringify(data) + '\n\n');
       } catch { /* client gone */ }
     },
 
-    onRoomDone: (data) => {
+    onRoomDone: async (data) => {
+      try {
+        await durableExecution.completeSucceeded({ evidenceRefs: roomEvidenceRefs, result: data });
+      } catch (error) {
+        await durableExecution.completeFailed({
+          incomplete: true,
+          error: {
+            code: error.code || 'DURABLE_ROOM_EVIDENCE_FAILED',
+            message: error.message || 'Room output could not be verified after it was saved.',
+          },
+        }).catch(() => {});
+        throw error;
+      }
       if (!finishStream('done')) return;
       try {
         emitRoomEvent(roomId, 'room-done', data);
@@ -395,7 +487,13 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
       } catch { /* client gone */ }
     },
 
-    onError: (err) => {
+    onError: async (err) => {
+      await durableExecution.completeFailed({
+        error: {
+          code: err.code || 'ORCHESTRATION_FAILED',
+          message: err.message || 'Room orchestration failed',
+        },
+      }).catch(() => {});
       if (!finishStream(err?.code === 'ROOM_INTERRUPTED' ? 'interrupted' : 'error')) return;
       try {
         res.write('event: error\ndata: ' + JSON.stringify({
@@ -406,6 +504,7 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
       } catch { /* client gone */ }
     },
   });
+  durableExecution.registerAbort(cleanupFn);
 
   registerRoomOrchestration(roomId, requestId, ({ reason, supersededByRequestId, actor }) => {
     interruptCurrentStream({
@@ -424,9 +523,7 @@ router.post('/:id/send', requireValidId, roomSendLimiter, async (req, res) => {
     if (!streamSettled) {
       streamSettled = true;
       settledReason = settledReason || 'client-disconnect';
-      if (cleanupFn) {
-        try { cleanupFn(); } catch { /* ignore */ }
-      }
+      durableExecution.detachClient();
     }
   });
 });

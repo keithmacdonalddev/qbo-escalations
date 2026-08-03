@@ -1,242 +1,165 @@
 'use strict';
 
-// Provider call package reasoning endpoint.
-//
 // GET /api/provider-packages/:id/reasoning
 //
-// Surfaces the model's internal reasoning ("thinking") captured for a
-// provider call. ProviderCallPackage documents persist every CLI stdout
-// JSONL event in cli.stdout.jsonlEvents (or externalized to disk when large
-// — see provider-call-package-payload-store.js). This route replays those
-// stored events and extracts only the reasoning text, so the client never
-// receives raw forensic event dumps.
-//
-// Supported shapes:
-// - Codex CLI: events with item.type 'reasoning' / 'agent_reasoning'
-//   (cumulative snapshots per item id), plus flat event types containing
-//   'reasoning' with text/delta payloads. Mirrors
-//   extractThinkingFromEventLine() in services/codex.js.
-// - Claude CLI: assistant message snapshots with content blocks of
-//   type 'thinking', plus stream_event-wrapped content_block_delta events
-//   with delta.type 'thinking_delta'. Mirrors extractThinking() in
-//   services/claude.js.
-// - Direct Anthropic API (HTTP harness): thinking blocks stored verbatim in
-//   response.parsedJson.content (type 'thinking') when the request opted into
-//   readable summaries via thinking: {type:'adaptive', display:'summarized'}.
-// - Other providers (no cli.stdout, no Anthropic-shaped response): honest
-//   empty result — { ok: true, reasoning: [] }.
+// Returns bounded, ordered, diagnostic-only provider reasoning evidence. The
+// legacy `reasoning: [{text}]` response remains for compatibility; `evidence`
+// and `provenance` are the authoritative identity-aware surfaces.
 
+const crypto = require('crypto');
 const express = require('express');
-const fs = require('fs/promises');
-const path = require('path');
 const mongoose = require('mongoose');
 
 const ProviderCallPackage = require('../models/ProviderCallPackage');
-const { getDefaultPayloadRoot } = require('../services/provider-call-package-payload-store');
+const { loadProviderPayloadText } = require('../services/provider-payload-loader');
+const {
+  buildReasoningEvidence,
+  resolveReasoningIdentity,
+} = require('../services/provider-reasoning-evidence');
 
 const router = express.Router();
 
-// Reasoning can run long for high-effort runs. Keep the full text within a
-// sane response budget instead of dumping unbounded payloads to the client.
+// Stored evidence is already bounded more tightly. This independent display
+// cap protects the API when reading historical or externally stored packages.
 const MAX_TOTAL_REASONING_CHARS = 400_000;
 
-function summaryEntryText(entry) {
-  if (typeof entry === 'string') return entry;
-  if (entry && typeof entry.text === 'string') return entry.text;
+function safeString(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function idString(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  if (typeof value?.toString === 'function') {
+    const text = value.toString();
+    return text === '[object Object]' ? '' : safeString(text);
+  }
   return '';
 }
 
-/**
- * Extract ordered reasoning text blocks from stored CLI stdout JSONL events.
- * Returns an array of strings (one per reasoning block).
- */
-function extractReasoningBlocks(events) {
-  // Codex: per-item cumulative snapshots (latest snapshot wins; non-prefix
-  // snapshots are appended so nothing captured is silently dropped).
-  const codexSnapshots = new Map();
-  const codexOrder = [];
-  // Codex: flat streaming reasoning deltas with no item id.
-  let codexStreamText = '';
-  // Claude: full thinking blocks from assistant message snapshots.
-  const claudeFullBlocks = [];
-  // Claude: thinking_delta accumulation per content-block index (fallback).
-  const claudeDeltas = new Map();
-
-  for (const event of Array.isArray(events) ? events : []) {
-    if (!event || typeof event !== 'object') continue;
-
-    // --- Codex CLI: reasoning items -------------------------------------
-    const item = event.item && typeof event.item === 'object' ? event.item : null;
-    if (item && (item.type === 'reasoning' || item.type === 'agent_reasoning')) {
-      const nextText = typeof item.text === 'string'
-        ? item.text
-        : Array.isArray(item.summary)
-          ? item.summary.map(summaryEntryText).filter(Boolean).join('\n')
-          : '';
-      if (nextText) {
-        const key = item.id || '__default__';
-        if (!codexSnapshots.has(key)) codexOrder.push(key);
-        const prevText = codexSnapshots.get(key) || '';
-        codexSnapshots.set(
-          key,
-          nextText.startsWith(prevText) || !prevText ? nextText : `${prevText}\n${nextText}`
-        );
-      }
-      continue;
-    }
-
-    const eventType = typeof event.type === 'string' ? event.type : '';
-
-    // --- Codex CLI: flat reasoning text/delta events ---------------------
-    if (eventType.includes('reasoning')) {
-      if (typeof event.text === 'string') {
-        codexStreamText += event.text;
-        continue;
-      }
-      if (typeof event.delta === 'string') {
-        codexStreamText += event.delta;
-        continue;
-      }
-      if (event.delta && typeof event.delta.text === 'string') {
-        codexStreamText += event.delta.text;
-        continue;
-      }
-    }
-
-    // --- Claude CLI: full assistant snapshots ----------------------------
-    const content = event.message && Array.isArray(event.message.content)
-      ? event.message.content
-      : null;
-    if (content) {
-      for (const block of content) {
-        if (block && block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim()) {
-          claudeFullBlocks.push(block.thinking.trim());
-        }
-      }
-    }
-
-    // --- Claude CLI: streaming thinking deltas ----------------------------
-    const inner = (eventType === 'stream_event' && event.event && typeof event.event === 'object')
-      ? event.event
-      : event;
-    if (inner
-        && inner.type === 'content_block_delta'
-        && inner.delta
-        && inner.delta.type === 'thinking_delta'
-        && typeof inner.delta.thinking === 'string') {
-      const index = Number.isFinite(inner.index) ? inner.index : 0;
-      claudeDeltas.set(index, (claudeDeltas.get(index) || '') + inner.delta.thinking);
-    }
-  }
-
-  const blocks = [];
-  for (const key of codexOrder) {
-    const text = (codexSnapshots.get(key) || '').trim();
-    if (text) blocks.push(text);
-  }
-
-  // Claude: prefer complete assistant-snapshot blocks. Partial+final snapshots
-  // can repeat the same block — keep only the longest of any prefix family.
-  if (claudeFullBlocks.length > 0) {
-    const deduped = [];
-    for (const text of claudeFullBlocks) {
-      const familyIndex = deduped.findIndex(
-        (existing) => existing.startsWith(text) || text.startsWith(existing)
-      );
-      if (familyIndex >= 0) {
-        if (text.length > deduped[familyIndex].length) deduped[familyIndex] = text;
-      } else {
-        deduped.push(text);
-      }
-    }
-    blocks.push(...deduped);
-  } else if (claudeDeltas.size > 0) {
-    const orderedIndexes = [...claudeDeltas.keys()].sort((a, b) => a - b);
-    for (const index of orderedIndexes) {
-      const text = (claudeDeltas.get(index) || '').trim();
-      if (text) blocks.push(text);
-    }
-  }
-
-  const streamText = codexStreamText.trim();
-  if (streamText) blocks.push(streamText);
-
-  return blocks;
+function optionalIndex(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
-/**
- * Load the stored CLI stdout JSONL events for a package. Large captures are
- * externalized to disk by the payload store with the inline field nulled and
- * a payload ref attached — follow the ref when the inline array is empty.
- */
-async function loadJsonlEvents(pkg) {
-  const stdout = pkg && pkg.cli && pkg.cli.stdout ? pkg.cli.stdout : null;
-  if (!stdout) return [];
+function hashLegacyEvidence(value) {
+  return crypto.createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+}
 
-  if (Array.isArray(stdout.jsonlEvents) && stdout.jsonlEvents.length > 0) {
-    return stdout.jsonlEvents;
-  }
-
-  const ref = stdout.jsonlEventsPayloadRef && typeof stdout.jsonlEventsPayloadRef.ref === 'string'
-    ? stdout.jsonlEventsPayloadRef.ref
-    : '';
+async function loadExternalArray(ref) {
   if (!ref) return [];
-
-  // Refs are stored as server/data/provider-call-packages/<date>/<id>/<file>.
-  const marker = 'provider-call-packages/';
-  const markerIndex = ref.indexOf(marker);
-  if (markerIndex < 0) return [];
-
-  const payloadRoot = path.resolve(getDefaultPayloadRoot());
-  const filePath = path.resolve(payloadRoot, ref.slice(markerIndex + marker.length));
-  // Path traversal guard — the resolved file must stay inside the payload root.
-  if (!filePath.startsWith(payloadRoot + path.sep)) return [];
-
-  try {
-    const text = await fs.readFile(filePath, 'utf8');
-    const parsed = JSON.parse(text);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    // Externalized file may have been cleaned up independently of the Mongo
-    // TTL — treat as "no reasoning captured" rather than a hard failure.
-    return [];
-  }
+  const loaded = await loadProviderPayloadText(ref, { maxBytes: 1024 * 1024 });
+  const parsed = JSON.parse(loaded.text);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
-/**
- * Extract reasoning from an HTTP-harness package whose stored response is an
- * Anthropic /v1/messages body — thinking blocks precede the text block(s).
- */
-function extractHttpReasoningBlocks(pkg) {
-  const content = pkg && pkg.response && pkg.response.parsedJson && Array.isArray(pkg.response.parsedJson.content)
-    ? pkg.response.parsedJson.content
+async function loadJsonlEvents(pkg) {
+  const stdout = pkg?.cli?.stdout;
+  if (!stdout) return [];
+  if (Array.isArray(stdout.jsonlEvents) && stdout.jsonlEvents.length > 0) return stdout.jsonlEvents;
+  const ref = typeof stdout?.jsonlEventsPayloadRef?.ref === 'string'
+    ? stdout.jsonlEventsPayloadRef
     : null;
-  if (!content) return [];
-  return content
-    .filter((block) => block && block.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim())
-    .map((block) => block.thinking.trim());
+  return loadExternalArray(ref);
 }
 
-function capBlocks(blocks) {
-  const capped = [];
+function normalizeEvidenceEntries(entries, fallback = {}) {
+  const ordered = (Array.isArray(entries) ? entries : [])
+    .map((rawEntry, originalIndex) => ({ rawEntry, originalIndex }))
+    .sort((left, right) => {
+      const leftSequence = optionalIndex(left.rawEntry?.sequence) ?? left.originalIndex;
+      const rightSequence = optionalIndex(right.rawEntry?.sequence) ?? right.originalIndex;
+      return leftSequence - rightSequence || left.originalIndex - right.originalIndex;
+    });
+
+  const evidence = [];
   let total = 0;
   let truncated = false;
-  for (const text of blocks) {
+  for (const { rawEntry, originalIndex } of ordered) {
     if (total >= MAX_TOTAL_REASONING_CHARS) {
       truncated = true;
       break;
     }
+    const entry = rawEntry && typeof rawEntry === 'object' ? rawEntry : { text: rawEntry };
+    const text = typeof entry.text === 'string' ? entry.text.trim() : '';
+    if (!text) continue;
     const remaining = MAX_TOTAL_REASONING_CHARS - total;
-    if (text.length > remaining) {
-      capped.push(text.slice(0, remaining));
-      total += remaining;
-      truncated = true;
-      break;
-    }
-    capped.push(text);
-    total += text.length;
+    const displayText = text.length > remaining ? text.slice(0, remaining) : text;
+    const displayTruncated = displayText.length < text.length;
+    if (displayTruncated) truncated = true;
+    const sequence = optionalIndex(entry.sequence) ?? originalIndex;
+    const packageId = idString(entry.packageId || fallback.packageId);
+    const provider = safeString(entry.provider || entry.providerId || fallback.provider);
+    const actualModel = safeString(entry.actualModel || fallback.actualModel);
+    const requestedModel = safeString(entry.requestedModel || fallback.requestedModel);
+    const sourcePath = safeString(entry.sourcePath || fallback.sourcePath) || 'unknown';
+    const storedComplete = entry.complete === true;
+    const storedTruncated = entry.truncated === true;
+    const evidenceId = safeString(entry.evidenceId) || hashLegacyEvidence({
+      packageId,
+      sequence,
+      sourcePath,
+      text,
+    });
+    const transportEventHash = safeString(entry.transportEventHash);
+    evidence.push({
+      version: safeString(entry.version) || 'provider-reasoning-evidence-v1-legacy',
+      evidenceId,
+      packageId,
+      runId: idString(entry.runId || fallback.runId),
+      requestId: idString(entry.requestId || fallback.requestId),
+      attemptId: idString(entry.attemptId || fallback.attemptId),
+      attemptIndex: optionalIndex(entry.attemptIndex ?? fallback.attemptIndex),
+      toolLoopRound: optionalIndex(entry.toolLoopRound ?? fallback.toolLoopRound),
+      modelRound: optionalIndex(entry.modelRound ?? fallback.modelRound),
+      provider,
+      providerId: provider,
+      actualModel,
+      requestedModel,
+      model: safeString(entry.model) || actualModel || requestedModel,
+      promptId: safeString(entry.promptId || fallback.promptId),
+      promptHash: safeString(entry.promptHash || fallback.promptHash),
+      promptHashSource: safeString(entry.promptHashSource || fallback.promptHashSource) || 'legacy',
+      promptVersion: safeString(entry.promptVersion || fallback.promptVersion),
+      sequence,
+      transportSequence: optionalIndex(entry.transportSequence),
+      transportEventId: idString(entry.transportEventId),
+      transportEventHash,
+      sourcePath,
+      kind: safeString(entry.kind) || 'provider-reasoning',
+      authority: 'diagnostic-only',
+      text: displayText,
+      originalChars: Number.isFinite(Number(entry.originalChars))
+        ? Number(entry.originalChars)
+        : text.length,
+      retainedChars: displayText.length,
+      complete: storedComplete && !storedTruncated && !displayTruncated,
+      truncated: storedTruncated || displayTruncated,
+      storedComplete,
+      storedTruncated,
+      displayTruncated,
+      provenanceComplete: Boolean(packageId && provider && sourcePath && evidenceId && transportEventHash),
+    });
+    total += displayText.length;
+    if (displayTruncated) break;
   }
-  return { capped, truncated };
+  return { evidence, truncated, totalChars: total };
+}
+
+function sendPayloadReadError(res, error) {
+  const statusByCode = {
+    PROVIDER_PAYLOAD_MISSING: 410,
+    PROVIDER_PAYLOAD_TOO_LARGE: 413,
+    PROVIDER_PAYLOAD_INTEGRITY_FAILED: 422,
+    PROVIDER_PAYLOAD_REF_INVALID: 400,
+  };
+  return res.status(statusByCode[error?.code] || 500).json({
+    ok: false,
+    code: error?.code || 'PROVIDER_PAYLOAD_READ_FAILED',
+    payloadStatus: error?.payloadStatus || 'read-failed',
+    error: error?.message || 'Stored reasoning evidence could not be verified.',
+  });
 }
 
 router.get('/:id/reasoning', async (req, res) => {
@@ -249,7 +172,26 @@ router.get('/:id/reasoning', async (req, res) => {
   }
 
   const pkg = await ProviderCallPackage.findById(req.params.id)
-    .select('providerId cli.modelRequested cli.stdout.jsonlEvents cli.stdout.jsonlEventsPayloadRef request.modelRequested response.parsedJson')
+    .select([
+      'providerId',
+      'metadata',
+      'capturePolicy',
+      'reasoningEvidence',
+      'reasoningEvidencePayloadRef',
+      'reasoningEvidenceSummary',
+      'resultHandoff.model',
+      'cli.modelRequested',
+      'cli.stdout.jsonlEvents',
+      'cli.stdout.jsonlEventsPayloadRef',
+      'request.modelRequested',
+      'response.parsedJson',
+      'lmStudio.request.modelRequested',
+      'lmStudio.response.parsedJson',
+      'llmGateway.request.modelRequested',
+      'llmGateway.response.parsedJson',
+      'geminiApi.request.modelRequested',
+      'geminiApi.response.parsedJson',
+    ].join(' '))
     .lean();
   if (!pkg) {
     return res.status(404).json({
@@ -259,19 +201,85 @@ router.get('/:id/reasoning', async (req, res) => {
     });
   }
 
-  const events = await loadJsonlEvents(pkg);
-  let blocks = extractReasoningBlocks(events);
-  if (blocks.length === 0) {
-    blocks = extractHttpReasoningBlocks(pkg);
+  const packageId = String(pkg._id);
+  let labelledEvidence = Array.isArray(pkg.reasoningEvidence) ? pkg.reasoningEvidence : [];
+  if (labelledEvidence.length === 0 && pkg.reasoningEvidencePayloadRef?.ref) {
+    try {
+      labelledEvidence = await loadExternalArray(pkg.reasoningEvidencePayloadRef);
+    } catch (error) {
+      return sendPayloadReadError(res, error);
+    }
   }
-  const { capped, truncated } = capBlocks(blocks);
+
+  let legacyCapture = null;
+  if (labelledEvidence.length === 0) {
+    let events;
+    try {
+      events = await loadJsonlEvents(pkg);
+    } catch (error) {
+      return sendPayloadReadError(res, error);
+    }
+    const legacyEnvelope = {
+      ...pkg,
+      _id: packageId,
+      cli: pkg.cli ? {
+        ...pkg.cli,
+        stdout: { ...(pkg.cli.stdout || {}), jsonlEvents: events },
+      } : null,
+    };
+    legacyCapture = buildReasoningEvidence(legacyEnvelope, { packageId });
+    labelledEvidence = legacyCapture.evidence;
+  }
+
+  const identity = legacyCapture?.identity || resolveReasoningIdentity(pkg, { packageId });
+  const responseEvidence = normalizeEvidenceEntries(labelledEvidence, {
+    ...identity,
+    packageId,
+    sourcePath: pkg.reasoningEvidencePayloadRef?.ref
+      ? 'reasoningEvidencePayloadRef'
+      : 'reasoningEvidence',
+  });
+  const firstEvidence = responseEvidence.evidence[0] || null;
+  const actualModel = safeString(firstEvidence?.actualModel || identity.actualModel);
+  const requestedModel = safeString(firstEvidence?.requestedModel || identity.requestedModel);
+  const evidenceSummary = pkg.reasoningEvidenceSummary || legacyCapture?.summary || null;
+  const truncated = responseEvidence.truncated;
 
   res.json({
     ok: true,
     provider: pkg.providerId || '',
-    model: (pkg.cli && pkg.cli.modelRequested) || (pkg.request && pkg.request.modelRequested) || '',
-    reasoning: capped.map((text) => ({ text })),
+    model: actualModel || requestedModel,
+    actualModel,
+    requestedModel,
+    // Compatibility surface retained for existing clients.
+    reasoning: responseEvidence.evidence.map((entry) => ({ text: entry.text })),
     truncated,
+    evidence: responseEvidence.evidence,
+    evidenceSummary,
+    provenance: {
+      packageId,
+      runId: firstEvidence?.runId || identity.runId || '',
+      requestId: firstEvidence?.requestId || identity.requestId || '',
+      attemptId: firstEvidence?.attemptId || identity.attemptId || '',
+      attemptIndex: firstEvidence?.attemptIndex ?? identity.attemptIndex ?? null,
+      toolLoopRound: firstEvidence?.toolLoopRound ?? identity.toolLoopRound ?? null,
+      modelRound: firstEvidence?.modelRound ?? identity.modelRound ?? null,
+      provider: pkg.providerId || identity.provider || '',
+      actualModel,
+      requestedModel,
+      promptId: firstEvidence?.promptId || identity.promptId || '',
+      promptHash: firstEvidence?.promptHash || identity.promptHash || '',
+      promptHashSource: firstEvidence?.promptHashSource || identity.promptHashSource || 'unavailable',
+      promptVersion: firstEvidence?.promptVersion || identity.promptVersion || '',
+      authority: 'diagnostic-only',
+    },
+    capturePolicy: pkg.capturePolicy || null,
+    displayTruncation: {
+      applied: truncated,
+      maxChars: MAX_TOTAL_REASONING_CHARS,
+      storedEvidenceComplete: evidenceSummary?.complete !== false,
+      storedEvidenceTruncated: evidenceSummary?.truncated === true,
+    },
   });
 });
 

@@ -209,7 +209,9 @@ async function createTestConversation(title) {
       message: 'test abort during streaming',
     });
 
-    await sse.waitForEvent('chunk');
+    // Sequential output is buffered until validation succeeds, so the start
+    // event is the safe signal that the request is live before disconnecting.
+    await sse.waitForEvent('start');
     sse.destroy();
     await delay(300);
 
@@ -249,7 +251,8 @@ async function createTestConversation(title) {
   // Test 3
   // -------------------------------------------------------------------------
 
-  test('abort during fallback cancels in-flight fallback provider', async () => {
+  test('unevaluated product fallback settles before backup dispatch', async () => {
+    let codexCalls = 0;
     let codexCleanupCalled = false;
 
     claude.chat = ({ onError }) => {
@@ -260,6 +263,7 @@ async function createTestConversation(title) {
     };
 
     codex.chat = ({ onChunk, onDone }) => {
+      codexCalls += 1;
       onChunk('fallback partial');
       const handle = setTimeout(() => onDone('fallback complete'), 30_000);
       return () => {
@@ -279,11 +283,13 @@ async function createTestConversation(title) {
     });
 
     await sse.waitForEvent('fallback');
-    await sse.waitForEvent('chunk');
+    const errorEvent = await sse.waitForEvent('error');
+    const fallbackEvent = parseSseEvents(sse.getRawChunks()).find((event) => event.event === 'fallback');
+    assert.ok(errorEvent);
+    assert.equal(JSON.parse(fallbackEvent.data).decision.reason, 'server_evaluation_authority_not_implemented');
+    assert.equal(codexCalls, 0, 'blocked backup must not be dispatched');
+    assert.equal(codexCleanupCalled, false);
     sse.destroy();
-    await delay(300);
-
-    assert.equal(codexCleanupCalled, true, 'fallback provider cleanup must be called on client disconnect');
   });
 
   // -------------------------------------------------------------------------
@@ -397,7 +403,7 @@ async function createTestConversation(title) {
       message: 'test double destroy',
     });
 
-    await sse.waitForEvent('chunk');
+    await sse.waitForEvent('start');
     sse.destroy();
     sse.destroy();
     await delay(300);
@@ -557,7 +563,7 @@ async function createTestConversation(title) {
   // Test 11
   // -------------------------------------------------------------------------
 
-  test('SSE stream contains chunk events before abort', async () => {
+  test('sequential SSE withholds unvalidated chunks before abort', async () => {
     claude.chat = ({ onChunk, onDone }) => {
       onChunk('hello ');
       onChunk('world');
@@ -572,7 +578,7 @@ async function createTestConversation(title) {
       message: 'test sse events before abort',
     });
 
-    await sse.waitForEvent('chunk');
+    await sse.waitForEvent('start');
     await delay(50);
     sse.destroy();
     await delay(100);
@@ -582,7 +588,7 @@ async function createTestConversation(title) {
     const chunkEvents = events.filter((e) => e.event === 'chunk');
 
     assert.equal(startEvents.length, 1, 'exactly one start event');
-    assert.ok(chunkEvents.length >= 1, 'at least one chunk event before abort');
+    assert.equal(chunkEvents.length, 0, 'unvalidated sequential chunks must remain buffered');
   });
 
   // -------------------------------------------------------------------------
@@ -606,7 +612,7 @@ async function createTestConversation(title) {
       message: 'test cleanup explosion',
     });
 
-    await sse.waitForEvent('chunk');
+    await sse.waitForEvent('start');
     sse.destroy();
     await delay(300);
 
@@ -654,7 +660,7 @@ async function createTestConversation(title) {
       message: 'first request',
     });
 
-    await sse1.waitForEvent('chunk');
+    await sse1.waitForEvent('start');
     sse1.destroy();
     await delay(300);
 
@@ -699,7 +705,7 @@ async function createTestConversation(title) {
       message: 'test late onDone after abort',
     });
 
-    await sse.waitForEvent('chunk');
+    await sse.waitForEvent('start');
     sse.destroy();
     await delay(300);
 
@@ -734,7 +740,7 @@ async function createTestConversation(title) {
         message: 'rapid abort ' + i,
       });
 
-      await sse.waitForEvent('chunk');
+      await sse.waitForEvent('start');
       sse.destroy();
       await delay(200);
     }

@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeRoomMessageForAgent } = require('../room-message-trust');
+
 const copilotService = require('../copilot-service');
 
 // Regex to detect escalation/investigation IDs in user messages
@@ -195,18 +197,7 @@ module.exports = {
       'Add value without repeating what others said. If another agent already answered well, acknowledge it briefly and add only what they missed.';
 
     // Normalize room messages for the model
-    const messagesForModel = roomMessages.slice(-15).map((msg) => {
-      if (msg.role === 'assistant' && msg.agentId && msg.agentName) {
-        return {
-          role: 'assistant',
-          content: '[' + msg.agentName + ']: ' + (msg.content || ''),
-        };
-      }
-      return {
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: msg.content || '',
-      };
-    });
+    const messagesForModel = roomMessages.slice(-15).map((msg) => normalizeRoomMessageForAgent(msg, 'copilot'));
 
     return { systemPrompt, messagesForModel };
   },

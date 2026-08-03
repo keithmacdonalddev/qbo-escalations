@@ -20,7 +20,10 @@ const {
   isChatAgentActive,
 } = require('../../services/workspace-runtime');
 const { WORKSPACE_AVAILABLE_TOOL_LINES } = require('../../services/workspace-tools/metadata');
-const { buildWorkspacePrompt } = require('../../services/workspace-prompt-builder');
+const {
+  WORKSPACE_USER_PROMPT_MAX_CHARS,
+  buildWorkspacePrompt,
+} = require('../../services/workspace-prompt-builder');
 const { getWorkspaceAuthority } = require('../../services/workspace-action-policy');
 const {
   createWorkspaceConversationSaver,
@@ -37,10 +40,7 @@ const {
   listAgentIdentities,
 } = require('../../services/agent-identity-service');
 const { buildAgentIdentityOverlay } = require('../../services/room-agents/agent-profiles');
-const {
-  clearWorkspaceFailureFingerprints,
-  normalizeWorkspaceReasoningEffort,
-} = require('../../services/workspace-request-helpers');
+const { normalizeWorkspaceReasoningEffort } = require('../../services/workspace-request-helpers');
 const { runWorkspaceRequest } = require('../../services/workspace-request-service');
 
 const router = express.Router();
@@ -133,6 +133,15 @@ router.post('/ai', async (req, res) => {
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
     return res.status(400).json({ ok: false, code: 'MISSING_PROMPT', error: 'prompt is required' });
   }
+  if (prompt.trim().length > WORKSPACE_USER_PROMPT_MAX_CHARS) {
+    return res.status(413).json({
+      ok: false,
+      incomplete: true,
+      code: 'WORKSPACE_PROMPT_TOO_LARGE',
+      error: `Workspace request is too large to process safely. Maximum ${WORKSPACE_USER_PROMPT_MAX_CHARS} characters.`,
+      detail: 'No provider or Workspace tool was called.',
+    });
+  }
 
   const workspaceAuthority = await getWorkspaceAuthority();
   if (!workspaceAuthority.enabled) {
@@ -208,7 +217,6 @@ router.post('/ai', async (req, res) => {
   const persistentSessionId = conversationSessionId
     || `ws-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
-  clearWorkspaceFailureFingerprints();
   const connectedAccountsPromise = require('../../models/GmailAuth').getAll().catch(() => []);
 
   const session = createWorkspaceSession({ prompt, context, conversationHistory });

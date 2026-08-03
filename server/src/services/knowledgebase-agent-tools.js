@@ -27,6 +27,9 @@ const {
   buildDraftHarnessChecks,
 } = require('./knowledgebase-agent-service');
 const { searchKnowledge } = require('./knowledgebase-service');
+const {
+  buildAgentToolActionEnvelopeInstructions,
+} = require('./agent-tool-action-envelope');
 
 const KNOWLEDGEBASE_AGENT_ID = 'knowledgebase-agent';
 const KB_AGENT_ACTOR = Object.freeze({ actor: KNOWLEDGEBASE_AGENT_ID, role: 'reviewer' });
@@ -154,9 +157,10 @@ function buildKbAgentToolLines() {
   lines.push('- When the reviewer gives an explicit edit command (e.g. "rewrite the summary", "set the customer goal to ..."), use mode "explicit" and edit the requested fields.');
   lines.push('- After a successful kb.updateDraft, state in plain language exactly which fields you changed.');
   lines.push('');
-  lines.push('ACTION FORMAT:');
-  lines.push('ACTION: {"tool": "kb.updateDraft", "params": {"fields": {"customerGoal": "..."}, "mode": "explicit"}}');
-  lines.push('Emit one or more ACTION lines. After results come back, either emit more ACTION lines or give the final answer with no ACTION lines.');
+  lines.push(buildAgentToolActionEnvelopeInstructions({
+    exampleTool: 'kb.updateDraft',
+    exampleParams: { fields: { customerGoal: '...' }, mode: 'explicit' },
+  }));
   return lines.join('\n');
 }
 

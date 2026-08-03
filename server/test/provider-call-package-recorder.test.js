@@ -169,7 +169,10 @@ test('recordProviderCallPackage skips when feature flag is explicitly disabled',
     response: { statusCode: 200, bodyText: '{}' },
   });
 
-  const result = await recordProviderCallPackage(envelope, { log: false });
+  const result = await recordProviderCallPackage(envelope, {
+    log: false,
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
+  });
 
   assert.equal(result.ok, false);
   assert.equal(result.skipped, true);
@@ -206,7 +209,10 @@ test('recordProviderCallPackage saves redacted package when enabled', async () =
     },
   });
 
-  const result = await recordProviderCallPackage(envelope, { log: false });
+  const result = await recordProviderCallPackage(envelope, {
+    log: false,
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
+  });
   const saved = await ProviderCallPackage.findById(result.id).lean();
 
   assert.equal(result.ok, true);
@@ -218,9 +224,84 @@ test('recordProviderCallPackage saves redacted package when enabled', async () =
   assert.equal(saved.response.headers['set-cookie'], '[REDACTED]');
   assert.equal(saved.response.rawHeaders[1], '[REDACTED]');
   assert.equal(saved.storage.inline, true);
+  assert.equal(saved.storage.externalRetention.state, 'not-applicable');
   // Caller-supplied capture metadata is persisted on the package (the forward
   // link from a forensic record back to the work that triggered the call).
   assert.equal(saved.metadata.sourceAgent, 'knowledgebase-agent');
   assert.equal(saved.metadata.escalationId, '64b000000000000000000001');
   assert.equal(saved.metadata.escalationCaseNumber, 'CASE-META-1');
+});
+
+test('recordProviderCallPackage binds bounded reasoning evidence to immutable package and caller identity', async () => {
+  process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
+  const packageId = new (require('mongoose').Types.ObjectId)();
+  const envelope = buildHttpProviderCallPackage({
+    method: 'POST',
+    baseUrl: 'https://api.openai.com',
+    urlPath: '/v1/chat/completions',
+    body: {
+      model: 'gpt-requested',
+      messages: [{ role: 'user', content: 'private evaluation prompt' }],
+    },
+    captureContext: {
+      providerId: 'openai',
+      providerPathType: 'direct-http',
+      callSite: 'test:reasoning-identity',
+      operation: 'chat',
+      modelRequested: 'gpt-requested',
+      metadata: {
+        runId: 'run-identity-1',
+        requestId: 'request-identity-1',
+        attemptId: 'attempt-identity-1',
+        attemptIndex: 1,
+        toolLoopRound: 2,
+        modelRound: 3,
+        promptId: 'chat-core',
+        promptVersion: '12',
+      },
+    },
+    response: {
+      statusCode: 200,
+      bodyText: JSON.stringify({
+        model: 'gpt-actual',
+        choices: [{
+          finish_reason: 'stop',
+          message: { reasoning_content: 'diagnostic reasoning', content: 'visible answer' },
+        }],
+      }),
+    },
+  });
+
+  const result = await recordProviderCallPackage(envelope, {
+    log: false,
+    packageId,
+  });
+  assert.equal(result.ok, true);
+  const saved = await ProviderCallPackage.findById(packageId).lean();
+  const evidence = saved.reasoningEvidence[0];
+
+  assert.equal(saved.capturePolicy.mode, 'manifest');
+  assert.equal(saved.request.bodyText, null, 'default raw-capture policy remains unchanged');
+  assert.equal(evidence.version, 'provider-reasoning-evidence-v2');
+  assert.equal(evidence.packageId, String(packageId));
+  assert.equal(evidence.runId, 'run-identity-1');
+  assert.equal(evidence.requestId, 'request-identity-1');
+  assert.equal(evidence.attemptId, 'attempt-identity-1');
+  assert.equal(evidence.attemptIndex, 1);
+  assert.equal(evidence.toolLoopRound, 2);
+  assert.equal(evidence.modelRound, 3);
+  assert.equal(evidence.provider, 'openai');
+  assert.equal(evidence.actualModel, 'gpt-actual');
+  assert.equal(evidence.requestedModel, 'gpt-requested');
+  assert.equal(evidence.promptId, 'chat-core');
+  assert.match(evidence.promptHash, /^[a-f0-9]{64}$/);
+  assert.equal(evidence.promptHashSource, 'provider-request');
+  assert.equal(evidence.promptVersion, '12');
+  assert.equal(evidence.authority, 'diagnostic-only');
+  assert.equal(evidence.complete, true);
+  assert.equal(evidence.truncated, false);
+  assert.equal(saved.reasoningEvidenceSummary.complete, true);
+  assert.equal(saved.reasoningEvidenceSummary.exactDuplicatesRemoved, 0);
+  assert.equal(saved.resultHandoff.text, 'visible answer');
+  assert.equal(JSON.stringify(saved.resultHandoff).includes('diagnostic reasoning'), false);
 });

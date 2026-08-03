@@ -22,6 +22,10 @@ const originalSpawn = childProcess.spawn;
 const originalEnv = {
   ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE: process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE,
 };
+const DIAGNOSTIC_CAPTURE = Object.freeze({
+  captureMode: 'diagnostic',
+  capturePurpose: 'provider-package-contract-test',
+});
 
 function restoreEnv() {
   if (originalEnv.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE === undefined) {
@@ -217,6 +221,7 @@ test('recordCliProviderCallPackage persists CLI package when enabled', async () 
     exitCode: 0,
     closed: true,
     expectsJsonl: true,
+    captureContext: DIAGNOSTIC_CAPTURE,
   }, { log: false });
 
   assert.equal(result.ok, true);
@@ -278,6 +283,7 @@ test('codex transcribeImage writes one background CLI package record on success'
     model: 'gpt-5.5',
     reasoningEffort: 'high',
     timeoutMs: 1000,
+    captureContext: DIAGNOSTIC_CAPTURE,
   });
 
   assert.equal(spawnCalls.length, 1);
@@ -344,7 +350,7 @@ test('codex transcribeImage returns normally and writes no record when capture i
   assert.equal(await ProviderCallPackage.countDocuments({}), 0);
 });
 
-test('codex chat honors caller-supplied capture context and force-captures the CLI package', async () => {
+test('codex chat force-captures a manifest plus typed result handoff without raw CLI traffic', async () => {
   delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
   const spawnCalls = installSpawnMock();
   const codex = requireFresh('../src/services/codex');
@@ -426,9 +432,13 @@ test('codex chat honors caller-supplied capture context and force-captures the C
   assert.equal(saved.cli.command, 'codex');
   assert.equal(saved.cli.modelRequested, 'gpt-5.5');
   assert.equal(saved.cli.reasoningEffort, 'high');
-  assert.equal(saved.cli.stdin.text, child.getStdinText());
-  assert.equal(saved.cli.stdout.lines.length, 3);
-  assert.equal(saved.cli.stdout.jsonlEvents.length, 3);
+  assert.equal(saved.capturePolicy.mode, 'manifest');
+  assert.equal(saved.cli.stdin.text, null);
+  assert.equal(saved.cli.stdout.lines, null);
+  assert.equal(saved.cli.stdout.jsonlEvents, null);
+  assert.equal(saved.resultHandoff.text, 'COID/MID: 123');
+  assert.equal(saved.resultHandoff.format, 'assistant-text');
+  assert.equal(saved.reasoningEvidence[0].text, 'Thinking trace');
   assert.equal(saved.cli.process.exitCode, 0);
   assert.equal(saved.cli.process.closed, true);
   assert.equal(saved.outcome, 'success');
@@ -439,7 +449,7 @@ test('codex chat honors caller-supplied capture context and force-captures the C
   assert.equal(providerEvents.some((event) => event.eventType === 'provider.package_capture_confirmed'), true);
 });
 
-test('claude CLI harness force-captures the CLI package and confirms readback', async () => {
+test('claude CLI harness persists a typed result handoff and confirms readback', async () => {
   delete process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE;
   const spawnCalls = installSpawnMock();
   const { sendClaudeCliPrompt } = requireFresh('../src/services/providers/claude-cli-provider-harness');
@@ -513,8 +523,10 @@ test('claude CLI harness force-captures the CLI package and confirms readback', 
   assert.equal(saved.cli.command, 'claude');
   assert.equal(saved.cli.modelRequested, 'claude-opus-4-8');
   assert.equal(saved.cli.reasoningEffort, 'high');
-  assert.equal(saved.cli.stdin.text, child.getStdinText());
-  assert.equal(saved.cli.stdout.jsonlEvents.length, 3);
+  assert.equal(saved.capturePolicy.mode, 'manifest');
+  assert.equal(saved.cli.stdin.text, null);
+  assert.equal(saved.cli.stdout.jsonlEvents, null);
+  assert.equal(saved.resultHandoff.text, 'Category: bank feeds\nSeverity: P3');
 });
 
 test('codex chat records cleanup as an aborted CLI package', async () => {
@@ -560,6 +572,7 @@ test('codex parseEscalation writes one background CLI package record on success'
     model: 'gpt-5.5',
     reasoningEffort: 'high',
     timeoutMs: 1000,
+    captureContext: DIAGNOSTIC_CAPTURE,
   });
 
   const { child } = spawnCalls[0];
@@ -635,7 +648,10 @@ test('codex transcribeImage preserves malformed stdout lines in the wired provid
   const spawnCalls = installSpawnMock();
   const codex = requireFresh('../src/services/codex');
 
-  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
+  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', {
+    timeoutMs: 1000,
+    captureContext: DIAGNOSTIC_CAPTURE,
+  });
   const { child } = spawnCalls[0];
   emitStdoutLines(child, [
     'this is not json',
@@ -657,7 +673,10 @@ test('codex transcribeImage preserves nonzero exit facts in the wired provider p
   const spawnCalls = installSpawnMock();
   const codex = requireFresh('../src/services/codex');
 
-  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 1000 });
+  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', {
+    timeoutMs: 1000,
+    captureContext: DIAGNOSTIC_CAPTURE,
+  });
   const { child } = spawnCalls[0];
   child.stderr.emit('data', Buffer.from('codex failed before output'));
   closeChild(child, 1);
@@ -676,7 +695,10 @@ test('codex transcribeImage waits for close facts before recording timeout packa
   const spawnCalls = installSpawnMock();
   const codex = requireFresh('../src/services/codex');
 
-  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 5 });
+  const promise = codex.transcribeImage('data:image/png;base64,aGVsbG8=', {
+    timeoutMs: 5,
+    captureContext: DIAGNOSTIC_CAPTURE,
+  });
   const { child } = spawnCalls[0];
 
   await assert.rejects(promise, /timed out/);

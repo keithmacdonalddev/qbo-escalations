@@ -8,6 +8,8 @@ const WorkspaceActionRecord = require('../models/WorkspaceActionRecord');
 const { READ_WORKSPACE_TOOLS, WORKSPACE_TOOL_METADATA } = require('./workspace-tools/metadata');
 
 const APPROVAL_TTL_MS = 10 * 60 * 1000;
+const APPROVAL_EVIDENCE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const APPROVAL_EXECUTION_LEASE_MS = 2 * 60 * 1000;
 const DEFAULT_WORKSPACE_POLICY = Object.freeze({
   proactiveEnabled: true,
   emailMonitoring: true,
@@ -156,9 +158,21 @@ function stableValue(value) {
   return value;
 }
 
+function normalizeWorkspaceActionParams(params = {}) {
+  const normalized = params && typeof params === 'object' && !Array.isArray(params)
+    ? { ...params }
+    : {};
+  if (Object.prototype.hasOwnProperty.call(normalized, 'account')) {
+    const account = String(normalized.account || '').trim().toLowerCase();
+    if (account) normalized.account = account;
+    else delete normalized.account;
+  }
+  return normalized;
+}
+
 function hashWorkspaceAction(tool, params) {
   return crypto.createHash('sha256')
-    .update(JSON.stringify({ tool, params: stableValue(params || {}) }))
+    .update(JSON.stringify({ tool, params: stableValue(normalizeWorkspaceActionParams(params)) }))
     .digest('hex');
 }
 
@@ -190,6 +204,43 @@ function previewWorkspaceAction(tool, params = {}) {
   return `${labels[tool] || `Run ${tool}`}: ${target}`.slice(0, 280);
 }
 
+function buildWorkspaceApprovalInspection(tool, params = {}) {
+  if (tool === 'gmail.send') {
+    const normalizeRecipients = (value) => (Array.isArray(value) ? value : [value])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean);
+    const attachments = Array.isArray(params.attachments) ? params.attachments : [];
+    return {
+      tool,
+      account: String(params.account || ''),
+      to: normalizeRecipients(params.to),
+      cc: normalizeRecipients(params.cc),
+      bcc: normalizeRecipients(params.bcc),
+      subject: String(params.subject || ''),
+      body: String(params.body || ''),
+      threadId: String(params.threadId || ''),
+      inReplyTo: String(params.inReplyTo || ''),
+      references: Array.isArray(params.references) ? params.references.map(String) : [],
+      attachments: attachments.map((attachment) => ({
+        name: String(attachment?.name || attachment?.filename || ''),
+        mimeType: String(attachment?.mimeType || attachment?.type || ''),
+        size: Number(attachment?.size) || null,
+        contentHash: String(attachment?.contentHash || attachment?.hash || ''),
+      })),
+      attachmentCount: attachments.length,
+      note: attachments.length > 0
+        ? 'Attachment content is not rendered inline; verify each listed name, type, size, and content hash before approval.'
+        : 'No attachments are included.',
+    };
+  }
+  return {
+    tool,
+    account: String(params.account || ''),
+    target: targetForAction(tool, params),
+    params: stableValue(params),
+  };
+}
+
 function safeParamsSummary(tool, params = {}) {
   const summary = {
     account: String(params.account || ''),
@@ -202,9 +253,13 @@ function safeParamsSummary(tool, params = {}) {
   return summary;
 }
 
-function evaluateWorkspaceAction(action, authority, { approvedHash = '' } = {}) {
+function evaluateWorkspaceAction(action, authority, {
+  approvedHash = '',
+  connectedAccounts = null,
+  requireAccountProof = false,
+} = {}) {
   const tool = String(action?.tool || '');
-  const params = action?.params && typeof action.params === 'object' ? action.params : {};
+  const params = normalizeWorkspaceActionParams(action?.params);
   const policy = mergeWorkspacePolicy(authority?.policy || {});
   const actionHash = hashWorkspaceAction(tool, params);
   if (!WORKSPACE_TOOL_METADATA[tool]) {
@@ -214,8 +269,23 @@ function evaluateWorkspaceAction(action, authority, { approvedHash = '' } = {}) 
     return { decision: 'blocked', reason: 'The Workspace Agent is disabled.', actionHash };
   }
   const account = String(params.account || '').trim().toLowerCase();
-  if (account && policy.allowedAccounts.length > 0 && !policy.allowedAccounts.includes(account)) {
-    return { decision: 'blocked', reason: `Account ${account} is outside the Workspace Agent allowlist.`, actionHash };
+  const accountScopedTool = tool.startsWith('gmail.') || tool.startsWith('calendar.');
+  if (accountScopedTool && requireAccountProof) {
+    if (!account) {
+      return { decision: 'blocked', reason: 'The effective Google account could not be proven for this action.', actionHash };
+    }
+    const connected = normalizeAccounts(connectedAccounts);
+    if (!connected.includes(account)) {
+      return { decision: 'blocked', reason: `Account ${account} could not be verified as a connected Google account.`, actionHash };
+    }
+  }
+  if (accountScopedTool && policy.allowedAccounts.length > 0) {
+    if (!account) {
+      return { decision: 'blocked', reason: 'The effective Google account could not be proven for the configured account allowlist.', actionHash };
+    }
+    if (!policy.allowedAccounts.includes(account)) {
+      return { decision: 'blocked', reason: `Account ${account} is outside the Workspace Agent allowlist.`, actionHash };
+    }
   }
   if (tool.startsWith('gmail.') && !policy.emailMonitoring) {
     return { decision: 'blocked', reason: 'Email access is turned off.', actionHash };
@@ -241,8 +311,11 @@ function evaluateWorkspaceAction(action, authority, { approvedHash = '' } = {}) 
   }
   if (tool === 'gmail.batchModify') {
     const count = Array.isArray(params.messageIds) ? params.messageIds.length : 0;
-    const riskyLabels = [...(params.addLabelIds || []), ...(params.addLabels || [])]
-      .some((label) => ['TRASH', 'SPAM'].includes(String(label || '').toUpperCase()));
+    const riskyLabels = [
+      ...(Array.isArray(params.addLabelIds) ? params.addLabelIds : []),
+      ...(Array.isArray(params.addLabels) ? params.addLabels : []),
+      ...(Array.isArray(params.addLabelNames) ? params.addLabelNames : []),
+    ].some((label) => ['TRASH', 'SPAM'].includes(String(label || '').trim().toUpperCase()));
     if (count > policy.maxAutomaticBatchSize || riskyLabels) {
       return { decision: 'confirmation-required', reason: count > policy.maxAutomaticBatchSize ? `Batch exceeds the automatic limit of ${policy.maxAutomaticBatchSize}.` : 'Batch includes a destructive Gmail label.', actionHash };
     }
@@ -263,15 +336,19 @@ function evaluateWorkspaceAction(action, authority, { approvedHash = '' } = {}) 
 }
 
 async function createWorkspaceApproval(action, context = {}) {
-  const params = action?.params && typeof action.params === 'object' ? action.params : {};
+  const tool = String(action?.tool || '');
+  const params = normalizeWorkspaceActionParams(action?.params);
   const approvalId = randomUUID();
   const expiresAt = new Date(Date.now() + APPROVAL_TTL_MS);
+  const inspection = buildWorkspaceApprovalInspection(tool, params);
   const doc = await WorkspaceActionApproval.create({
     approvalId,
-    tool: action.tool,
+    agentId: context.agentId || context.source || 'workspace',
+    tool,
     params,
-    paramsHash: hashWorkspaceAction(action.tool, params),
-    preview: previewWorkspaceAction(action.tool, params),
+    paramsHash: hashWorkspaceAction(tool, params),
+    preview: previewWorkspaceAction(tool, params),
+    inspection,
     account: String(params.account || ''),
     source: context.source || 'workspace-agent',
     surface: context.surface || 'workspace-panel',
@@ -281,17 +358,45 @@ async function createWorkspaceApproval(action, context = {}) {
   return {
     id: doc.approvalId,
     preview: doc.preview,
+    inspection,
     expiresAt: doc.expiresAt,
   };
 }
 
 async function claimWorkspaceApproval(approvalId) {
   const now = new Date();
-  return WorkspaceActionApproval.findOneAndUpdate(
+  const claimed = await WorkspaceActionApproval.findOneAndUpdate(
     { approvalId, status: 'pending', expiresAt: { $gt: now } },
-    { $set: { status: 'executing', claimedAt: now } },
+    {
+      $set: {
+        status: 'executing',
+        claimedAt: now,
+        executionLeaseExpiresAt: new Date(now.getTime() + APPROVAL_EXECUTION_LEASE_MS),
+        expiresAt: new Date(now.getTime() + APPROVAL_EVIDENCE_RETENTION_MS),
+      },
+    },
     { returnDocument: 'after' }
   ).lean();
+  if (claimed) return claimed;
+
+  const reconciled = await WorkspaceActionApproval.findOneAndUpdate(
+    {
+      approvalId,
+      status: 'executing',
+      executionLeaseExpiresAt: { $lte: now },
+    },
+    {
+      $set: {
+        status: 'failed',
+        error: 'The prior execution lease expired before completion evidence was saved. The external outcome is unknown; this action was not retried.',
+        completedAt: now,
+        expiresAt: new Date(now.getTime() + APPROVAL_EVIDENCE_RETENTION_MS),
+      },
+      $unset: { executionLeaseExpiresAt: '' },
+    },
+    { returnDocument: 'after' },
+  ).lean();
+  return reconciled ? { reconciledOutcomeUnknown: true, approval: reconciled } : null;
 }
 
 async function completeWorkspaceApproval(approvalId, { ok, summary = '', error = '' } = {}) {
@@ -304,6 +409,7 @@ async function completeWorkspaceApproval(approvalId, { ok, summary = '', error =
         error: String(error || '').slice(0, 500),
         completedAt: new Date(),
       },
+      $unset: { executionLeaseExpiresAt: '' },
     },
     { returnDocument: 'after' }
   ).lean();
@@ -312,7 +418,7 @@ async function completeWorkspaceApproval(approvalId, { ok, summary = '', error =
 async function recordWorkspaceAction(data = {}) {
   try {
     return await WorkspaceActionRecord.create({
-      agentId: 'workspace',
+      agentId: data.agentId || 'workspace',
       tool: data.tool,
       policyDecision: data.policyDecision,
       status: data.status,
@@ -346,6 +452,7 @@ module.exports = {
   hashWorkspaceAction,
   mergeWorkspacePolicy,
   previewWorkspaceAction,
+  buildWorkspaceApprovalInspection,
   recordWorkspaceAction,
   safeParamsSummary,
   updateWorkspacePolicy,

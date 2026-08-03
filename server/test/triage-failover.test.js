@@ -111,6 +111,7 @@ test('triage fails over to the configured backup when the primary provider fails
   let preflightProviders = [];
 
   const result = await runTriage(PARSER_TEXT, {
+    executionPurpose: 'provider-comparison',
     runId: 'triage-failover-backup-attempted',
     provider: PRIMARY,
     model: 'local-triage-model',
@@ -185,6 +186,7 @@ test('triage attempts the neutral global alternate as backup when none is config
   const calledProviders = [];
 
   const result = await runTriage(PARSER_TEXT, {
+    executionPurpose: 'provider-comparison',
     runId: 'triage-failover-neutral-default',
     provider: PRIMARY,
     model: 'claude-opus-4-8',
@@ -216,6 +218,7 @@ test('triage falls back to the deterministic rule card when BOTH primary and bac
   const calledProviders = [];
 
   const result = await runTriage(PARSER_TEXT, {
+    executionPurpose: 'provider-comparison',
     runId: 'triage-failover-both-fail-rule-card',
     provider: PRIMARY,
     model: 'local-triage-model',
@@ -252,6 +255,7 @@ test('triage does NOT attempt a backup for a bare caller with no failover intent
   const calledProviders = [];
 
   const result = await runTriage(PARSER_TEXT, {
+    executionPurpose: 'provider-comparison',
     runId: 'triage-failover-no-intent',
     provider: PRIMARY,
     model: 'local-triage-model',
@@ -285,6 +289,7 @@ test('chat-v5 wiring: agentRuntime alone (profile fallback, no explicit request 
   const calledProviders = [];
 
   const result = await runTriage(PARSER_TEXT, {
+    executionPurpose: 'provider-comparison',
     runId: 'triage-chatv5-agentruntime-configured-backup',
     provider: PRIMARY,
     model: 'local-triage-model',
@@ -338,6 +343,7 @@ test('rule-card provenance records the primary (and backup) that failed, not jus
   const calledProviders = [];
 
   const result = await runTriage(PARSER_TEXT, {
+    executionPurpose: 'provider-comparison',
     runId: 'triage-failover-attempted-provenance',
     provider: PRIMARY,
     model: 'local-triage-model',
@@ -355,13 +361,13 @@ test('rule-card provenance records the primary (and backup) that failed, not jus
   assert.deepEqual(calledProviders, [PRIMARY, BACKUP]);
   assert.equal(result.status, 'degraded');
   assert.equal(result.triageMeta.source, 'fallback');
-  // Ordered provenance: primary first, then the backup that also failed.
+  // Ordered provenance: primary first, then the fallback that also failed.
   assert.ok(Array.isArray(result.triageMeta.attempted), 'triageMeta.attempted is populated on a rule-card fallback');
   assert.equal(result.triageMeta.attempted.length, 2);
   assert.equal(result.triageMeta.attempted[0].provider, PRIMARY);
   assert.equal(result.triageMeta.attempted[0].role, 'primary');
   assert.equal(result.triageMeta.attempted[1].provider, BACKUP);
-  assert.equal(result.triageMeta.attempted[1].role, 'backup');
+  assert.equal(result.triageMeta.attempted[1].role, 'fallback');
 });
 
 test('triage does NOT fail over (rule card only) when the backup collapses to the primary', async () => {
@@ -372,6 +378,7 @@ test('triage does NOT fail over (rule card only) when the backup collapses to th
   const calledProviders = [];
 
   const result = await runTriage(PARSER_TEXT, {
+    executionPurpose: 'provider-comparison',
     runId: 'triage-failover-degenerate-backup',
     provider: PRIMARY,
     model: 'local-triage-model',

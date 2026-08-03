@@ -69,6 +69,8 @@ const {
 const {
   requireProviderPackageCapture,
 } = require('./providers/provider-handoff');
+const { loadProviderPayloadText } = require('./provider-payload-loader');
+const { readProviderResultHandoff } = require('./provider-capture-policy');
 
 function getPromptVersionFromText(promptText) {
   const match = String(promptText || '').match(/^\s*PROMPT_VERSION:\s*([^\r\n]+)/im);
@@ -1263,7 +1265,7 @@ async function convertToPngIfNeeded(rawBase64, mediaType) {
  * LM Studio — reuses jsonRequest pattern, non-streaming POST to /v1/chat/completions
  * Note: llama.cpp only supports PNG and JPEG. WebP/GIF are auto-converted to PNG.
  */
-async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeoutMs, eventBus, signal = null) {
+async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeoutMs, eventBus, signal = null, capturePolicy = null) {
   throwIfAborted(signal);
   const effectiveModel = model || await getLoadedModel(LM_STUDIO_API_URL);
 
@@ -1356,6 +1358,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
       functionName: 'callLmStudio',
       forceCapture: true,
       modelRequested: effectiveModel,
+      ...(capturePolicy || {}),
       metadata: {
         imageMediaType: mediaType,
         imageSizeBytes: Buffer.byteLength(imageBase64 || '', 'base64'),
@@ -1396,7 +1399,7 @@ async function callLmStudio(systemPrompt, imageBase64, mediaType, model, timeout
 /**
  * Anthropic API — direct HTTPS POST to api.anthropic.com/v1/messages
  */
-async function callAnthropic(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
+async function callAnthropic(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs, eventBus = null, signal = null, capturePolicy = null) {
   throwIfAborted(signal);
   const effectiveModel = model || 'claude-sonnet-5';
 
@@ -1446,6 +1449,7 @@ async function callAnthropic(systemPrompt, rawBase64, mediaType, model, reasonin
       functionName: 'callAnthropic',
       forceCapture: true,
       modelRequested: effectiveModel,
+      ...(capturePolicy || {}),
       source: {
         file: 'server/src/services/image-parser.js',
         functionName: 'callAnthropic',
@@ -1527,7 +1531,7 @@ async function callAnthropicSdk(rawBase64, mediaType, model, reasoningEffort, ti
 /**
  * OpenAI API — direct HTTPS POST to api.openai.com/v1/chat/completions
  */
-async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
+async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null, signal = null, capturePolicy = null) {
   throwIfAborted(signal);
   const apiKey = await resolveApiKey('openai');
   if (!apiKey) {
@@ -1582,6 +1586,7 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
       functionName: 'callOpenAI',
       forceCapture: true,
       modelRequested: effectiveModel,
+      ...(capturePolicy || {}),
       metadata: {
         imageDataUrlBytes: Buffer.byteLength(imageDataUrl || '', 'utf8'),
       },
@@ -1621,7 +1626,7 @@ async function callOpenAI(systemPrompt, imageDataUrl, model, reasoningEffort, ti
 /**
  * Google Gemini API — direct HTTPS POST to generativelanguage.googleapis.com/v1beta/models/*:generateContent
  */
-async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
+async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEffort, timeoutMs, eventBus = null, signal = null, capturePolicy = null) {
   throwIfAborted(signal);
   const effectiveModel = model || 'gemini-3.6-flash';
   const thinkingLevel = normalizeGeminiThinkingLevel(effectiveModel, reasoningEffort);
@@ -1659,6 +1664,7 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEf
       functionName: 'callGemini',
       forceCapture: true,
       modelRequested: effectiveModel,
+      ...(capturePolicy || {}),
       metadata: {
         imageMediaType: mediaType,
         imageSizeBytes: Buffer.byteLength(rawBase64 || '', 'base64'),
@@ -1698,7 +1704,7 @@ async function callGemini(systemPrompt, rawBase64, mediaType, model, reasoningEf
 /**
  * Kimi/Moonshot AI — OpenAI-compatible POST to api.moonshot.ai/v1/chat/completions
  */
-async function callKimi(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
+async function callKimi(systemPrompt, imageDataUrl, model, reasoningEffort, timeoutMs, eventBus = null, signal = null, capturePolicy = null) {
   throwIfAborted(signal);
   const effectiveModel = model || 'kimi-k3';
   const body = {
@@ -1745,6 +1751,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, reasoningEffort, time
       functionName: 'callKimi',
       forceCapture: true,
       modelRequested: effectiveModel,
+      ...(capturePolicy || {}),
       metadata: {
         imageDataUrlBytes: Buffer.byteLength(imageDataUrl || '', 'utf8'),
         requestPayloadBytes: payloadSize,
@@ -1782,7 +1789,7 @@ async function callKimi(systemPrompt, imageDataUrl, model, reasoningEffort, time
   };
 }
 
-async function callClaudeCli(systemPrompt, imageDataUrl, provider, model, reasoningEffort, timeoutMs, eventBus = null, signal = null) {
+async function callClaudeCli(systemPrompt, imageDataUrl, provider, model, reasoningEffort, timeoutMs, eventBus = null, signal = null, capturePolicy = null) {
   throwIfAborted(signal);
   const effectiveModel = getClaudeImageParserModel(provider, model);
 
@@ -1827,6 +1834,7 @@ async function callClaudeCli(systemPrompt, imageDataUrl, provider, model, reason
       forceCapture: true,
       modelRequested: effectiveModel,
       reasoningEffort: reasoningEffort || process.env.CLAUDE_PARSE_REASONING_EFFORT || process.env.CLAUDE_REASONING_EFFORT || '',
+      ...(capturePolicy || {}),
       source: {
         file: 'server/src/services/image-parser.js',
         functionName: 'callClaudeCli',
@@ -1869,7 +1877,7 @@ async function callClaudeCli(systemPrompt, imageDataUrl, provider, model, reason
   };
 }
 
-async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus, signal = null) {
+async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus, signal = null, capturePolicy = null) {
   throwIfAborted(signal);
   const effectiveModel = getCodexImageParserModel(provider, model);
 
@@ -1940,6 +1948,7 @@ async function callCodex(systemPrompt, imageDataUrl, provider, model, reasoningE
           forceCapture: true,
           modelRequested: effectiveModel,
           reasoningEffort: reasoningEffort || process.env.CODEX_PARSE_REASONING_EFFORT,
+          ...(capturePolicy || {}),
           source: {
             file: 'server/src/services/image-parser.js',
             functionName: 'callCodex',
@@ -2085,15 +2094,19 @@ async function loadProviderCallPackagePayloadRef(ref) {
     return null;
   }
 
-  const fullPath = path.resolve(__dirname, '..', '..', '..', ref.ref);
   try {
-    return await fs.promises.readFile(fullPath, 'utf8');
+    const loaded = await loadProviderPayloadText(ref, { maxBytes: 8 * 1024 * 1024 });
+    return loaded.text;
   } catch (err) {
-    throw createProviderPackageError(`Failed to read provider package payload ref ${ref.ref}: ${err.message}`);
+    const wrapped = createProviderPackageError(`Failed to verify provider package payload ref ${ref.ref}: ${err.message}`, err.code || 'PROVIDER_PAYLOAD_READ_FAILED');
+    wrapped.payloadStatus = err.payloadStatus || 'read-failed';
+    throw wrapped;
   }
 }
 
 async function loadLlmGatewayParsedJsonFromPackage(providerPackage) {
+  const handoff = readProviderResultHandoff(providerPackage, 'provider-response-json');
+  if (handoff) return handoff;
   const response = providerPackage?.llmGateway?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
     return response.parsedJson;
@@ -2121,6 +2134,8 @@ async function loadLlmGatewayParsedJsonFromPackage(providerPackage) {
 }
 
 async function loadOpenAiParsedJsonFromPackage(providerPackage) {
+  const handoff = readProviderResultHandoff(providerPackage, 'provider-response-json');
+  if (handoff) return handoff;
   const response = providerPackage?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
     return response.parsedJson;
@@ -2142,6 +2157,8 @@ async function loadOpenAiParsedJsonFromPackage(providerPackage) {
 }
 
 async function loadLmStudioParsedJsonFromPackage(providerPackage) {
+  const handoff = readProviderResultHandoff(providerPackage, 'provider-response-json');
+  if (handoff) return handoff;
   const response = providerPackage?.lmStudio?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
     return response.parsedJson;
@@ -2169,6 +2186,8 @@ async function loadLmStudioParsedJsonFromPackage(providerPackage) {
 }
 
 async function loadGeminiParsedJsonFromPackage(providerPackage) {
+  const handoff = readProviderResultHandoff(providerPackage, 'provider-response-json');
+  if (handoff) return handoff;
   const response = providerPackage?.geminiApi?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
     return response.parsedJson;
@@ -2196,6 +2215,8 @@ async function loadGeminiParsedJsonFromPackage(providerPackage) {
 }
 
 async function loadAnthropicParsedJsonFromPackage(providerPackage) {
+  const handoff = readProviderResultHandoff(providerPackage, 'provider-response-json');
+  if (handoff) return handoff;
   const response = providerPackage?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
     return response.parsedJson;
@@ -2226,6 +2247,8 @@ async function loadAnthropicParsedJsonFromPackage(providerPackage) {
 }
 
 async function loadKimiParsedJsonFromPackage(providerPackage) {
+  const handoff = readProviderResultHandoff(providerPackage, 'provider-response-json');
+  if (handoff) return handoff;
   const response = providerPackage?.response || {};
   if (response.parsedJson && typeof response.parsedJson === 'object') {
     return response.parsedJson;
@@ -2304,6 +2327,8 @@ function buildUsageFromGeminiJson(parsed, modelFallback = '') {
 }
 
 async function loadCodexStdoutJsonlEventsFromPackage(providerPackage) {
+  const handoffEvents = readProviderResultHandoff(providerPackage, 'cli-semantic-events');
+  if (Array.isArray(handoffEvents)) return handoffEvents;
   const stdout = providerPackage?.cli?.stdout || {};
   if (Array.isArray(stdout.jsonlEvents) && stdout.jsonlEvents.length) {
     return stdout.jsonlEvents;
@@ -2478,11 +2503,40 @@ async function waitForProviderPackage(providerTrace, eventBus = null, signal = n
   );
 }
 
+function buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus) {
+  const handoff = readProviderResultHandoff(providerPackage);
+  if (!handoff) return null;
+  const providerPackageId = String(providerPackage._id || providerTrace.providerPackageId);
+  const sourcePath = `resultHandoff.${handoff.sourcePath}`;
+  eventBus?.emit('parser.provider_payload_selected', {
+    providerPackageId,
+    providerId: providerPackage.providerId || '',
+    sourcePath,
+    textLength: handoff.text.length,
+    usagePresent: false,
+    integrityVerified: true,
+  });
+  return {
+    text: handoff.text,
+    usage: handoff.usage ? { model: handoff.model || '', ...handoff.usage } : null,
+    providerPackage,
+    providerPayloadTrace: {
+      providerPackageId,
+      sourcePath,
+      resultSha256: handoff.sha256,
+      authority: handoff.authority,
+      integrityVerified: true,
+    },
+  };
+}
+
 async function buildCodexImageParserResultFromProviderPackage(providerTrace, { eventBus = null, model = '', signal = null } = {}) {
   const providerPackage = await waitForProviderPackage(providerTrace, eventBus, signal);
   if (providerPackage.providerResearchId !== 'openai-cli' && providerPackage.providerPathType !== 'cli') {
     throw createProviderPackageError(`Unsupported provider package for Codex image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const events = await loadCodexStdoutJsonlEventsFromPackage(providerPackage);
   const payload = buildCodexPayloadFromEvents(events, providerTrace?.model || model);
@@ -2513,6 +2567,8 @@ async function buildClaudeImageParserResultFromProviderPackage(providerTrace, { 
   if (providerPackage.providerResearchId !== 'anthropic-cli' && providerPackage.providerPathType !== 'cli') {
     throw createProviderPackageError(`Unsupported provider package for Claude image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const events = await loadCodexStdoutJsonlEventsFromPackage(providerPackage);
   const payload = buildClaudePayloadFromEvents(events, providerTrace?.model || model);
@@ -2543,6 +2599,8 @@ async function buildImageParserResultFromProviderPackage(providerTrace, { eventB
   if (providerPackage.providerId !== 'llm-gateway') {
     throw createProviderPackageError(`Unsupported provider package for image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const parsed = await loadLlmGatewayParsedJsonFromPackage(providerPackage);
   const message = parsed?.choices?.[0]?.message || {};
@@ -2580,6 +2638,8 @@ async function buildOpenAiImageParserResultFromProviderPackage(providerTrace, { 
   if (providerPackage.providerId !== 'openai' && providerPackage.providerResearchId !== 'openai-api') {
     throw createProviderPackageError(`Unsupported provider package for OpenAI image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const parsed = await loadOpenAiParsedJsonFromPackage(providerPackage);
   const message = parsed?.choices?.[0]?.message || {};
@@ -2613,6 +2673,8 @@ async function buildLmStudioImageParserResultFromProviderPackage(providerTrace, 
   if (providerPackage.providerId !== 'lm-studio' && providerPackage.providerResearchId !== 'lm-studio-openai-compatible') {
     throw createProviderPackageError(`Unsupported provider package for LM Studio image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const parsed = await loadLmStudioParsedJsonFromPackage(providerPackage);
   const message = parsed?.choices?.[0]?.message || {};
@@ -2651,6 +2713,8 @@ async function buildGeminiImageParserResultFromProviderPackage(providerTrace, { 
   if (providerPackage.providerId !== 'gemini' && providerPackage.providerResearchId !== 'gemini-api') {
     throw createProviderPackageError(`Unsupported provider package for Gemini image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const parsed = await loadGeminiParsedJsonFromPackage(providerPackage);
   const text = extractGeminiTextFromJson(parsed);
@@ -2684,6 +2748,8 @@ async function buildAnthropicImageParserResultFromProviderPackage(providerTrace,
   if (providerPackage.providerId !== 'anthropic' && providerPackage.providerResearchId !== 'anthropic-api') {
     throw createProviderPackageError(`Unsupported provider package for Anthropic image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const parsed = await loadAnthropicParsedJsonFromPackage(providerPackage);
   // With thinking enabled, content starts with a "thinking" block before the "text" block —
@@ -2723,6 +2789,8 @@ async function buildKimiImageParserResultFromProviderPackage(providerTrace, { ev
   if (providerPackage.providerId !== 'kimi' && providerPackage.providerResearchId !== 'kimi-api') {
     throw createProviderPackageError(`Unsupported provider package for Kimi image parser extraction: ${providerPackage.providerId || 'unknown'}`);
   }
+  const typedHandoff = buildTypedHandoffImageParserResult(providerPackage, providerTrace, eventBus);
+  if (typedHandoff) return typedHandoff;
 
   const parsed = await loadKimiParsedJsonFromPackage(providerPackage);
   const message = parsed?.choices?.[0]?.message || {};
@@ -2795,6 +2863,13 @@ async function parseImage(imageBase64, options = {}) {
   // downstream stats/events/persistence describe the provider that succeeded.
   let { provider, model } = options;
   const { reasoningEffort, serviceTier, timeoutMs = DEFAULT_TIMEOUT_MS, eventBus, signal } = options;
+  // Contract/evaluation harnesses may explicitly request rich capture. The
+  // recorder still enforces its allowlisted mode + purpose policy, so these
+  // scalar hints cannot authorize unrestricted product capture on their own.
+  const providerCapturePolicy = {
+    ...(typeof options.captureMode === 'string' ? { captureMode: options.captureMode } : {}),
+    ...(typeof options.capturePurpose === 'string' ? { capturePurpose: options.capturePurpose } : {}),
+  };
   throwIfAborted(signal);
   // Legacy SDK adapter is now explicit opt-in. The normal Anthropic provider
   // route uses the direct API harness so it gets ProviderCallPackage parity.
@@ -2879,9 +2954,9 @@ async function parseImage(imageBase64, options = {}) {
       signal,
     });
   } else if (isClaudeImageParserProvider(provider)) {
-    result = await callClaudeCli(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, timeoutMs, eventBus, signal);
+    result = await callClaudeCli(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, timeoutMs, eventBus, signal, providerCapturePolicy);
   } else if (isCodexImageParserProvider(provider)) {
-    result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus, signal);
+    result = await callCodex(systemPrompt, normalized.dataUrl, provider, model, reasoningEffort, serviceTier, timeoutMs, eventBus, signal, providerCapturePolicy);
     await requireProviderPackageCapture({
       providerTrace: result.providerTrace,
       onProviderEvent: (eventType, payload) => eventBus?.emit(eventType, payload),
@@ -2970,6 +3045,7 @@ async function parseImage(imageBase64, options = {}) {
               forceCapture: true,
               agent: promptId,
               modelRequested: effectiveGatewayModel,
+              ...providerCapturePolicy,
               metadata: {
                 sourceAgent: promptId,
                 imageMediaType: normalized.mediaType,
@@ -3008,7 +3084,7 @@ async function parseImage(imageBase64, options = {}) {
         }
         break;
       case 'lm-studio':
-        result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal);
+        result = await callLmStudio(systemPrompt, normalized.rawBase64, normalized.mediaType, model, timeoutMs, eventBus, signal, providerCapturePolicy);
         break;
       case 'anthropic':
         if (useAnthropicSdk) {
@@ -3022,17 +3098,17 @@ async function parseImage(imageBase64, options = {}) {
             provider,
             reason: 'direct_anthropic_provider_harness_default',
           });
-          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, eventBus, signal);
+          result = await callAnthropic(systemPrompt, normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, eventBus, signal, providerCapturePolicy);
         }
         break;
       case 'openai':
-        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus, signal);
+        result = await callOpenAI(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus, signal, providerCapturePolicy);
         break;
       case 'gemini':
-        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, eventBus, signal);
+        result = await callGemini(systemPrompt, normalized.rawBase64, normalized.mediaType, model, reasoningEffort, timeoutMs, eventBus, signal, providerCapturePolicy);
         break;
       case 'kimi':
-        result = await callKimi(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus, signal);
+        result = await callKimi(systemPrompt, normalized.dataUrl, model, reasoningEffort, timeoutMs, eventBus, signal, providerCapturePolicy);
         break;
       default: {
         const err = new Error(`Invalid provider: ${provider}. Must be one of: ${VALID_IMAGE_PARSER_PROVIDERS.join(', ')}`);
@@ -3097,6 +3173,45 @@ async function parseImage(imageBase64, options = {}) {
       throw primaryErr;
     }
 
+    const backupEffectiveModel = backupModel || getProviderModelId(backupProvider) || '';
+    const explicitEvaluationPath = options.executionPurpose === 'agent-evaluation'
+      || options.executionPurpose === 'provider-comparison';
+    const eligibilityResolver = typeof options.fallbackEligibilityResolver === 'function'
+      ? options.fallbackEligibilityResolver
+      : require('./agent-evaluation-contract').getFallbackEligibility;
+    const fallbackDecision = explicitEvaluationPath
+      ? {
+          eligible: true,
+          reason: 'explicit-evaluation-path',
+          source: options.executionPurpose,
+          agentId: options.agentId || 'image-analyst',
+          useCase: 'image-parse',
+          provider: backupProvider,
+          model: backupEffectiveModel,
+        }
+      : await eligibilityResolver({
+          agentId: options.agentId || 'image-analyst',
+          useCase: 'image-parse',
+          provider: backupProvider,
+          model: backupEffectiveModel,
+          promptId,
+        });
+    if (fallbackDecision?.eligible !== true) {
+      primaryErr.fallbackDecision = fallbackDecision || { eligible: false, reason: 'fallback_evaluation_unavailable' };
+      eventBus?.emit('parser.provider_failover_blocked', {
+        from: provider,
+        fromModel: model || '',
+        to: backupProvider,
+        toModel: backupEffectiveModel,
+        code: 'FALLBACK_NOT_EVALUATED',
+        reason: fallbackDecision?.reason || 'fallback_evaluation_unavailable',
+        decision: primaryErr.fallbackDecision,
+        surfaceToUser: true,
+        displayMessage: `Image parser fallback ${backupProvider} is not eligible for this prompt and workflow.`,
+      });
+      throw primaryErr;
+    }
+
     // The primary model was validated at parseImage entry, but the backup model
     // (request-supplied options.fallbackModel or a profile-resolved backup) has
     // not been. Apply the SAME allowlist before the backup attempt — for a
@@ -3113,6 +3228,8 @@ async function parseImage(imageBase64, options = {}) {
       toModel: backupModel || '',
       reason: primaryErr?.message || 'Primary image-parser provider failed',
       code: primaryErr?.code || 'PROVIDER_ERROR',
+      eligible: true,
+      decision: fallbackDecision,
       surfaceToUser: true,
       displayMessage: `Image parser primary ${provider} failed; failing over to ${backupProvider}`,
     });

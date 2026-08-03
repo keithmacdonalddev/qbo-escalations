@@ -164,6 +164,10 @@ function queueCapture({
       agent: captureContext.agent || null,
       modelRequested: captureContext.modelRequested || null,
     },
+    captureContext: {
+      ...(typeof captureContext.captureMode === 'string' ? { captureMode: captureContext.captureMode } : {}),
+      ...(typeof captureContext.capturePurpose === 'string' ? { capturePurpose: captureContext.capturePurpose } : {}),
+    },
   };
 
   const queued = recordLlmGatewayProviderCallPackageInBackground(captureInput, {

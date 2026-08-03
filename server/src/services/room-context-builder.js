@@ -2,10 +2,12 @@
 
 const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
 const { summarizeMessages } = require('../lib/chat-context-builder');
-const { buildRoomMemoryContext } = require('./room-memory');
+const { buildRoomMemoryContext, serializeUntrustedRoomEvidence } = require('./room-memory');
+const { measurePromptSections } = require('../lib/agent-output-contract');
 const { buildRoomRuntimeContext } = require('./room-agent-runtime');
 const { buildAgentIdentityOverlay } = require('./room-agents/agent-profiles');
-const { SHARED_AGENT_TOOL_LINES } = require('./shared-agent-tools');
+const { buildSharedAgentToolLines } = require('./shared-agent-tools');
+const { getMaximumAgentToolNames } = require('./agent-tool-capabilities');
 const {
   buildCommunityProfilesContext,
   buildIdentityMemoryContext,
@@ -44,8 +46,8 @@ async function buildAgentContext(agent, room, opts = {}) {
     const summaryText = summarizeMessages(omitted, summaryMaxChars);
     if (summaryText) {
       summaryMessage = {
-        role: 'system',
-        content: `[Summary of earlier conversation]\n${summaryText}`,
+        role: 'user',
+        content: serializeUntrustedRoomEvidence('earlier-room-summary', { summary: summaryText }, summaryMaxChars),
       };
     }
   }
@@ -88,24 +90,51 @@ async function buildAgentContext(agent, room, opts = {}) {
   const result = await agent.buildContext(contextMessages, ctx);
   const identity = await getAgentIdentity(agent.id);
   const identities = await listAgentIdentities();
-  const hasSharedAgentTools = Boolean(agent.supportsAgentTools || agent.supportsTools || agent.useActionFlow);
+  const hasSharedAgentTools = Boolean(agent.supportsAgentTools);
+  const sharedAgentToolNames = hasSharedAgentTools
+    ? getMaximumAgentToolNames(agent.id, 'room-chat')
+    : null;
+  if (hasSharedAgentTools && !sharedAgentToolNames) {
+    const error = new Error(`No room-chat tool capability is registered for ${agent.id}.`);
+    error.code = 'AGENT_TOOL_CAPABILITY_UNKNOWN';
+    throw error;
+  }
 
-  return {
-    systemPrompt: [
+  const systemPrompt = [
       result.systemPrompt || '',
       'You are sending exactly one chat bubble as yourself. Never write dialogue for another agent, never script a multi-speaker scene, and never include transcript prefixes like "[Copilot]:" or "QBO Assistant:" for anyone else in your final answer. If you want another agent to speak, nudge them or mention them, but do not write their reply for them.',
       buildAgentIdentityOverlay(identity?.profile || agent.id),
       buildRoomRuntimeContext(agent.id, room.activeAgents || [], opts.runtimeSelections || {}),
       buildIdentityMemoryContext(identity),
       buildRelationshipCoordinationContext(identity, room.activeAgents || []),
-      hasSharedAgentTools ? SHARED_AGENT_TOOL_LINES : '',
+      hasSharedAgentTools ? buildSharedAgentToolLines(sharedAgentToolNames) : '',
       buildCommunityProfilesContext(agent.id, identities, room.activeAgents || []),
       buildRoomMemoryContext(room.memory || null, agent.id),
     ]
       .filter(Boolean)
-      .join('\n\n'),
-    messagesForModel: result.messagesForModel || [],
+      .join('\n\n');
+  const messagesForModel = result.messagesForModel || [];
+  const maxChars = Math.max(1000, Number(ctx.aiSettings?.context?.maxInputTokens || 12000) * 4);
+  const promptManifest = measurePromptSections([
+    { id: 'room-system', kind: 'required', text: systemPrompt },
+    ...messagesForModel.map((message, index) => ({
+      id: `room-message-${index + 1}`,
+      kind: message?.role === 'user' ? 'user-input' : 'required',
+      text: typeof message?.content === 'string' ? message.content : JSON.stringify(message?.content ?? ''),
+    })),
+  ], { maxChars });
+  if (!promptManifest.withinBudget) {
+    const error = new Error(`Final room prompt exceeds its ${maxChars}-character budget.`);
+    error.code = 'ROOM_PROMPT_BUDGET_EXCEEDED';
+    error.promptManifest = promptManifest;
+    throw error;
+  }
+
+  return {
+    systemPrompt,
+    messagesForModel,
     contextDebug: result.contextDebug || {},
+    promptManifest,
     citations: result.citations || [],
   };
 }

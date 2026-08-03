@@ -114,7 +114,11 @@ test('OpenAI provider harness saves provider package before returning success tr
     assert.equal(saved.providerPathType, 'direct-http');
     assert.equal(saved.outcome, 'success');
     assert.equal(saved.request.headers.Authorization, 'Bearer [REDACTED]');
-    assert.equal(saved.response.parsedJson.choices[0].message.content, 'COID/MID: 123\nCASE: 456');
+    assert.equal(saved.capturePolicy.mode, 'manifest');
+    assert.equal(saved.response.parsedJson, null);
+    assert.equal(saved.response.bodyText, null);
+    assert.equal(saved.resultHandoff.text, 'COID/MID: 123\nCASE: 456');
+    assert.equal(saved.resultHandoff.usage.inputTokens, 13);
     assert.equal(events.some((event) => event.eventType === 'provider.package_capture_confirmed'), true);
     assert.equal(events.some((event) => event.eventType === 'provider.package_ready_for_agent'), true);
   });

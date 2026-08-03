@@ -3,10 +3,10 @@ import { apiFetchJson } from '../api/http.js';
 import './WorkspaceAgentOperationsTab.css';
 
 const POLICY_CONTROLS = [
-  { key: 'proactiveEnabled', label: 'Proactive operations', detail: 'Look ahead and work between conversations.' },
-  { key: 'emailMonitoring', label: 'Monitor email', detail: 'Watch connected inboxes for urgent or useful work.' },
+  { key: 'proactiveEnabled', label: 'Proactive suggestions', detail: 'Look ahead between conversations and surface suggested work without changing external systems.' },
+  { key: 'emailMonitoring', label: 'Monitor email', detail: 'Observe connected inboxes for urgent or useful work. Background changes are suggestion-only.' },
   { key: 'calendarMonitoring', label: 'Monitor calendar', detail: 'Watch timing, conflicts, deadlines, and upcoming commitments.' },
-  { key: 'emailOrganization', label: 'Organize email', detail: 'Label, archive, star, and update read state automatically.' },
+  { key: 'emailOrganization', label: 'Allow email organization', detail: 'Permit requested label, archive, star, and read-state actions after server permission checks.' },
   { key: 'draftReplies', label: 'Prepare reply drafts', detail: 'Write drafts proactively. Sending still requires confirmation.' },
   { key: 'personalCalendarHolds', label: 'Create private holds', detail: 'Reserve focus or buffer time without inviting anyone.' },
 ];
@@ -114,7 +114,7 @@ export default function WorkspaceAgentOperationsTab({ section = 'configuration' 
         <header className="workspace-ops-section-intro">
           <span className="workspace-ops-kicker">Workspace permissions</span>
           <h2>Email and calendar authority</h2>
-          <p>These saved controls determine what the Workspace Agent may do proactively. Sending, deleting, inviting people, and lasting rules still require your confirmation.</p>
+          <p>These saved controls determine what the Workspace Agent may do after a request passes server checks. Background monitoring currently observes and suggests; it does not change Gmail.</p>
         </header>
 
         {error && <div className="workspace-ops-alert" role="alert">{error}</div>}
@@ -123,7 +123,7 @@ export default function WorkspaceAgentOperationsTab({ section = 'configuration' 
           <div className="workspace-ops-card-heading">
             <div>
               <span className="workspace-ops-kicker">Proactive behavior</span>
-              <h3>Work allowed between conversations</h3>
+              <h3>Observation and requested-action boundaries</h3>
             </div>
             <span className="workspace-ops-safety-note">Sending and destructive actions always pause</span>
           </div>
@@ -146,7 +146,7 @@ export default function WorkspaceAgentOperationsTab({ section = 'configuration' 
           </div>
           <label className="workspace-ops-batch">
             <span>
-              <strong>Automatic email batch limit</strong>
+              <strong>Pre-approved email batch limit</strong>
               <small>Larger batches require an exact confirmation.</small>
             </span>
             <input
@@ -162,7 +162,7 @@ export default function WorkspaceAgentOperationsTab({ section = 'configuration' 
 
         <div className="workspace-ops-permissions">
           <article className="workspace-ops-permission is-automatic">
-            <span>Runs automatically</span>
+            <span>Pre-approved when requested</span>
             <ul>{(profile.permissions?.automatic || []).map((item) => <li key={item}>{item}</li>)}</ul>
           </article>
           <article className="workspace-ops-permission is-confirmation">
@@ -191,7 +191,7 @@ export default function WorkspaceAgentOperationsTab({ section = 'configuration' 
       <div className="workspace-ops-grid workspace-ops-grid-top">
         <article className="workspace-ops-card">
           <span className="workspace-ops-kicker">Readiness</span>
-          <h3>{profile.readiness?.ready ? 'Ready for proactive work' : 'Needs setup attention'}</h3>
+          <h3>{profile.readiness?.ready ? 'Ready for proactive observation' : 'Needs setup attention'}</h3>
           <p className="workspace-ops-copy">
             {failedChecks.length
               ? `${failedChecks.length} readiness check${failedChecks.length === 1 ? '' : 's'} need attention.`

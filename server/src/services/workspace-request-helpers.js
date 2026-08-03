@@ -9,18 +9,25 @@ const { markMessageProcessed } = require('./workspace-runtime');
 const { logUsage } = require('../lib/usage-writer');
 const { calculateCost } = require('../lib/pricing');
 const {
+  normalizeWorkspaceActionAccount,
   normalizeWorkspaceLabelRef,
   orderWorkspaceActionsByDependency,
   prepareActionForExecution,
   trackWorkspaceExecutionState,
 } = require('./workspace-tools/execution-state');
 const { WORKSPACE_TOOL_HANDLERS: TOOL_HANDLERS } = require('./workspace-tools/handler-registry');
+const { WORKSPACE_TOOL_METADATA } = require('./workspace-tools/metadata');
 const {
   createWorkspaceApproval,
   evaluateWorkspaceAction,
   getWorkspaceAuthority,
+  hashWorkspaceAction,
   recordWorkspaceAction,
 } = require('./workspace-action-policy');
+const {
+  parseAgentToolActionEnvelope,
+  stripAgentToolProtocolOutput,
+} = require('./agent-tool-action-envelope');
 
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(value, 10);
@@ -164,16 +171,20 @@ const VERIFICATION_HANDLERS = {
 };
 
 const TRANSIENT_ERROR_PATTERNS = ['429', 'rate limit', 'quota', '503', 'timeout', 'etimedout', 'econnreset'];
-const NON_RETRYABLE_TOOLS = new Set(['gmail.send', 'gmail.trash', 'gmail.draft', 'gmail.createLabel', 'calendar.deleteEvent']);
-const failureFingerprints = new Map();
+const NON_RETRYABLE_TOOLS = new Set([
+  'gmail.send',
+  'gmail.trash',
+  'gmail.draft',
+  'gmail.createLabel',
+  'gmail.createFilter',
+  'calendar.createEvent',
+  'calendar.deleteEvent',
+  'agentProfiles.nudge',
+]);
 
 function normalizeWorkspaceReasoningEffort(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return WORKSPACE_ALLOWED_REASONING.has(normalized) ? normalized : 'high';
-}
-
-function clearWorkspaceFailureFingerprints() {
-  failureFingerprints.clear();
 }
 
 function isTransientError(err) {
@@ -182,24 +193,230 @@ function isTransientError(err) {
 }
 
 function getFailureFingerprint(action) {
-  return `${action.tool}:${JSON.stringify(Object.keys(action.params || {}).sort())}`;
+  return hashWorkspaceAction(action.tool, action.params || {});
 }
 
-function parseWorkspaceActions(text) {
-  const actions = [];
-  const regex = /ACTION:\s*(\{[\s\S]*?\})\s*(?=\n|$)/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    try {
-      const parsed = JSON.parse(match[1]);
-      if (parsed.tool && typeof parsed.tool === 'string') {
-        actions.push({ tool: parsed.tool, params: parsed.params || {} });
-      }
-    } catch {
-      // Skip malformed action blocks.
-    }
+function getResolvedHandlerFailure(result) {
+  if (!result || typeof result !== 'object') return '';
+  const status = String(result.status || '').trim().toLowerCase();
+  if (result.ok === false || result.error || ['error', 'failed', 'failure'].includes(status)) {
+    return String(result.error || result.message || `Tool returned failure status: ${status || 'ok=false'}`);
   }
-  return actions;
+  return '';
+}
+
+const TOOL_PARAM_KEYS = Object.freeze({
+  'gmail.search': ['q', 'maxResults', 'account'],
+  'gmail.send': ['to', 'subject', 'body', 'cc', 'bcc', 'threadId', 'inReplyTo', 'references', 'account'],
+  'gmail.archive': ['messageId', 'account'],
+  'gmail.trash': ['messageId', 'account'],
+  'gmail.star': ['messageId', 'account'],
+  'gmail.unstar': ['messageId', 'account'],
+  'gmail.markRead': ['messageId', 'account'],
+  'gmail.markUnread': ['messageId', 'account'],
+  'gmail.label': ['messageId', 'labelId', 'labelName', 'label', 'account'],
+  'gmail.removeLabel': ['messageId', 'labelId', 'labelName', 'label', 'account'],
+  'gmail.draft': ['to', 'subject', 'body', 'cc', 'bcc', 'account'],
+  'gmail.getMessage': ['messageId', 'account'],
+  'gmail.listLabels': ['account'],
+  'gmail.createLabel': ['name', 'labelName', 'label', 'labelListVisibility', 'messageListVisibility', 'account'],
+  'gmail.createFilter': ['criteria', 'action', 'account'],
+  'gmail.listFilters': ['account'],
+  'gmail.deleteFilter': ['filterId', 'account'],
+  'gmail.batchModify': ['messageIds', 'addLabelIds', 'removeLabelIds', 'addLabels', 'removeLabels', 'addLabelNames', 'removeLabelNames', 'account'],
+  'calendar.listEvents': ['timeMin', 'timeMax', 'q', 'calendarId', 'maxResults', 'account'],
+  'calendar.createEvent': ['summary', 'start', 'end', 'location', 'description', 'attendees', 'allDay', 'timeZone', 'calendarId', 'account', 'reminders'],
+  'calendar.updateEvent': ['eventId', 'summary', 'start', 'end', 'location', 'description', 'attendees', 'allDay', 'timeZone', 'calendarId', 'account', 'reminders'],
+  'calendar.deleteEvent': ['eventId', 'calendarId', 'account'],
+  'calendar.freeTime': ['calendarIds', 'timeMin', 'timeMax', 'timeZone', 'account'],
+  'memory.save': ['type', 'key', 'content', 'source'],
+  'memory.list': ['query', 'type', 'limit'],
+  'memory.delete': ['key'],
+  'agentProfiles.list': [],
+  'agentProfiles.get': ['agentId'],
+  'agentProfiles.history': ['agentId'],
+  'agentProfiles.updateAvatar': ['agentId', 'imageUrl', 'emoji', 'prompt', 'source', 'summary'],
+  'agentProfiles.generateAvatar': ['agentId', 'prompt', 'palette', 'emoji', 'summary'],
+  'agentProfiles.nudge': ['fromAgentId', 'toAgentId', 'note', 'roomId', 'surface'],
+  'autoAction.createRule': ['name', 'tier', 'conditionType', 'conditionValue', 'actionType', 'actionValue'],
+  'autoAction.approve': ['ruleId'],
+  'shipment.list': ['active', 'carrier', 'status'],
+  'shipment.get': ['trackingNumber'],
+  'shipment.updateStatus': ['trackingNumber', 'status', 'location', 'description'],
+  'shipment.markDelivered': ['trackingNumber'],
+  'shipment.track': ['trackingNumber'],
+  'db.searchEscalations': ['query', 'category', 'status', 'limit'],
+  'db.getEscalation': ['id', 'caseNumber'],
+  'db.searchInvestigations': ['query', 'category', 'status', 'statuses', 'limit'],
+  'db.getInvestigation': ['id', 'invNumber'],
+  'db.searchTemplates': ['query', 'category', 'limit'],
+  'db.searchConversations': ['query', 'limit'],
+  'db.getConversation': ['id'],
+  'db.searchRooms': ['query', 'activeAgentId', 'limit'],
+  'db.getRoom': ['id'],
+  'web.search': ['query', 'limit'],
+});
+
+const TOOL_REQUIRED_PARAMS = Object.freeze({
+  'gmail.send': ['to', 'body'],
+  'gmail.archive': ['messageId'],
+  'gmail.trash': ['messageId'],
+  'gmail.star': ['messageId'],
+  'gmail.unstar': ['messageId'],
+  'gmail.markRead': ['messageId'],
+  'gmail.markUnread': ['messageId'],
+  'gmail.label': ['messageId'],
+  'gmail.removeLabel': ['messageId'],
+  'gmail.draft': ['to', 'body'],
+  'gmail.getMessage': ['messageId'],
+  'gmail.createLabel': ['name'],
+  'gmail.createFilter': ['criteria', 'action'],
+  'gmail.deleteFilter': ['filterId'],
+  'gmail.batchModify': ['messageIds'],
+  'calendar.listEvents': ['timeMin', 'timeMax'],
+  'calendar.createEvent': ['summary', 'start', 'end'],
+  'calendar.updateEvent': ['eventId'],
+  'calendar.deleteEvent': ['eventId'],
+  'calendar.freeTime': ['timeMin', 'timeMax'],
+  'memory.save': ['type', 'key', 'content'],
+  'memory.delete': ['key'],
+  'agentProfiles.get': ['agentId'],
+  'agentProfiles.history': ['agentId'],
+  'agentProfiles.updateAvatar': ['agentId'],
+  'agentProfiles.generateAvatar': ['agentId'],
+  'agentProfiles.nudge': ['fromAgentId', 'toAgentId'],
+  'autoAction.createRule': ['name', 'tier', 'conditionType', 'conditionValue', 'actionType'],
+  'autoAction.approve': ['ruleId'],
+  'shipment.get': ['trackingNumber'],
+  'shipment.updateStatus': ['trackingNumber', 'status'],
+  'shipment.markDelivered': ['trackingNumber'],
+  'shipment.track': ['trackingNumber'],
+  'db.getConversation': ['id'],
+  'db.getRoom': ['id'],
+  'web.search': ['query'],
+});
+
+const TOOL_ANY_OF_PARAMS = Object.freeze({
+  'gmail.label': ['labelId', 'labelName', 'label'],
+  'gmail.removeLabel': ['labelId', 'labelName', 'label'],
+  'db.getEscalation': ['id', 'caseNumber'],
+  'db.getInvestigation': ['id', 'invNumber'],
+});
+
+const ARRAY_PARAM_NAMES = new Set([
+  'to', 'cc', 'bcc', 'references', 'messageIds', 'addLabelIds', 'removeLabelIds',
+  'addLabels', 'removeLabels', 'addLabelNames', 'removeLabelNames', 'attendees',
+  'calendarIds', 'statuses',
+]);
+const NUMBER_PARAM_NAMES = new Set(['limit', 'maxResults']);
+const BOOLEAN_PARAM_NAMES = new Set(['active', 'allDay']);
+const OBJECT_PARAM_NAMES = new Set(['criteria', 'action', 'reminders']);
+const DATE_VALUE_PARAM_NAMES = new Set(['start', 'end']);
+
+function isPlainActionObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function hasUsableActionValue(value) {
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== null && value !== undefined;
+}
+
+function validateActionParamValue(key, value, expectedType = '') {
+  if (expectedType === 'object') return isPlainActionObject(value) ? '' : `${key} must be an object`;
+  if (expectedType === 'string') {
+    if (typeof value !== 'string') return `${key} must be a string`;
+    if (value.length > 10000) return `${key} exceeds the 10000-character field limit`;
+    return '';
+  }
+  if (expectedType === 'number') return typeof value === 'number' && Number.isFinite(value) ? '' : `${key} must be a number`;
+  if (expectedType === 'boolean') return typeof value === 'boolean' ? '' : `${key} must be a boolean`;
+  if (ARRAY_PARAM_NAMES.has(key)) {
+    const recipientField = ['to', 'cc', 'bcc'].includes(key);
+    const arrayValue = recipientField && typeof value === 'string' ? [value] : value;
+    if (!Array.isArray(arrayValue)) return `${key} must be an array${recipientField ? ' or string' : ''}`;
+    if (arrayValue.length > 100) return `${key} exceeds the 100-item server limit`;
+    const validItems = key === 'attendees'
+      ? arrayValue.every((item) => typeof item === 'string' || isPlainActionObject(item))
+      : arrayValue.every((item) => typeof item === 'string');
+    if (!validItems) return `${key} contains an invalid item type`;
+    return '';
+  }
+  if (NUMBER_PARAM_NAMES.has(key)) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return `${key} must be a number`;
+    return '';
+  }
+  if (BOOLEAN_PARAM_NAMES.has(key)) return typeof value === 'boolean' ? '' : `${key} must be a boolean`;
+  if (OBJECT_PARAM_NAMES.has(key)) return isPlainActionObject(value) ? '' : `${key} must be an object`;
+  if (DATE_VALUE_PARAM_NAMES.has(key)) {
+    return typeof value === 'string' || isPlainActionObject(value) ? '' : `${key} must be a date string or object`;
+  }
+  if (typeof value !== 'string') return `${key} must be a string`;
+  if (value.length > 10000) return `${key} exceeds the 10000-character field limit`;
+  return '';
+}
+
+function validateWorkspaceActionShape(action, { toolSchemas = null } = {}) {
+  if (!isPlainActionObject(action)) return 'ACTION payload must be a JSON object.';
+  const tool = typeof action.tool === 'string' ? action.tool.trim() : '';
+  if (!tool) return 'ACTION.tool must be a non-empty string.';
+  const customSchema = toolSchemas && isPlainActionObject(toolSchemas[tool]) ? toolSchemas[tool] : null;
+  if (!WORKSPACE_TOOL_METADATA[tool] && !customSchema) return `Unknown tool: ${tool}.`;
+  if (!isPlainActionObject(action.params || {})) return 'ACTION.params must be a JSON object.';
+  const params = action.params || {};
+  const allowedKeys = new Set(customSchema?.allowedKeys || TOOL_PARAM_KEYS[tool] || []);
+  const unexpected = Object.keys(params).filter((key) => !allowedKeys.has(key));
+  if (unexpected.length > 0) return `${tool} has unsupported parameter(s): ${unexpected.join(', ')}.`;
+  const serialized = JSON.stringify(params);
+  if (serialized.length > 32768) return `${tool} parameters exceed the 32768-character server limit.`;
+  for (const key of customSchema?.required || TOOL_REQUIRED_PARAMS[tool] || []) {
+    if (!hasUsableActionValue(params[key])) return `${tool} requires parameter ${key}.`;
+  }
+  const anyOf = customSchema?.anyOf || TOOL_ANY_OF_PARAMS[tool] || [];
+  if (anyOf.length > 0 && !anyOf.some((key) => hasUsableActionValue(params[key]))) {
+    return `${tool} requires one of: ${anyOf.join(', ')}.`;
+  }
+  for (const [key, value] of Object.entries(params)) {
+    const error = validateActionParamValue(key, value, customSchema?.types?.[key] || '');
+    if (error) return `${tool}: ${error}.`;
+  }
+  return '';
+}
+
+function parseWorkspaceActions(text, options = {}) {
+  const customToolNames = options.toolSchemas && isPlainActionObject(options.toolSchemas)
+    ? Object.keys(options.toolSchemas)
+    : [];
+  const knownToolNames = options.knownToolNames || [
+    ...Object.keys(WORKSPACE_TOOL_METADATA),
+    ...customToolNames,
+  ];
+  const envelopeResult = parseAgentToolActionEnvelope(text, {
+    knownToolNames,
+    maxActions: Number.isInteger(options.maxActions) ? options.maxActions : 6,
+    maxEnvelopeChars: options.maxEnvelopeChars,
+    maxParamsChars: options.maxParamsChars,
+    validateAction: (action) => validateWorkspaceActionShape(action, options),
+  });
+  if (envelopeResult.kind === 'none') return [];
+  if (envelopeResult.kind === 'invalid') {
+    return [{
+      tool: 'server.invalidAction',
+      params: {},
+      invalidOutput: true,
+      code: envelopeResult.code,
+      error: envelopeResult.error,
+      rawPreview: envelopeResult.rawPreview,
+    }];
+  }
+  return envelopeResult.actions;
+}
+
+function stripWorkspaceActionLines(text) {
+  return stripAgentToolProtocolOutput(String(text || ''));
 }
 
 function createWorkspaceAbortError(message = 'Workspace action loop aborted') {
@@ -208,11 +425,33 @@ function createWorkspaceAbortError(message = 'Workspace action loop aborted') {
   return err;
 }
 
+function createWorkspaceToolTimeoutError(tool, { outcomeUnknown = false, cancelled = false } = {}) {
+  const err = new Error(
+    outcomeUnknown
+      ? `${tool} ${cancelled ? 'was cancelled after dispatch' : 'timed out'} and its external outcome is unknown. It was not retried.`
+      : `${tool} ${cancelled ? 'was cancelled' : 'timed out before returning a result'}.`,
+  );
+  err.code = 'TOOL_TIMEOUT';
+  err.outcomeUnknown = outcomeUnknown;
+  return err;
+}
+
 async function executeWorkspaceActions(actions, executionState, opts = {}) {
   const ordered = orderWorkspaceActionsByDependency(actions);
   const results = [];
-  const authority = opts.authority || await getWorkspaceAuthority();
+  const toolHandlers = opts.toolHandlers && typeof opts.toolHandlers === 'object'
+    ? opts.toolHandlers
+    : TOOL_HANDLERS;
+  const failureFingerprints = executionState?.failureFingerprints instanceof Map
+    ? executionState.failureFingerprints
+    : new Map();
+  const sharedAgentAuthority = opts.authorityScope === 'shared-agent'
+    ? { enabled: true, policy: {} }
+    : null;
+  let authority = sharedAgentAuthority || opts.authority || null;
+  let authorityLoaded = Boolean(authority);
   const evidenceContext = {
+    agentId: opts.agentId || 'workspace',
     source: opts.source || 'workspace-agent',
     surface: opts.surface || 'workspace-panel',
     sessionId: opts.sessionId || '',
@@ -221,12 +460,40 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
   const abortMessage = typeof opts.abortMessage === 'string' && opts.abortMessage.trim()
     ? opts.abortMessage
     : 'Workspace action loop aborted';
+  const deadlineAt = Number.isFinite(opts.deadlineAt) ? opts.deadlineAt : null;
+  const perToolTimeoutMs = Number.isFinite(opts.perToolTimeoutMs) && opts.perToolTimeoutMs > 0
+    ? opts.perToolTimeoutMs
+    : null;
 
   for (const action of ordered) {
     if (shouldAbort()) {
       throw createWorkspaceAbortError(abortMessage);
     }
-    const handler = TOOL_HANDLERS[action.tool];
+    if (action?.invalidOutput === true) {
+      const error = action.error || 'Invalid tool-action envelope.';
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: 'server.invalidAction',
+        params: {},
+        policyDecision: 'blocked',
+        status: 'blocked',
+        error,
+      });
+      results.push({
+        tool: 'server.invalidAction',
+        error,
+        blocked: true,
+        status: 'blocked',
+        policyDecision: 'blocked',
+        invalidOutput: true,
+        code: action.code || 'TOOL_ACTION_ENVELOPE_INVALID',
+      });
+      continue;
+    }
+    const handler = Object.prototype.hasOwnProperty.call(toolHandlers, action.tool)
+      && typeof toolHandlers[action.tool] === 'function'
+      ? toolHandlers[action.tool]
+      : null;
     if (!handler) {
       actionLog.logAction({
         action: action.tool,
@@ -247,27 +514,55 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
       continue;
     }
 
-    const policyResult = evaluateWorkspaceAction(action, authority, {
+    const directValidationError = validateWorkspaceActionShape(action);
+    if (directValidationError) {
+      await recordWorkspaceAction({
+        ...evidenceContext,
+        tool: action.tool,
+        params: {},
+        policyDecision: 'blocked',
+        status: 'blocked',
+        error: directValidationError,
+      });
+      results.push({
+        tool: action.tool,
+        error: directValidationError,
+        blocked: true,
+        status: 'blocked',
+        policyDecision: 'blocked',
+        invalidOutput: true,
+      });
+      continue;
+    }
+
+    if (!authorityLoaded) {
+      authority = await getWorkspaceAuthority();
+      authorityLoaded = true;
+    }
+    const normalizedAction = normalizeWorkspaceActionAccount(action, executionState);
+    const policyResult = evaluateWorkspaceAction(normalizedAction, authority, {
       approvedHash: opts.approvedHash || '',
+      connectedAccounts: executionState?.connectedGmailAccounts || [],
+      requireAccountProof: true,
     });
     if (policyResult.decision === 'blocked') {
       actionLog.logAction({
-        action: action.tool,
-        params: action.params,
+        action: normalizedAction.tool,
+        params: normalizedAction.params,
         result: policyResult.reason,
         status: 'blocked',
         durationMs: 0,
       });
       await recordWorkspaceAction({
         ...evidenceContext,
-        tool: action.tool,
-        params: action.params,
+        tool: normalizedAction.tool,
+        params: normalizedAction.params,
         policyDecision: 'blocked',
         status: 'blocked',
         error: policyResult.reason,
       });
       results.push({
-        tool: action.tool,
+        tool: normalizedAction.tool,
         error: policyResult.reason,
         blocked: true,
         status: 'blocked',
@@ -276,25 +571,25 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
       continue;
     }
     if (policyResult.decision === 'confirmation-required') {
-      const approval = await createWorkspaceApproval(action, evidenceContext);
+      const approval = await createWorkspaceApproval(normalizedAction, evidenceContext);
       actionLog.logAction({
-        action: action.tool,
-        params: action.params,
+        action: normalizedAction.tool,
+        params: normalizedAction.params,
         result: approval.preview,
         status: 'confirmation-required',
         durationMs: 0,
       });
       await recordWorkspaceAction({
         ...evidenceContext,
-        tool: action.tool,
-        params: action.params,
+        tool: normalizedAction.tool,
+        params: normalizedAction.params,
         approvalId: approval.id,
         policyDecision: 'confirmation-required',
         status: 'pending',
         resultSummary: approval.preview,
       });
       results.push({
-        tool: action.tool,
+        tool: normalizedAction.tool,
         confirmationRequired: true,
         status: 'pending',
         policyDecision: 'confirmation-required',
@@ -305,25 +600,25 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
 
     let preparedAction;
     try {
-      preparedAction = await prepareActionForExecution(action, executionState);
+      preparedAction = await prepareActionForExecution(normalizedAction, executionState);
     } catch (prepErr) {
       const errMsg = prepErr?.message || 'Failed to prepare action';
       actionLog.logAction({
-        action: action.tool,
-        params: action.params,
+        action: normalizedAction.tool,
+        params: normalizedAction.params,
         result: errMsg,
         status: 'error',
         durationMs: 0,
       });
       await recordWorkspaceAction({
         ...evidenceContext,
-        tool: action.tool,
-        params: action.params,
+        tool: normalizedAction.tool,
+        params: normalizedAction.params,
         policyDecision: 'allowed',
         status: 'error',
         error: errMsg,
       });
-      results.push({ tool: action.tool, error: errMsg, preparationFailed: true });
+      results.push({ tool: normalizedAction.tool, error: errMsg, preparationFailed: true });
       continue;
     }
 
@@ -360,21 +655,84 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
       if (shouldAbort()) {
         throw createWorkspaceAbortError(abortMessage);
       }
+      if (deadlineAt && Date.now() >= deadlineAt) {
+        throw createWorkspaceAbortError('Workspace action execution deadline exceeded');
+      }
+      const actionAbortController = new AbortController();
+      const writeTool = WORKSPACE_TOOL_METADATA[preparedAction.tool]?.kind === 'write';
+      const remainingDeadlineMs = deadlineAt ? Math.max(1, deadlineAt - Date.now()) : null;
+      const actionTimeoutMs = [remainingDeadlineMs, perToolTimeoutMs]
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .reduce((min, value) => Math.min(min, value), Infinity);
+      let timeoutHandle = null;
+      let rejectCancellation = null;
+      const cancellationPromise = new Promise((_, reject) => {
+        rejectCancellation = reject;
+      });
+      const cancellationPoll = setInterval(() => {
+        if (!shouldAbort()) return;
+        rejectCancellation(
+          writeTool
+            ? createWorkspaceToolTimeoutError(preparedAction.tool, { outcomeUnknown: true, cancelled: true })
+            : createWorkspaceAbortError(abortMessage),
+        );
+        actionAbortController.abort('cancelled');
+      }, 50);
+      cancellationPoll.unref?.();
       try {
-        result = await handler(preparedAction.params);
+        const handlerPromise = Promise.resolve().then(() => handler(preparedAction.params, {
+          signal: actionAbortController.signal,
+          deadlineAt,
+        }));
+        const completionCandidates = [handlerPromise, cancellationPromise];
+        if (Number.isFinite(actionTimeoutMs)) {
+          completionCandidates.push(
+              new Promise((_, reject) => {
+                timeoutHandle = setTimeout(() => {
+                  actionAbortController.abort('deadline');
+                  reject(createWorkspaceToolTimeoutError(preparedAction.tool, {
+                    outcomeUnknown: writeTool,
+                  }));
+                }, actionTimeoutMs);
+                timeoutHandle.unref?.();
+              }),
+          );
+        }
+        result = await Promise.race(completionCandidates);
+        const resolvedFailure = getResolvedHandlerFailure(result);
+        if (resolvedFailure) {
+          const handlerError = new Error(resolvedFailure);
+          handlerError.code = 'TOOL_RESULT_ERROR';
+          throw handlerError;
+        }
         succeeded = true;
         break;
       } catch (err) {
+        if (shouldAbort() && !err?.outcomeUnknown) {
+          if (writeTool) {
+            lastErr = createWorkspaceToolTimeoutError(preparedAction.tool, {
+              outcomeUnknown: true,
+              cancelled: true,
+            });
+            break;
+          }
+          throw createWorkspaceAbortError(abortMessage);
+        }
         lastErr = err;
+        if (err?.code === 'TOOL_TIMEOUT') break;
         if (attempt < maxAttempts && isTransientError(err)) {
           await new Promise((resolve) => setTimeout(resolve, 1000));
           continue;
         }
         break;
+      } finally {
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+        clearInterval(cancellationPoll);
       }
     }
 
     if (succeeded) {
+      failureFingerprints.delete(fingerprint);
       let verified;
       let warnings;
       const verifier = VERIFICATION_HANDLERS[preparedAction.tool];
@@ -398,7 +756,7 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         ...(verified !== undefined ? { verified, warnings } : {}),
       });
 
-      await recordWorkspaceAction({
+      const evidenceRecord = await recordWorkspaceAction({
         ...evidenceContext,
         tool: preparedAction.tool,
         params: preparedAction.params,
@@ -412,13 +770,24 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         warnings,
         durationMs: Date.now() - startMs,
       });
+      const evidenceIncomplete = !evidenceRecord;
+      const evidenceWarning = evidenceIncomplete
+        ? 'The external action succeeded, but durable action evidence could not be saved.'
+        : '';
 
       trackWorkspaceExecutionState(executionState, preparedAction, result);
 
-      const entry = { tool: preparedAction.tool, result };
+      const entry = {
+        tool: preparedAction.tool,
+        result,
+        status: 'ok',
+        ...(evidenceIncomplete ? { evidenceIncomplete: true, evidenceWarning } : {}),
+      };
       if (verified !== undefined) {
         entry.verified = verified;
-        entry.warnings = warnings;
+        entry.warnings = evidenceWarning ? [...warnings, evidenceWarning] : warnings;
+      } else if (evidenceWarning) {
+        entry.warnings = [evidenceWarning];
       }
       results.push(entry);
 
@@ -427,8 +796,9 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
       }
     } else {
       const errMsg = (lastErr && lastErr.message) || 'Execution failed';
+      const outcomeUnknown = lastErr?.outcomeUnknown === true;
       const existing = failureFingerprints.get(fingerprint) || { count: 0, lastError: '' };
-      existing.count++;
+      existing.count = outcomeUnknown ? Math.max(2, existing.count + 1) : existing.count + 1;
       existing.lastError = errMsg;
       failureFingerprints.set(fingerprint, existing);
 
@@ -445,11 +815,25 @@ async function executeWorkspaceActions(actions, executionState, opts = {}) {
         params: preparedAction.params,
         approvalId: opts.approvalId || '',
         policyDecision: 'allowed',
-        status: 'error',
+        status: outcomeUnknown ? 'outcome-unknown' : 'error',
         error: errMsg,
+        warnings: outcomeUnknown
+          ? ['The external write may have completed after the server deadline. Reconcile state before retrying.']
+          : [],
         durationMs: Date.now() - startMs,
       });
-      results.push({ tool: preparedAction.tool, error: errMsg });
+      results.push({
+        tool: preparedAction.tool,
+        error: errMsg,
+        status: outcomeUnknown ? 'outcome-unknown' : 'error',
+        ...(outcomeUnknown ? {
+          outcomeUnknown: true,
+          evidenceIncomplete: true,
+          retrySafe: false,
+          warnings: ['Reconcile the external system before attempting this write again.'],
+        } : {}),
+      });
+      if (lastErr?.code === 'TOOL_TIMEOUT') break;
     }
   }
 
@@ -638,10 +1022,11 @@ function startWorkspaceCollectedChat({
 
 module.exports = {
   buildWorkspaceUsageSubdoc,
-  clearWorkspaceFailureFingerprints,
   executeWorkspaceActions,
   logWorkspaceAttempts,
   normalizeWorkspaceReasoningEffort,
   parseWorkspaceActions,
+  stripWorkspaceActionLines,
+  validateWorkspaceActionShape,
   startWorkspaceCollectedChat,
 };

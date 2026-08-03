@@ -191,7 +191,8 @@ function normalizeReasoningEffortForProvider(provider, value) {
 }
 
 function formatProviderSummary(providerStatus) {
-  const label = providerStatus?.providerLabel || getProviderLabel(providerStatus?.provider);
+  const label = providerStatus?.providerLabel
+    || (providerStatus?.provider ? getProviderLabel(providerStatus.provider) : 'Provider');
   const model = safeText(providerStatus?.model);
   return model ? `${label} / ${model}` : label;
 }
@@ -203,7 +204,8 @@ function formatAvailabilityMessage(providerStatus, roleLabel = 'Provider') {
 }
 
 function getProviderHostHint(provider) {
-  const normalized = normalizeProvider(provider || '');
+  if (!provider) return '';
+  const normalized = normalizeProvider(provider);
   return PROVIDER_HOST_HINTS[normalized] || '';
 }
 

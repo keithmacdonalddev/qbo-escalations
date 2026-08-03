@@ -4,8 +4,9 @@ const { randomUUID } = require('crypto');
 const { getAgent, getAllAgents, getAgentsForMessage } = require('./room-agents/registry');
 const { shouldProfileJoinConversation } = require('./room-agents/agent-profiles');
 const { buildAgentContext } = require('./room-context-builder');
-const { getAgentIdentity, recordAgentNudge } = require('./agent-identity-service');
+const { getAgentIdentity, listAgentIdentities, recordAgentNudge } = require('./agent-identity-service');
 const { runAgentToolLoop } = require('./agent-tool-loop');
+const { getMaximumAgentToolNames } = require('./agent-tool-capabilities');
 const { getRoom } = require('./chat-room-service');
 const { resolveAgentRuntimePolicy } = require('./room-agent-runtime');
 const { startChatOrchestration } = require('./chat-orchestrator');
@@ -500,21 +501,41 @@ function startRoomOrchestration({
       const activeAgentIds = room.activeAgents || [];
       let selectedAgents = [];
       const identityById = new Map();
-
-      for (const id of activeAgentIds) {
-        try {
-          const identity = await getAgentIdentity(id);
-          if (identity) identityById.set(id, identity);
-        } catch {
-          // Best-effort only. Static defaults still exist.
+      try {
+        const identities = await listAgentIdentities();
+        for (const identity of identities) {
+          if (identity?.agentId) identityById.set(identity.agentId, identity);
         }
+      } catch {
+        onError?.({ code: 'AGENT_STATE_UNAVAILABLE', message: 'Room agent availability could not be verified.' });
+        return;
+      }
+      const isAgentEnabled = (agentId) => identityById.get(agentId)?.enabled !== false;
+      const enabledActiveAgentIds = activeAgentIds.filter(isAgentEnabled);
+      const disabledActiveAgentIds = activeAgentIds.filter((agentId) => !isAgentEnabled(agentId));
+      for (const agentId of disabledActiveAgentIds) {
+        onStatus?.({
+          agentId,
+          type: 'agent_disabled',
+          phase: 'coordination',
+          message: `${getAgent(agentId)?.name || agentId} is disabled and will not run in this room.`,
+        });
       }
 
       if (Array.isArray(mentions) && mentions.length > 0) {
+        const disabledMentions = mentions.filter((id) => activeAgentIds.includes(id) && !isAgentEnabled(id));
+        if (disabledMentions.length > 0) {
+          onError?.({
+            code: 'AGENT_DISABLED',
+            message: `Disabled agents cannot run: ${disabledMentions.join(', ')}`,
+            agentIds: disabledMentions,
+          });
+          return;
+        }
         // Explicit @mentions — use only those agents
         for (const id of mentions) {
           const agent = getAgent(id);
-          if (agent && !agent.internal && activeAgentIds.includes(id)) {
+          if (agent && !agent.internal && enabledActiveAgentIds.includes(id)) {
             selectedAgents.push(withIdentityProfile(agent, identityById));
           }
         }
@@ -536,14 +557,14 @@ function startRoomOrchestration({
         }
 
         // Get candidate agents from the registry
-        const candidates = getAgentsForMessage(userMessage, [], room);
+        const candidates = getAgentsForMessage(userMessage, [], room).filter((agent) => isAgentEnabled(agent.id));
 
         if (candidates.length === 0) {
           onError?.({ code: 'NO_AGENTS', message: 'No active agents configured for this room.' });
           return;
         }
 
-        if (mode === 'auto' && candidates.length > 1) {
+        if (mode === 'auto' && candidates.length > 1 && isAgentEnabled('__router')) {
           // Use the Router Agent to pick the best agents
           const routerResult = await runRouterAgent(userMessage, candidates, room, {
             activeCleanups,
@@ -552,7 +573,7 @@ function startRoomOrchestration({
           if (cancelled) return;
           selectedAgents = routerResult
             .map(id => getAgent(id))
-            .filter(a => a && !a.internal)
+            .filter(a => a && !a.internal && isAgentEnabled(a.id))
             .map((agent) => withIdentityProfile(agent, identityById));
           // Ensure at least one agent
           if (selectedAgents.length === 0) {
@@ -575,7 +596,7 @@ function startRoomOrchestration({
       const selectedIds = new Set(selectedAgents.map(a => a.id));
       for (const agent of getAllAgents()) {
         if (selectedIds.has(agent.id)) continue;
-        if (!activeAgentIds.includes(agent.id)) continue;
+        if (!enabledActiveAgentIds.includes(agent.id)) continue;
         if (
           shouldProfileJoinConversation(agent.id, {
             userMessage,
@@ -603,12 +624,12 @@ function startRoomOrchestration({
       }
 
       const shouldAutoEncourage = wantsMoreParticipation(userMessage, recentMessages)
-        && activeAgentIds.length > selectedAgents.length;
+        && enabledActiveAgentIds.length > selectedAgents.length;
 
       if (shouldAutoEncourage) {
         const nudgePlans = chooseNudgePlans({
           selectedAgents,
-          activeAgentIds,
+          activeAgentIds: enabledActiveAgentIds,
           recentMessages,
           identityById,
         });
@@ -664,6 +685,7 @@ function startRoomOrchestration({
       // they weren't otherwise selected by the router or mention system.
       for (const agent of getAllAgents()) {
         if (selectedIds.has(agent.id)) continue;
+        if (!isAgentEnabled(agent.id)) continue;
         if (typeof agent.shouldRespond === 'function' && agent.shouldRespond(userMessage, roomState)) {
           selectedAgents.push(agent);
           selectedIds.add(agent.id);
@@ -716,7 +738,7 @@ function startRoomOrchestration({
       if (maxRounds > 1) {
         // Track which agents ran in round 0
         const respondedInRound0 = new Set(selectedAgents.map((a) => a.id));
-        const allPublicAgents = getAllAgents();
+        const allPublicAgents = getAllAgents().filter((agent) => isAgentEnabled(agent.id));
 
         for (let roundIdx = 1; roundIdx < maxRounds; roundIdx++) {
           if (cancelled) break;
@@ -748,7 +770,7 @@ function startRoomOrchestration({
           // Agents eligible for reaction: active, not in round 0, shouldRespond() true
           const reactionCandidates = allPublicAgents.filter((agent) => {
             if (respondedInRound0.has(agent.id)) return false;
-            if (!activeAgentIds.includes(agent.id)) return false;
+            if (!enabledActiveAgentIds.includes(agent.id)) return false;
             const relationshipBoost = shouldRelationshipJoinConversation(agent.id, respondedInRound0, identityById);
             const wasNudged = nudgedAgentIds.has(agent.id);
             if (shouldSuppressForQuality(agent.id, roundQualityState, { mentions, candidates: allPublicAgents })) {
@@ -775,7 +797,7 @@ function startRoomOrchestration({
 
       // --- 4. Emit room_done ---
       const totalUsage = aggregateUsage(agentUsages);
-      onRoomDone?.({
+      await onRoomDone?.({
         roomId: room._id ? room._id.toString() : null,
         requestId: roomRequestId,
         agents: agentUsages.map(u => ({
@@ -784,6 +806,9 @@ function startRoomOrchestration({
           status: u.status,
           latencyMs: u.latencyMs,
           usage: u.usage,
+          provider: u.provider || '',
+          model: u.model || '',
+          error: u.error || '',
         })),
         totalUsage,
         elapsedMs: Date.now() - startedAt,
@@ -803,9 +828,36 @@ function startRoomOrchestration({
    */
   async function runAgent(agent) {
     const agentStartedAt = Date.now();
+    let liveIdentity;
+    try {
+      liveIdentity = await getAgentIdentity(agent.id);
+    } catch {
+      await emitAgentError({
+        agentId: agent.id,
+        agentName: agent.name,
+        error: 'Agent availability could not be verified.',
+        code: 'AGENT_STATE_UNAVAILABLE',
+      });
+      return;
+    }
+    if (!liveIdentity || liveIdentity.enabled === false) {
+      onStatus?.({
+        agentId: agent.id,
+        type: 'agent_disabled',
+        phase: 'execution',
+        message: `${agent.name} is disabled and was stopped before provider or tool execution.`,
+      });
+      await emitAgentError({
+        agentId: agent.id,
+        agentName: agent.name,
+        error: `${agent.name} is disabled.`,
+        code: 'AGENT_DISABLED',
+      });
+      return;
+    }
     const runtimePolicy = resolveAgentRuntimePolicy(agent, agentRuntimeSelections);
 
-    onAgentStart?.({
+    await onAgentStart?.({
       agentId: agent.id,
       agentName: agent.name,
       provider: runtimePolicy.primaryProvider,
@@ -1047,11 +1099,14 @@ function startRoomOrchestration({
           systemPrompt: contextResult.systemPrompt,
           messagesForModel: contextResult.messagesForModel,
           runtimePolicy,
+          toolUseCase: 'room-chat',
+          allowedToolNames: getMaximumAgentToolNames(agent.id, 'room-chat'),
           // Evidence identity: link captured ProviderCallPackages to this
           // room + responding agent.
           captureMetadata: {
             roomId: room?._id ? String(room._id) : '',
             agentId: agent.id,
+            surface: 'rooms',
           },
           onActions: (data) => {
             if (cancelled) return;

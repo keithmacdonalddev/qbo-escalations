@@ -42,6 +42,7 @@ const {
   createKbAgentToolHandlers,
 } = require('./knowledgebase-agent-tools');
 const { runKnowledgeBaseAgentToolLoop } = require('./knowledgebase-agent-tool-loop');
+const { getFallbackEligibility } = require('./agent-evaluation-contract');
 
 const KNOWLEDGEBASE_AGENT_ID = 'knowledgebase-agent';
 const UPLOADS_ROOT = path.resolve(__dirname, '..', '..', 'uploads');
@@ -629,11 +630,11 @@ function buildUserPromptFromMessages(messages = []) {
 // Knowledge Base Agent single-shot completion, provider-harness transport.
 //
 // House rule (mirrors the triage reference pattern in runTriage): hand the
-// prompt to the capture-enabled provider dispatch with forceCapture, wait for
-// the ProviderCallPackage to be readable in MongoDB, then build the result by
-// reading the package back — never from the in-memory provider response. The
-// whole provider payload (including any thinking/reasoning events the provider
-// emitted) is persisted in the package.
+// prompt to the capture-enabled provider dispatch, wait for the
+// ProviderCallPackage to be readable in MongoDB, then build the result from
+// its bounded provider-result-handoff. Ordinary product calls do not persist
+// raw request/response traffic. Provider reasoning is stored separately as
+// bounded, diagnostic-only evidence and is never treated as case truth.
 //
 // Provider/model/failover come from the agent profile runtime
 // (resolveKbAgentRuntimePolicy — the single source of truth); failover is
@@ -657,6 +658,8 @@ async function runKnowledgeBaseAgentCompletion({
   // (e.g. the escalation that triggered a draft extraction) so the forensic
   // record links back to its source. Merged into captureOverrides.metadata.
   captureMetadata = null,
+  executionPurpose = 'product',
+  fallbackEligibilityResolver = getFallbackEligibility,
   directProviderCall = runDirectTriageProviderCall,
   waitForPackage = waitForProviderPackage,
 } = {}) {
@@ -692,6 +695,12 @@ async function runKnowledgeBaseAgentCompletion({
         callSite: KNOWLEDGEBASE_PROVIDER_CALL_SITE,
         operation: KNOWLEDGEBASE_PROVIDER_OPERATION,
         agent: KNOWLEDGEBASE_AGENT_ID,
+        captureMode: executionPurpose === 'agent-evaluation' || executionPurpose === 'provider-comparison'
+          ? 'evaluation'
+          : 'diagnostic',
+        capturePurpose: executionPurpose === 'agent-evaluation' || executionPurpose === 'provider-comparison'
+          ? executionPurpose
+          : 'required-provider-handoff',
         metadata: {
           sourceAgent: KNOWLEDGEBASE_AGENT_ID,
           systemPromptMode,
@@ -716,9 +725,25 @@ async function runKnowledgeBaseAgentCompletion({
   let provider = primaryProvider;
   let model = primaryModel;
   let attempt;
+  let fallbackDecision = null;
+  const attempts = [];
   try {
     attempt = await attemptProviderCompletion(primaryProvider, primaryModel);
+    attempts.push({
+      provider: primaryProvider,
+      model: attempt.providerTrace?.model || primaryModel,
+      status: 'ok',
+      providerPackageId: safeString(attempt.providerTrace?.providerPackageId, ''),
+    });
   } catch (primaryErr) {
+    attempts.push({
+      provider: primaryProvider,
+      model: primaryModel,
+      status: 'error',
+      errorCode: safeString(primaryErr?.code, 'PROVIDER_EXEC_FAILED'),
+      errorMessage: safeString(primaryErr?.message, 'Primary provider failed.'),
+      providerPackageId: safeString(primaryErr?.providerPackageId, ''),
+    });
     // Automatic provider-to-provider failover, consistent with the universal
     // failover already shipped for chat/image-parser/triage. The backup is the
     // profile-resolved fallback (resolveKbAgentRuntimePolicy defaults it to the
@@ -729,9 +754,43 @@ async function runKnowledgeBaseAgentCompletion({
       ? policy.fallbackProvider
       : '';
     if (!backupProvider || backupProvider === primaryProvider) {
+      primaryErr.providerAttempts = attempts;
       throw primaryErr;
     }
     const backupModel = getEffectiveModel(backupProvider, policy.fallbackModel);
+    if (executionPurpose === 'agent-evaluation' || executionPurpose === 'provider-comparison') {
+      fallbackDecision = {
+        eligible: true,
+        reason: 'explicit-evaluation-path',
+        source: executionPurpose,
+        agentId: KNOWLEDGEBASE_AGENT_ID,
+        useCase: 'knowledgebase-draft',
+        provider: backupProvider,
+        model: backupModel,
+      };
+    } else {
+      try {
+        fallbackDecision = await fallbackEligibilityResolver({
+          agentId: KNOWLEDGEBASE_AGENT_ID,
+          useCase: 'knowledgebase-draft',
+          provider: backupProvider,
+          model: backupModel,
+          promptId: KNOWLEDGEBASE_AGENT_ID,
+        });
+      } catch (error) {
+        fallbackDecision = {
+          eligible: false,
+          reason: 'evaluation_lookup_failed',
+          detail: error?.message || String(error),
+        };
+      }
+    }
+    if (fallbackDecision?.eligible !== true) {
+      primaryErr.code = primaryErr.code || 'PROVIDER_EXEC_FAILED';
+      primaryErr.fallbackDecision = fallbackDecision;
+      primaryErr.providerAttempts = attempts;
+      throw primaryErr;
+    }
     console.warn(
       '[knowledgebase-agent] primary provider %s failed (%s); failing over to %s',
       primaryProvider,
@@ -740,7 +799,27 @@ async function runKnowledgeBaseAgentCompletion({
     );
     provider = backupProvider;
     model = backupModel;
-    attempt = await attemptProviderCompletion(backupProvider, backupModel);
+    try {
+      attempt = await attemptProviderCompletion(backupProvider, backupModel);
+      attempts.push({
+        provider: backupProvider,
+        model: attempt.providerTrace?.model || backupModel,
+        status: 'ok',
+        providerPackageId: safeString(attempt.providerTrace?.providerPackageId, ''),
+      });
+    } catch (backupErr) {
+      attempts.push({
+        provider: backupProvider,
+        model: backupModel,
+        status: 'error',
+        errorCode: safeString(backupErr?.code, 'PROVIDER_EXEC_FAILED'),
+        errorMessage: safeString(backupErr?.message, 'Fallback provider failed.'),
+        providerPackageId: safeString(backupErr?.providerPackageId, ''),
+      });
+      backupErr.fallbackDecision = fallbackDecision;
+      backupErr.providerAttempts = attempts;
+      throw backupErr;
+    }
   }
 
   return {
@@ -754,6 +833,8 @@ async function runKnowledgeBaseAgentCompletion({
     payloadSourcePath: attempt.payload.sourcePath || '',
     fallbackUsed: provider !== primaryProvider,
     fallbackFrom: provider !== primaryProvider ? primaryProvider : '',
+    fallbackDecision,
+    attempts,
   };
 }
 
@@ -765,6 +846,8 @@ async function runKnowledgeBaseAgentDraftExtraction({
   runtimePolicy = null,
   directProviderCall = undefined,
   waitForPackage = undefined,
+  executionPurpose = 'product',
+  fallbackEligibilityResolver = undefined,
 } = {}) {
   const contextBundle = await buildKnowledgeBaseAgentContext({
     candidate,
@@ -784,6 +867,8 @@ async function runKnowledgeBaseAgentDraftExtraction({
     timeoutMs: 120000,
     systemPromptMode: 'draft',
     runtimePolicy,
+    executionPurpose,
+    ...(fallbackEligibilityResolver ? { fallbackEligibilityResolver } : {}),
     // Forward link: the captured ProviderCallPackage records WHICH escalation
     // triggered this draft extraction (Mongo _id + human case number). Stamped
     // per attempt, so a failover backup's package carries the same origin.
@@ -805,6 +890,8 @@ async function runKnowledgeBaseAgentDraftExtraction({
     payloadSourcePath: completion.payloadSourcePath,
     fallbackUsed: completion.fallbackUsed,
     fallbackFrom: completion.fallbackFrom,
+    fallbackDecision: completion.fallbackDecision,
+    attempts: completion.attempts,
   };
 }
 

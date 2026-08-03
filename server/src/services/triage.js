@@ -45,6 +45,8 @@ const {
   TRIAGE_PROVIDER_OPERATION,
 } = require('./providers/provider-handoff');
 const { buildOperationalIntelligenceContext } = require('./operational-intelligence-service');
+const { loadProviderPayloadText } = require('./provider-payload-loader');
+const { readProviderResultHandoff } = require('./provider-capture-policy');
 
 const TRIAGE_AGENT_ID = 'triage-agent';
 // Repair-pass prompt template. It lives beside the other agent prompts with a
@@ -868,11 +870,13 @@ async function waitForProviderPackage(providerTrace, eventBus = null, signal = n
 
 async function loadProviderCallPackagePayloadRef(ref) {
   if (!ref || typeof ref.ref !== 'string' || !ref.ref.trim()) return null;
-  const fullPath = path.resolve(__dirname, '..', '..', '..', ref.ref);
-  return fs.promises.readFile(fullPath, 'utf8');
+  const loaded = await loadProviderPayloadText(ref, { maxBytes: 8 * 1024 * 1024 });
+  return loaded.text;
 }
 
 async function loadCliStdoutJsonlEventsFromPackage(providerPackage) {
+  const handoffEvents = readProviderResultHandoff(providerPackage, 'cli-semantic-events');
+  if (Array.isArray(handoffEvents)) return handoffEvents;
   const stdout = providerPackage?.cli?.stdout || {};
   if (Array.isArray(stdout.jsonlEvents) && stdout.jsonlEvents.length) {
     return stdout.jsonlEvents;
@@ -974,6 +978,15 @@ function buildCodexTextFromEvents(events) {
 
 async function extractTriageTextFromProviderPackage(providerPackage, providerTrace = {}) {
   const providerId = providerPackage?.providerId || providerTrace.providerId || '';
+  const resultHandoff = readProviderResultHandoff(providerPackage);
+  if (resultHandoff) {
+    return {
+      text: resultHandoff.text,
+      parsed: null,
+      sourcePath: `resultHandoff.${resultHandoff.sourcePath}`,
+      resultHandoff,
+    };
+  }
   let parsed = null;
   let sourcePath = '';
   if (providerId === 'claude' || providerPackage?.providerResearchId === 'anthropic-cli') {
@@ -1458,6 +1471,44 @@ async function runTriage(text, options = {}) {
         throw primaryErr;
       }
 
+      const explicitEvaluationPath = options.executionPurpose === 'agent-evaluation'
+        || options.executionPurpose === 'provider-comparison';
+      const eligibilityResolver = typeof options.fallbackEligibilityResolver === 'function'
+        ? options.fallbackEligibilityResolver
+        : require('./agent-evaluation-contract').getFallbackEligibility;
+      const fallbackDecision = explicitEvaluationPath
+        ? {
+            eligible: true,
+            reason: 'explicit-evaluation-path',
+            source: options.executionPurpose,
+            agentId: TRIAGE_AGENT_ID,
+            useCase: 'triage',
+            provider: backupProvider,
+            model: backupModel,
+          }
+        : await eligibilityResolver({
+            agentId: TRIAGE_AGENT_ID,
+            useCase: 'triage',
+            provider: backupProvider,
+            model: backupModel,
+            promptId: TRIAGE_AGENT_ID,
+          });
+      if (fallbackDecision?.eligible !== true) {
+        primaryErr.fallbackDecision = fallbackDecision || { eligible: false, reason: 'fallback_evaluation_unavailable' };
+        eventBus?.emit('triage.provider_failover_blocked', {
+          from: primaryProvider,
+          fromModel: primaryModel || '',
+          to: backupProvider,
+          toModel: backupModel || '',
+          code: 'FALLBACK_NOT_EVALUATED',
+          reason: fallbackDecision?.reason || 'fallback_evaluation_unavailable',
+          decision: primaryErr.fallbackDecision,
+          surfaceToUser: true,
+          displayMessage: `Triage fallback ${backupProvider} is not eligible for this prompt and workflow.`,
+        });
+        throw primaryErr;
+      }
+
       // The backup must clear its own pre-flight before we hand off, mirroring
       // the primary path so an unreachable backup degrades to the rule card
       // rather than hanging on a dead provider.
@@ -1475,6 +1526,8 @@ async function runTriage(text, options = {}) {
         toModel: backupModel || '',
         reason: primaryErr?.message || 'Primary triage provider failed',
         code: primaryErr?.code || 'TRIAGE_PROVIDER_FAILED',
+        eligible: true,
+        decision: fallbackDecision,
         surfaceToUser: true,
         displayMessage: `Triage primary ${primaryProvider} failed; failing over to ${backupProvider}`,
       });

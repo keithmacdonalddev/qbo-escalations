@@ -156,6 +156,7 @@ test('KB draft extraction saves a ProviderCallPackage and builds its result from
   const dispatchCalls = [];
 
   const result = await runKnowledgeBaseAgentDraftExtraction({
+    executionPurpose: 'provider-comparison',
     escalation,
     draftData: makeDraftData(),
     runtimePolicy: makePolicy(),
@@ -249,6 +250,7 @@ test('KB draft extraction fails over to the configured backup, which reads back 
   const calledProviders = [];
 
   const result = await runKnowledgeBaseAgentDraftExtraction({
+    executionPurpose: 'provider-comparison',
     escalation,
     draftData: makeDraftData(),
     runtimePolicy: makePolicy({ primaryProvider: 'lm-studio', primaryModel: 'local-kb-model' }),
@@ -285,6 +287,7 @@ test('KB draft extraction rejects when BOTH providers fail, leaving the determin
 
   await assert.rejects(
     runKnowledgeBaseAgentDraftExtraction({
+      executionPurpose: 'provider-comparison',
       escalation,
       draftData: makeDraftData(),
       runtimePolicy: makePolicy({ primaryProvider: 'lm-studio', primaryModel: 'local-kb-model' }),

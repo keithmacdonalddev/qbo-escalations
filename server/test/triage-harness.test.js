@@ -240,7 +240,7 @@ test('triage direct Anthropic body gates thinking + temperature by model and ext
     assert.ok(savedPackage, 'anthropic triage package saved');
     const payload = await extractTriageTextFromProviderPackage(savedPackage, fableResult.providerTrace);
     assert.equal(payload.text, TRIAGE_OUTPUT);
-    assert.equal(payload.sourcePath, 'response.parsedJson.content[type=text].text');
+    assert.equal(payload.sourcePath, 'resultHandoff.response.content[type=text]');
 
     // Sonnet 5: adaptive thinking, selected effort, and no sampling parameter.
     await runDirectTriageProviderCall({

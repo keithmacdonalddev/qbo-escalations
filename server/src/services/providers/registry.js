@@ -11,9 +11,8 @@ const {
   getProviderFamily: getCatalogProviderFamily,
   getProviderLabel: getCatalogProviderLabel,
   getProviderTransport: getCatalogProviderTransport,
-  getProviderModelId,
+  getProviderModelId: getCatalogProviderModelId,
   isValidProvider: catalogIsValidProvider,
-  normalizeProvider: normalizeCatalogProvider,
   getAlternateProvider: getCatalogAlternateProvider,
   getProviderOptions,
   getSelectableProviderIds,
@@ -55,8 +54,12 @@ function getServiceForTransport(transport) {
     case 'kimi':
       return remoteApiProviders.kimi;
     case 'claude':
-    default:
       return claude;
+    default: {
+      const err = new Error(`Unknown provider transport "${transport}".`);
+      err.code = 'UNKNOWN_PROVIDER_TRANSPORT';
+      throw err;
+    }
   }
 }
 
@@ -101,12 +104,16 @@ function getTimeoutEnvValue(transport, kind) {
           ? process.env.KIMI_PARSE_TIMEOUT_MS || process.env.MOONSHOT_PARSE_TIMEOUT_MS
           : process.env.KIMI_CHAT_TIMEOUT_MS || process.env.MOONSHOT_CHAT_TIMEOUT_MS;
     case 'claude':
-    default:
       return kind === 'transcribe'
         ? process.env.CLAUDE_TRANSCRIBE_TIMEOUT_MS
         : kind === 'parse'
           ? process.env.CLAUDE_PARSE_TIMEOUT_MS
           : process.env.CLAUDE_CHAT_TIMEOUT_MS;
+    default: {
+      const err = new Error(`Unknown provider transport "${transport}".`);
+      err.code = 'UNKNOWN_PROVIDER_TRANSPORT';
+      throw err;
+    }
   }
 }
 
@@ -114,7 +121,7 @@ const PROVIDER_DEFS = Object.freeze(
   PROVIDER_IDS.reduce((acc, id) => {
     const meta = getProviderMeta(id);
     const transport = meta?.transport || 'claude';
-    const model = getProviderModelId(id);
+    const model = getCatalogProviderModelId(id);
     const service = getServiceForTransport(transport);
     const catalogSupportsImageInput = typeof meta?.supportsImageInput === 'boolean'
       ? meta.supportsImageInput
@@ -185,8 +192,17 @@ function isValidProvider(provider) {
 
 function normalizeProvider(provider) {
   if (isValidProvider(provider)) return provider;
-  console.warn(`[registry] Unknown provider "${provider}", falling back to "${DEFAULT_PROVIDER}"`);
-  return normalizeCatalogProvider(provider);
+  const supplied = typeof provider === 'string' ? provider.trim() : '';
+  const err = new Error(
+    supplied
+      ? `Unknown provider "${supplied}". Choose one of: ${PROVIDER_IDS.join(', ')}.`
+      : `Provider is required. Choose one of: ${PROVIDER_IDS.join(', ')}.`
+  );
+  err.code = 'UNKNOWN_PROVIDER';
+  err.status = 400;
+  err.provider = supplied;
+  err.allowedProviderIds = [...PROVIDER_IDS];
+  throw err;
 }
 
 function getProvider(provider) {
@@ -211,15 +227,19 @@ function getProvider(provider) {
 }
 
 function getProviderLabel(provider) {
-  return getCatalogProviderLabel(provider);
+  return getCatalogProviderLabel(normalizeProvider(provider));
 }
 
 function getProviderFamily(provider) {
-  return getCatalogProviderFamily(provider);
+  return getCatalogProviderFamily(normalizeProvider(provider));
 }
 
 function getProviderTransport(provider) {
-  return getCatalogProviderTransport(provider);
+  return getCatalogProviderTransport(normalizeProvider(provider));
+}
+
+function getProviderModelId(provider) {
+  return getCatalogProviderModelId(normalizeProvider(provider));
 }
 
 function getAlternateProvider(provider) {

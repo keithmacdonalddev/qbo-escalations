@@ -5,7 +5,10 @@ const mongoose = require('mongoose');
 
 const ProviderCallPackage = require('../models/ProviderCallPackage');
 const { redactProviderCallPackage } = require('./provider-call-package-redaction');
-const { externalizeProviderCallPackagePayloads, sha256 } = require('./provider-call-package-payload-store');
+const { externalizeProviderCallPackagePayloads, removeProviderPayloadDirectory, sha256 } = require('./provider-call-package-payload-store');
+const { applyProviderCapturePolicy } = require('./provider-capture-policy');
+const { resolveProviderPromptHash } = require('./provider-reasoning-evidence');
+const { RETENTION_KEYS, resolveRetentionDays } = require('../lib/retention-config');
 
 const CAPTURE_VERSION = 'provider-harness-http-v0.1';
 const CLI_CAPTURE_VERSION = 'provider-harness-cli-v0.2';
@@ -15,8 +18,11 @@ const GEMINI_API_CAPTURE_VERSION = 'provider-harness-gemini-api-v0.1';
 const SCHEMA_VERSION = '0.1';
 const inFlightBackgroundRecords = new Set();
 
-// Evidence capture is ON by default: every provider call records its full
-// request/response as a ProviderCallPackage. Set
+// Evidence capture is ON by default: every provider call records a safe run
+// manifest. Callers must explicitly request an allowlisted
+// diagnostic/evaluation purpose to retain full request/response bodies;
+// forceCapture guarantees recording but grants no raw-traffic authority.
+// Provider reasoning remains bounded, labelled evidence in every mode. Set
 // ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE=false to explicitly disable; any other
 // value (including unset) leaves capture enabled, so a lost env line can no
 // longer silently kill the evidence layer.
@@ -1207,29 +1213,72 @@ async function recordProviderCallPackage(envelope, options = {}) {
     return { ok: false, skipped: true, reason: 'mongoose_not_connected' };
   }
 
+  const packageId = options.packageId || new mongoose.Types.ObjectId();
+  const payloadNow = options.now instanceof Date ? options.now : new Date();
   try {
-    const packageId = options.packageId || new mongoose.Types.ObjectId();
+    // Compute the prompt fingerprint before redaction, then pass only the hash
+    // into diagnostic evidence identity. The prompt itself remains governed by
+    // the existing capture policy and is never copied into reasoning evidence.
+    const requestedCaptureContext = options.captureContext || {};
+    const promptIdentity = resolveProviderPromptHash(envelope, requestedCaptureContext);
+    const evidenceCaptureContext = {
+      ...requestedCaptureContext,
+      evidenceIdentity: {
+        ...(requestedCaptureContext.evidenceIdentity || {}),
+        packageId: String(packageId),
+        ...(promptIdentity.promptHash ? promptIdentity : {}),
+      },
+    };
     const redacted = redactProviderCallPackage(envelope);
     redacted._id = packageId;
-    const prepared = await externalizeProviderCallPackagePayloads(redacted, {
+    const governed = applyProviderCapturePolicy(redacted, evidenceCaptureContext);
+    governed._id = packageId;
+    const payloadFields = Array.isArray(options.fields)
+      ? [...new Set([...options.fields, 'reasoningEvidence'])]
+      : undefined;
+    const prepared = await externalizeProviderCallPackagePayloads(governed, {
       packageId,
       maxInlineBytes: options.maxInlineBytes,
       payloadRoot: options.payloadRoot,
-      now: options.now,
-      fields: options.fields,
+      now: payloadNow,
+      fields: payloadFields,
       kindByField: options.kindByField,
     });
+
+    const retentionBase = options.now instanceof Date ? options.now : new Date();
+    prepared.expiresAt = new Date(
+      retentionBase.getTime() + resolveRetentionDays(RETENTION_KEYS.PROVIDER_CALL_PACKAGE) * 24 * 60 * 60 * 1000
+    );
 
     // Short-retention stamp for probe packages: override the schema's default
     // expiresAt (long forensic retention) so health-probe noise self-cleans
     // via the existing TTL index on expiresAt.
     if ((prepared.operation || envelope?.operation) === PROBE_OPERATION) {
-      prepared.expiresAt = new Date(Date.now() + resolveProbeTtlHours() * 60 * 60 * 1000);
+      prepared.expiresAt = new Date(retentionBase.getTime() + resolveProbeTtlHours() * 60 * 60 * 1000);
     }
+
+    prepared.storage = prepared.storage || {};
+    const hasExternalPayloads = Array.isArray(prepared.storage.externalPayloads)
+      && prepared.storage.externalPayloads.length > 0;
+    prepared.storage.externalRetention = {
+      state: hasExternalPayloads ? 'janitor-required' : 'not-applicable',
+      documentExpiresAt: prepared.expiresAt,
+      policyKey: RETENTION_KEYS.PROVIDER_CALL_PACKAGE,
+      cleanupImplemented: false,
+      janitorRequired: hasExternalPayloads,
+      orphanRisk: hasExternalPayloads,
+      note: hasExternalPayloads
+        ? 'MongoDB TTL does not delete external payload files. A payload janitor is required before this retention state can be considered complete.'
+        : 'No external payload files were created for this package.',
+    };
 
     const doc = await ProviderCallPackage.create(prepared);
     return { ok: true, id: String(doc._id) };
   } catch (err) {
+    await removeProviderPayloadDirectory(packageId, {
+      payloadRoot: options.payloadRoot,
+      now: payloadNow,
+    }).catch(() => {});
     return {
       ok: false,
       error: {
@@ -1241,10 +1290,24 @@ async function recordProviderCallPackage(envelope, options = {}) {
   }
 }
 
+function mergeCaptureContexts(...contexts) {
+  const valid = contexts.filter((context) => context && typeof context === 'object');
+  return {
+    ...valid.reduce((result, context) => ({ ...result, ...context }), {}),
+    metadata: valid.reduce((result, context) => ({
+      ...result,
+      ...(context.metadata && typeof context.metadata === 'object' ? context.metadata : {}),
+    }), {}),
+  };
+}
+
 async function recordHttpProviderCallPackage(input, options = {}) {
   try {
     const envelope = buildHttpProviderCallPackage(input);
-    return await recordProviderCallPackage(envelope, options);
+    return await recordProviderCallPackage(envelope, {
+      ...options,
+      captureContext: mergeCaptureContexts(input.context, input.captureContext, options.captureContext),
+    });
   } catch (err) {
     return {
       ok: false,
@@ -1303,7 +1366,10 @@ function cliPayloadOptions(options = {}) {
 async function recordCliProviderCallPackage(input, options = {}) {
   try {
     const envelope = buildCliProviderCallPackage(input);
-    return await recordProviderCallPackage(envelope, cliPayloadOptions(options));
+    return await recordProviderCallPackage(envelope, cliPayloadOptions({
+      ...options,
+      captureContext: mergeCaptureContexts(input.context, input.captureContext, options.captureContext),
+    }));
   } catch (err) {
     return {
       ok: false,
@@ -1388,7 +1454,10 @@ function geminiApiPayloadOptions(options = {}) {
 async function recordLmStudioProviderCallPackage(input, options = {}) {
   try {
     const envelope = buildLmStudioProviderCallPackage(input);
-    return await recordProviderCallPackage(envelope, lmStudioPayloadOptions(options));
+    return await recordProviderCallPackage(envelope, lmStudioPayloadOptions({
+      ...options,
+      captureContext: mergeCaptureContexts(input.context, input.captureContext, options.captureContext),
+    }));
   } catch (err) {
     return {
       ok: false,
@@ -1404,7 +1473,10 @@ async function recordLmStudioProviderCallPackage(input, options = {}) {
 async function recordLlmGatewayProviderCallPackage(input, options = {}) {
   try {
     const envelope = buildLlmGatewayProviderCallPackage(input);
-    return await recordProviderCallPackage(envelope, llmGatewayPayloadOptions(options));
+    return await recordProviderCallPackage(envelope, llmGatewayPayloadOptions({
+      ...options,
+      captureContext: mergeCaptureContexts(input.context, input.captureContext, options.captureContext),
+    }));
   } catch (err) {
     return {
       ok: false,
@@ -1420,7 +1492,10 @@ async function recordLlmGatewayProviderCallPackage(input, options = {}) {
 async function recordGeminiApiProviderCallPackage(input, options = {}) {
   try {
     const envelope = buildGeminiApiProviderCallPackage(input);
-    return await recordProviderCallPackage(envelope, geminiApiPayloadOptions(options));
+    return await recordProviderCallPackage(envelope, geminiApiPayloadOptions({
+      ...options,
+      captureContext: mergeCaptureContexts(input.context, input.captureContext, options.captureContext),
+    }));
   } catch (err) {
     return {
       ok: false,

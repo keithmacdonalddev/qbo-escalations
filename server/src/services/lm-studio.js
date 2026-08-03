@@ -521,6 +521,10 @@ function chat({ messages, systemPrompt, images, model, reasoningEffort, timeoutM
           callSite: 'lm-studio:chat',
           operation: 'chat',
           modelRequested: effectiveModel,
+          ...(typeof callerCaptureContext?.captureMode === 'string'
+            ? { captureMode: callerCaptureContext.captureMode } : {}),
+          ...(typeof callerCaptureContext?.capturePurpose === 'string'
+            ? { capturePurpose: callerCaptureContext.capturePurpose } : {}),
           // Caller-supplied evidence identity (conversationId/caseNumber/...)
           // recorded as ProviderCallPackage.metadata.
           ...(callerCaptureContext?.metadata && typeof callerCaptureContext.metadata === 'object'
@@ -806,6 +810,8 @@ async function parseEscalation(imageBase64OrText, options = {}) {
       helperName: 'jsonRequest',
     },
     modelRequested: effectiveModel,
+    ...(typeof options.captureMode === 'string' ? { captureMode: options.captureMode } : {}),
+    ...(typeof options.capturePurpose === 'string' ? { capturePurpose: options.capturePurpose } : {}),
   });
 
   if (res.statusCode !== 200) {
@@ -896,6 +902,8 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
       helperName: 'jsonRequest',
     },
     modelRequested: effectiveModel,
+    ...(typeof options.captureMode === 'string' ? { captureMode: options.captureMode } : {}),
+    ...(typeof options.capturePurpose === 'string' ? { capturePurpose: options.capturePurpose } : {}),
   });
 
   if (res.statusCode !== 200) {

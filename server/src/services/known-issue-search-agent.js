@@ -4,6 +4,7 @@ const { getRenderedAgentPrompt } = require('../lib/agent-prompt-store');
 const { runAgentToolLoop } = require('./agent-tool-loop');
 const { getProviderModelId } = require('./providers/catalog');
 const { createThinkingCoalescer } = require('../lib/thinking-coalescer');
+const { getAgentIdentity } = require('./agent-identity-service');
 
 const KNOWN_ISSUE_AGENT_ID = 'known-issue-search-agent';
 const KNOWN_ISSUE_AGENT_NAME = 'INV Search Agent';
@@ -364,6 +365,26 @@ async function runKnownIssueSearchAgent({
     return buildUnavailableResult('No validated parsed escalation fields were available for known issue search.');
   }
 
+  let identity;
+  try {
+    identity = await getAgentIdentity(KNOWN_ISSUE_AGENT_ID);
+  } catch (err) {
+    return buildUnavailableResult('INV Search Agent availability could not be verified.', {
+      error: { code: 'AGENT_STATE_UNAVAILABLE', message: err?.message || 'Agent state unavailable' },
+      validationIssues: ['known_issue_agent_state_unavailable'],
+    });
+  }
+  if (!identity || identity.enabled === false) {
+    await emitStatus?.({
+      message: `${KNOWN_ISSUE_AGENT_NAME} is disabled and did not call a provider or tool.`,
+      code: 'AGENT_DISABLED',
+    });
+    return buildUnavailableResult(`${KNOWN_ISSUE_AGENT_NAME} is disabled. Re-enable it from Agents before running known issue search.`, {
+      error: { code: 'AGENT_DISABLED', message: `${KNOWN_ISSUE_AGENT_NAME} is disabled.` },
+      validationIssues: ['known_issue_agent_disabled'],
+    });
+  }
+
   let streamingEmitted = false;
   const thinkingCoalescer = createThinkingCoalescer((delta) => {
     eventBus?.emit('llm.thinking', {
@@ -400,6 +421,7 @@ async function runKnownIssueSearchAgent({
         content: buildKnownIssueSearchPromptInput({ parserText, parseFields }),
       }],
       timeoutMs,
+      toolUseCase: 'known-issue-search',
       runtimePolicy: {
         mode: policy.mode,
         primaryProvider: policy.primaryProvider,
@@ -410,6 +432,10 @@ async function runKnownIssueSearchAgent({
         serviceTier: policy.serviceTier || '',
       },
       allowedToolNames: KNOWN_ISSUE_ALLOWED_TOOLS,
+      captureMetadata: {
+        agentId: KNOWN_ISSUE_AGENT_ID,
+        surface: 'known-issue-search',
+      },
       includeActionParamsInResults: true,
       onActions: ({ results }) => {
         if (Array.isArray(results)) {

@@ -885,7 +885,7 @@ test('publish kill-switch forces markdown export off for the knowledge records r
 
 test('agent-chat applies a kb.updateDraft edit and returns appliedChanges with prior values', async () => {
   // The KB sidebar chat now runs through the tool loop. We stub the chat so the
-  // model emits an ACTION line that calls kb.updateDraft on turn 1, then a plain
+  // model emits the structured kb.updateDraft envelope on turn 1, then a plain
   // final answer on turn 2. The route must surface appliedChanges (with prior
   // values) and the field must be saved — proving the agent can actually edit.
   const previousStubbed = process.env.HARNESS_PROVIDERS_STUBBED;
@@ -895,7 +895,7 @@ test('agent-chat applies a kb.updateDraft edit and returns appliedChanges with p
     turn += 1;
     if (turn === 1) {
       onDone(
-        'I will fill in the customer goal.\nACTION: {"tool": "kb.updateDraft", "params": {"fields": {"customerGoal": "Confirm the archived employer payroll summary after filing."}, "mode": "explicit"}}',
+        '{"type":"agent_tool_actions","version":"1","mode":"execute","actions":[{"tool":"kb.updateDraft","params":{"fields":{"customerGoal":"Confirm the archived employer payroll summary after filing."},"mode":"explicit"}}]}',
         { model: 'claude-test', usageAvailable: true }
       );
     } else {

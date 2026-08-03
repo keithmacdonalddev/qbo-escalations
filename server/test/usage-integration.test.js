@@ -289,9 +289,9 @@ test('POST /api/chat (single, error) → UsageLog status=error, partial usage', 
 });
 
 // ================================================================
-//  /api/chat — fallback mode: primary fails → fallback succeeds
+//  /api/chat — product fallback is blocked without evaluation authority
 // ================================================================
-test('POST /api/chat (fallback) → UsageLog for primary error + fallback ok', async () => {
+test('POST /api/chat (fallback) → primary error is logged and unevaluated backup is not dispatched', async () => {
   currentClaudeStub = makeFakeStreamError(null);
   currentCodexStub = makeFakeStreamOk(FAKE_USAGE_CODEX);
 
@@ -305,23 +305,27 @@ test('POST /api/chat (fallback) → UsageLog for primary error + fallback ok', a
     })
     .expect(200);
 
-  assert.ok(parseSseEvents(res.text).find((e) => e.event === 'done'), 'done event via fallback');
+  const events = parseSseEvents(res.text);
+  const fallbackEvent = events.find((e) => e.event === 'fallback');
+  assert.ok(fallbackEvent, 'blocked fallback decision');
+  const fallbackData = JSON.parse(fallbackEvent.data);
+  assert.equal(fallbackData.blocked, true);
+  assert.equal(fallbackData.decision?.reason, 'server_evaluation_authority_not_implemented');
+  assert.ok(events.find((e) => e.event === 'error'), 'terminal error event');
+  assert.equal(events.some((e) => e.event === 'done'), false);
 
   await drainPendingWrites(5000);
   resetDrain();
 
   const docs = await UsageLog.find({ service: 'chat' }).sort({ attemptIndex: 1 }).lean();
-  assert.ok(docs.length >= 2, 'UsageLog for both attempts');
+  assert.equal(docs.length, 1, 'only the authorized primary attempt is logged');
 
   const primary = docs.find((d) => d.provider === 'claude');
   assert.ok(primary, 'primary attempt log');
   assert.equal(primary.status, 'error');
 
   const fallback = docs.find((d) => d.provider === 'gpt-5.5');
-  assert.ok(fallback, 'fallback attempt log');
-  assert.equal(fallback.status, 'ok');
-  assert.equal(fallback.inputTokens, 300);
-  assert.equal(fallback.outputTokens, 100);
+  assert.equal(fallback, undefined, 'blocked backup has no attempt log');
 });
 
 // ================================================================

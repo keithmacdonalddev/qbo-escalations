@@ -75,7 +75,7 @@ http.get = function patchedGet(...args) {
 };
 
 const {
-  parseImage,
+  parseImage: parseImageService,
   checkProviderAvailability,
   clearProviderAvailabilityCache,
   normalizeBase64,
@@ -85,6 +85,14 @@ const {
   KEYS_FILE,
   validateRemoteProvider,
 } = require('../src/services/image-parser');
+
+function parseImage(image, options = {}) {
+  return parseImageService(image, {
+    captureMode: 'diagnostic',
+    capturePurpose: 'provider-package-contract-test',
+    ...options,
+  });
+}
 
 test.beforeEach(() => {
   clearProviderAvailabilityCache();
@@ -138,6 +146,8 @@ test('LLM Gateway harness returns only a package trace while full response is sa
         callSite: 'test:llm-gateway-direct',
         operation: 'chat-completion',
         forceCapture: true,
+        captureMode: 'diagnostic',
+        capturePurpose: 'provider-package-contract-test',
       },
     });
 

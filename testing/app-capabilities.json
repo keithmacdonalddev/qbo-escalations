@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "lastHumanReviewDate": "2026-07-23",
+  "lastHumanReviewDate": "2026-07-24",
   "knownGlobalGaps": [
     "The five dedicated QBO Chat V5 browser journeys are structurally implemented but have not passed repeatedly because native browser transport cannot currently open even a static local known-good page within its hard bound.",
     "There is no broad automated accessibility audit, visual-regression suite, hosted multi-user run, mutation testing, or large-list browser pressure profile.",
@@ -14,9 +14,11 @@
         "reason": "Pinned server tests reviewed on 2026-07-22. New server tests must be deliberately mapped or added here with review context.",
         "paths": [
           "server/test/abort.test.js",
+          "server/test/agent-architecture-contracts.test.js",
           "server/test/agent-default-failover.test.js",
           "server/test/agent-identities-health.test.js",
           "server/test/agent-identities-registry.test.js",
+          "server/test/agent-run-service.test.js",
           "server/test/ai-management.test.js",
           "server/test/anthropic-provider-harness.test.js",
           "server/test/anthropic-thinking.test.js",
@@ -95,14 +97,18 @@
           "server/test/provider-cli-helpers.test.js",
           "server/test/provider-package-store-health.test.js",
           "server/test/provider-packages-routes.test.js",
+          "server/test/provider-payload-loader.test.js",
           "server/test/provider-spending.test.js",
           "server/test/provider-usage-contract.test.js",
           "server/test/rate-limit.test.js",
           "server/test/realtime-websocket.test.js",
           "server/test/remote-api-providers.test.js",
           "server/test/room-workspace-adapter-utils.test.js",
+          "server/test/room-memory-context-hardening.test.js",
           "server/test/secret-fields-select.test.js",
           "server/test/server-test-runner.test.js",
+          "server/test/shared-agent-tool-authority.test.js",
+          "server/test/knowledgebase-agent-tool-loop.test.js",
           "server/test/shared-agent-tools.test.js",
           "server/test/sse-parser.test.js",
           "server/test/startup-controls.test.js",
@@ -122,7 +128,10 @@
           "server/test/usage-routes.test.js",
           "server/test/usage-writer-integration.test.js",
           "server/test/usage-writer.test.js",
+          "server/test/workspace-action-authority-hardening.test.js",
           "server/test/workspace-agent-policy.test.js",
+          "server/test/workspace-context-read-only.test.js",
+          "server/test/workspace-monitor-authority.test.js",
           "server/test/work-center-events.test.js",
           "server/test/work-center-websocket.test.js"
         ]
@@ -374,19 +383,55 @@
       "lastHumanReviewDate": "2026-07-23"
     },
     {
+      "id": "shared-agent-tool-authority",
+      "label": "Shared-agent server tool authority",
+      "userOutcome": "Every shared agent receives a versioned least-privilege capability set for its identity and use case, and can execute only the exact server-assigned subset for that run without inheriting Workspace email, calendar, memory, automation, shipment, profile-write, or unrelated data-read authority.",
+      "risk": "critical",
+      "owner": "Coordinated agent system",
+      "sourcePaths": [
+        "server/src/services/agent-tool-capabilities.js",
+        "server/src/services/agent-tool-loop.js",
+        "server/src/services/workspace-request-helpers.js",
+        "server/src/services/workspace-tools/handler-registry.js",
+        "server/src/services/shared-agent-tools.js",
+        "server/src/services/known-issue-search-agent.js",
+        "server/src/routes/chat/send.js",
+        "server/src/services/room-orchestrator.js",
+        "server/src/services/room-context-builder.js",
+        "server/src/services/workspace-action-policy.js",
+        "server/src/services/knowledgebase-agent-tool-loop.js"
+      ],
+      "requiredCheckTypes": ["unit", "server"],
+      "evidence": [
+        { "type": "unit", "groupId": "server-suite", "paths": ["server/test/shared-agent-tool-authority.test.js", "server/test/knowledgebase-agent-tool-loop.test.js"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/shared-agent-tool-authority.test.js", "server/test/knowledgebase-agent-tool-loop.test.js", "server/test/known-issue-search-agent.test.js", "server/test/shared-agent-tools.test.js", "server/test/chat-analyst-failover.test.js"] }
+      ],
+      "knownGaps": ["No browser or live-provider check is mapped because guessed-tool rejection occurs before those external layers; provider and connected-service calls are intentionally stubbed in this authority test."],
+      "lastHumanReviewDate": "2026-07-24"
+    },
+    {
       "id": "workspace-primary-operations-agent",
       "label": "Workspace Agent email and calendar operations",
-      "userOutcome": "The primary Workspace Agent proactively monitors and organizes email and calendar work, pauses consequential actions for exact user confirmation, honors its enabled state everywhere, and exposes durable evidence in a complete profile.",
+      "userOutcome": "The primary Workspace Agent treats email, calendar, current-view, alert, and saved-memory content as bounded untrusted evidence; saves durable memory automatically only from explicit user statements; surfaces background suggestions without mutating Gmail; executes requested actions only through account-aware policy and evidence checks; and pauses consequential actions for exact user confirmation.",
       "risk": "critical",
       "owner": "Workspace Agent",
       "sourcePaths": [
         "server/src/services/workspace-action-policy.js",
         "server/src/services/workspace-request-helpers.js",
+        "server/src/services/workspace-action-loop.js",
+        "server/src/services/workspace-tools/execution-state.js",
+        "server/src/services/workspace-context-builder.js",
+        "server/src/services/workspace-prompt-builder.js",
+        "server/src/services/workspace-memory-extraction.js",
+        "server/src/services/workspace-memory.js",
+        "server/src/services/workspace-alerts.js",
         "server/src/services/workspace-monitor.js",
         "server/src/services/workspace-scheduler.js",
         "server/src/routes/workspace/profile.js",
+        "server/src/routes/workspace/ai.js",
         "server/src/models/WorkspaceActionApproval.js",
         "server/src/models/WorkspaceActionRecord.js",
+        "server/src/models/WorkspaceMemory.js",
         "client/src/components/AgentsView.jsx",
         "client/src/components/agentProfileTabs.js",
         "client/src/components/WorkspaceAgentOperationsTab.jsx",
@@ -396,16 +441,54 @@
       "requiredCheckTypes": ["component", "server", "stress", "browser"],
       "evidence": [
         { "type": "component", "groupId": "client-components", "paths": ["client/src/components/agentProfileTabs.test.js", "client/src/components/WorkspaceAgentOperationsTab.test.jsx"] },
-        { "type": "server", "groupId": "server-suite", "paths": ["server/test/workspace-agent-policy.test.js"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/workspace-agent-policy.test.js", "server/test/workspace-action-authority-hardening.test.js", "server/test/workspace-context-read-only.test.js", "server/test/workspace-monitor-authority.test.js"] },
         { "type": "stress", "groupId": "all-stress-slices", "paths": ["stress-testing/slices/workspace-assistant/harness/run.js"] }
       ],
       "knownGaps": [
         "The deterministic permission harness intentionally performs no external Gmail or Calendar mutation.",
-        "The standard Workspace profile tabs and non-blocking unavailable-server state were browser-verified on 2026-07-23; live proactive controls still require the current Workspace profile route to be the process serving the app.",
+        "Background monitoring is suggestion-only until a centralized account-aware executor with a durable cross-process lease is implemented.",
+        "The standard Workspace profile tabs and non-blocking unavailable-server state were browser-verified on 2026-07-23. The changed authority copy and effective tool counts were browser-verified on 2026-07-24 against the already-running local app with no console errors; live proactive controls still require the current Workspace profile route to be the process serving the app.",
         "A trusted real-browser run still needs to prove a confirmation preview, exact user approval, external execution receipt, and durable profile evidence against a controlled connected-service account.",
-        "Background-monitor and daily-briefing timing still need clock-controlled stress fixtures."
+        "Background-monitor observation and daily-briefing timing still need clock-controlled stress fixtures."
       ],
-      "lastHumanReviewDate": "2026-07-23"
+      "lastHumanReviewDate": "2026-07-24"
+    },
+    {
+      "id": "agent-execution-safety",
+      "label": "Agent execution evidence and prompt safety",
+      "userOutcome": "Agent requests keep external and peer content untrusted, respect final prompt limits, retain bounded provider reasoning for evaluation, store only integrity-checked product-result handoffs by default, and refuse unevaluated production fallback or unevidenced durable-run success.",
+      "risk": "critical",
+      "owner": "Coordinated agent system",
+      "sourcePaths": [
+        "server/src/lib/agent-output-contract.js",
+        "server/src/lib/chat-context-builder.js",
+        "server/src/lib/chat-guardrails.js",
+        "server/src/models/AgentRun.js",
+        "server/src/models/ProviderCallPackage.js",
+        "server/src/routes/chat/send.js",
+        "server/src/routes/provider-packages.js",
+        "server/src/services/agent-evaluation-contract.js",
+        "server/src/services/agent-run-service.js",
+        "server/src/services/chat-orchestrator.js",
+        "server/src/services/provider-call-package-recorder.js",
+        "server/src/services/provider-capture-policy.js",
+        "server/src/services/provider-payload-loader.js",
+        "server/src/services/provider-reasoning-evidence.js",
+        "server/src/services/room-context-builder.js",
+        "server/src/services/room-memory.js"
+      ],
+      "requiredCheckTypes": ["unit", "server"],
+      "evidence": [
+        { "type": "unit", "groupId": "server-suite", "paths": ["server/test/agent-architecture-contracts.test.js", "server/test/agent-run-service.test.js"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/provider-payload-loader.test.js", "server/test/room-memory-context-hardening.test.js", "server/test/provider-packages-routes.test.js", "server/test/chat-orchestrator.test.js"] }
+      ],
+      "knownGaps": [
+        "AgentRun is a tested persistence and lease foundation but is not yet wired into live agent execution, and repository-owned result evidence verification is not implemented.",
+        "Server-owned evaluation authority is not implemented, so ordinary product fallback intentionally remains disabled while diagnostic and provider-comparison harness runs remain available.",
+        "Provider reasoning remains available for prompt and model evaluation, but immutable cross-attempt reasoning identity and a scheduled orphan-payload janitor are not yet implemented.",
+        "No live-provider or repeated browser acceptance run is mapped to this capability; the checks use deterministic provider fixtures and local persistence contracts."
+      ],
+      "lastHumanReviewDate": "2026-07-24"
     },
     {
       "id": "provider-controls",
@@ -450,7 +533,7 @@
       "knownGaps": [
         "The deterministic fast checks, safe single-retry boundary, redacted diagnostics, read-only status path, deep-check boundaries, shell-free browser opening, redirected color handling, Windows npm invocation, shutdown reporting, timeout cleanup, and focused server status contracts are covered. Paid/external deep checks intentionally do not run in the automated suite; they require an operator-invoked controlled account check. The user completed an operator-observed friendly launcher start on 2026-07-23, while the 2026-07-24 quality-of-life output still needs its next operator-visible startup and Ctrl+C confirmation."
       ],
-      "lastHumanReviewDate": "2026-07-23"
+      "lastHumanReviewDate": "2026-07-24"
     },
     {
       "id": "request-diagnostics",

@@ -353,7 +353,10 @@ test('recordLmStudioProviderCallPackage persists and redacts LM Studio packages'
       apiKey: 'request-secret',
     },
     responseHeaders: { 'set-cookie': 'sid=response-secret' },
-  }), { log: false });
+  }), {
+    log: false,
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
+  });
 
   assert.equal(result.ok, true);
   const saved = await ProviderCallPackage.findById(result.id).lean();
@@ -381,6 +384,7 @@ test('recordLmStudioProviderCallPackage externalizes large LM Studio payloads wi
     maxInlineBytes: 64,
     payloadRoot,
     now: new Date('2026-05-21T12:00:00.000Z'),
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
   });
 
   try {
@@ -388,6 +392,9 @@ test('recordLmStudioProviderCallPackage externalizes large LM Studio payloads wi
     const saved = await ProviderCallPackage.findById(result.id).lean();
     assert.equal(saved.storage.truncated, false);
     assert.ok(saved.storage.externalPayloads.length > 0);
+    assert.equal(saved.storage.externalRetention.state, 'janitor-required');
+    assert.equal(saved.storage.externalRetention.cleanupImplemented, false);
+    assert.equal(saved.storage.externalRetention.orphanRisk, true);
     assert.equal(saved.lmStudio.request.bodyText, null);
     assert.ok(saved.lmStudio.request.bodyTextPayloadRef);
     assert.equal(saved.lmStudio.request.bodyJson, null);

@@ -39,6 +39,7 @@ async function detectAlerts(options = {}) {
       timeMin,
       timeMax: time48h,
       maxResults: 50,
+      account: options.account || undefined,
     }).catch(err => {
       console.warn('[workspace-alerts] calendar.listEvents failed:', err.message);
       return null;
@@ -46,6 +47,7 @@ async function detectAlerts(options = {}) {
     options.email === false ? Promise.resolve(null) : gmail.listMessages({
       q: 'is:starred is:unread',
       maxResults: 20,
+      accountEmail: options.account || undefined,
     }).catch(err => {
       console.warn('[workspace-alerts] gmail.listMessages failed:', err.message);
       return null;

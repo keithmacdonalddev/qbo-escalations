@@ -13,22 +13,24 @@ const GmailAuth = require('../models/GmailAuth');
 const labelCache = require('../lib/label-cache');
 const WorkspaceActivity = require('../models/WorkspaceActivity');
 const { observeBestEffort } = require('../lib/best-effort');
-const { getWorkspaceAuthority, recordWorkspaceAction } = require('./workspace-action-policy');
+const { getWorkspaceAuthority } = require('./workspace-action-policy');
 
 // ---------------------------------------------------------------------------
 // Workspace Background Monitor
 //
 // Singleton service that runs on a timer and pushes live alerts/nudges to
-// connected SSE clients. Acts as an autonomous executive assistant that:
+// connected SSE clients. It currently observes and suggests; external Gmail
+// changes remain behind the request-time policy/approval/evidence executor.
+// The monitor:
 //   - Detects NEW or CHANGED alerts (fingerprint-based change detection)
 //   - Detects resolved alerts that disappear between ticks
-//   - Auto-labels categorizable emails via executeCategorization
-//   - Executes silent-tier and notify-tier auto-action rules
+//   - Suggests categorizable emails and matched auto-action rules
 //   - Saves entity facts to workspace memory
-//   - Broadcasts work-completed summaries and labels-changed events
+//   - Broadcasts observation summaries and nudges
 //   - Maintains SSE connections with 30s heartbeats
 //
-// This service executes pre-approved work autonomously between user chats.
+// Direct external writes stay disabled until a centralized account-aware
+// executor has durable cross-process leasing/idempotency.
 // ---------------------------------------------------------------------------
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;      // 5 minutes between full scans
@@ -72,40 +74,28 @@ function persistActivity(entry, context) {
   });
 }
 
-async function recordBackgroundEvidence(actions = [], source = 'workspace-monitor') {
-  const toolByAction = {
-    archived: 'gmail.archive',
-    'marked-read': 'gmail.markRead',
-    labeled: 'gmail.label',
-  };
-  await Promise.all(actions
-    .filter((item) => item && item.action !== 'failed')
-    .map((item) => recordWorkspaceAction({
-      tool: toolByAction[item.action] || 'gmail.batchModify',
-      params: { messageId: item.messageId || '', label: item.label || '' },
-      policyDecision: 'allowed',
-      status: 'ok',
-      source,
-      surface: 'workspace-monitor',
-      resultSummary: item.subject || item.action || 'Background email organization completed.',
-    })));
-}
-
 /**
  * Resolve the primary Gmail account email for background monitor work.
  * Caches the result for 30 minutes to avoid DB lookups on every tick.
  * Returns null if no Gmail account is connected (logs a clear warning).
  */
-async function getMonitorAccount() {
+async function getMonitorAccount(policy = {}) {
   const now = Date.now();
-  if (_monitorAccountEmail && (now - _monitorAccountCheckedAt) < ACCOUNT_CACHE_TTL_MS) {
+  const allowedAccounts = Array.isArray(policy.allowedAccounts)
+    ? policy.allowedAccounts.map((email) => String(email || '').trim().toLowerCase()).filter(Boolean)
+    : [];
+  const cachedAllowed = allowedAccounts.length === 0 || allowedAccounts.includes(_monitorAccountEmail);
+  if (_monitorAccountEmail && cachedAllowed && (now - _monitorAccountCheckedAt) < ACCOUNT_CACHE_TTL_MS) {
     return _monitorAccountEmail;
   }
 
   try {
-    const primary = await GmailAuth.getPrimary();
-    if (primary && primary.email) {
-      _monitorAccountEmail = primary.email;
+    const accounts = await GmailAuth.getAll();
+    const selected = allowedAccounts.length > 0
+      ? accounts.find((account) => allowedAccounts.includes(String(account?.email || '').trim().toLowerCase()))
+      : accounts[0];
+    if (selected && selected.email) {
+      _monitorAccountEmail = String(selected.email).trim().toLowerCase();
       _monitorAccountCheckedAt = now;
       return _monitorAccountEmail;
     }
@@ -113,7 +103,7 @@ async function getMonitorAccount() {
     // No account found
     _monitorAccountEmail = null;
     _monitorAccountCheckedAt = now;
-    console.warn('[workspace-monitor] No Gmail account connected — skipping gmail-dependent background work. Connect a Gmail account in Settings to enable email monitoring.');
+    console.warn('[workspace-monitor] No connected Google account is permitted for background observation — skipping account-dependent work.');
     return null;
   } catch (err) {
     console.error('[workspace-monitor] Failed to resolve Gmail account:', err.message);
@@ -151,12 +141,14 @@ async function tick() {
       return;
     }
     _lastPolicySkipReason = null;
+    const observationAccount = await getMonitorAccount(authority.policy);
     // 1. Detect alerts from calendar + email sources
     let currentAlerts = [];
     try {
       currentAlerts = await detectAlerts({
-        email: authority.policy.emailMonitoring,
-        calendar: authority.policy.calendarMonitoring,
+        email: authority.policy.emailMonitoring && Boolean(observationAccount),
+        calendar: authority.policy.calendarMonitoring && Boolean(observationAccount),
+        account: observationAccount,
       });
     } catch (err) {
       console.error('[workspace-monitor] detectAlerts error:', err.message);
@@ -303,7 +295,9 @@ async function executeBackgroundWork(policy = {}) {
   };
 
   // Resolve the monitor's Gmail account — skip all email work if not connected
-  const accountEmail = policy.emailMonitoring === false ? null : await getMonitorAccount();
+  const accountEmail = (policy.emailMonitoring === false && policy.calendarMonitoring === false)
+    ? null
+    : await getMonitorAccount(policy);
   if (!accountEmail) {
     // Still try entity detection with calendar-only data below
   }
@@ -360,120 +354,17 @@ async function executeBackgroundWork(policy = {}) {
     }
   }
 
-  // --- Step A: Auto-label categorizable emails ---
-  if (policy.emailOrganization !== false && inboxMessages.length > 0) {
-    try {
-      const labelIdMap = await labelCache.getLabelMap(gmail).catch(() => null);
-      const categorizableGroups = findCategorizableEmails(inboxMessages, labelIdMap);
-      if (categorizableGroups.length > 0) {
-        const catResult = await autoActions.executeCategorization(categorizableGroups, gmail);
-        if (catResult.executed > 0) {
-          workSummary.labelsApplied = catResult.executed;
-          workSummary._labeledActions = catResult.actions || [];
-          await recordBackgroundEvidence(catResult.actions, 'workspace-auto-categorization');
-          console.log(`[workspace-monitor] auto-labeled ${catResult.executed} emails`);
-          // Persist for offline clients
-          persistActivity({
-            type: 'labels-applied',
-            summary: `Labeled ${catResult.executed} email${catResult.executed > 1 ? 's' : ''} and moved to folders`,
-            details: { actions: catResult.actions },
-          }, 'auto-categorization');
-          // Tell clients to refresh their inbox — labels changed
-          broadcast('labels-changed', {
-            labelsApplied: catResult.executed,
-            actions: catResult.actions,
-            timestamp: new Date().toISOString(),
-          });
-        }
-      }
-    } catch (err) {
-      console.error('[workspace-monitor] auto-categorization error:', err.message);
-    }
-  }
+  // Background observation may propose work, but it must not mutate Gmail
+  // directly. The former auto-categorization/silent/notify calls bypassed the
+  // effective-account allowlist, approval policy, durable pre-action evidence,
+  // and any cross-process lease. checkForNudges() below keeps the useful
+  // suggestions visible until a separately authorized executor can run them.
 
-  // --- Step B: Execute silent-tier auto-actions ---
-  if (policy.emailOrganization !== false && inboxMessages.length > 0) {
-    const msgsWithLabels = inboxMessages.filter(m => m.labels);
-    if (msgsWithLabels.length > 0) {
-      // Silent actions — execute and forget
-      try {
-        const silentResult = await autoActions.executeSilentActions(msgsWithLabels);
-        if (silentResult.executed > 0) {
-          workSummary.silentActionsRun = silentResult.executed;
-          await recordBackgroundEvidence(silentResult.actions, 'workspace-silent-rule');
-          console.log(`[workspace-monitor] executed ${silentResult.executed} silent auto-actions`);
-          // Persist for offline clients
-          persistActivity({
-            type: 'silent-action',
-            summary: `Auto-cleanup: ${silentResult.executed} email${silentResult.executed > 1 ? 's' : ''} archived/marked read`,
-            details: { actions: silentResult.actions },
-          }, 'silent auto-actions');
-          // Silent actions may modify labels (archive, mark-read) — notify clients
-          broadcast('labels-changed', {
-            labelsApplied: silentResult.executed,
-            actions: silentResult.actions,
-            timestamp: new Date().toISOString(),
-          });
-        }
-      } catch (err) {
-        console.error('[workspace-monitor] silent auto-actions error:', err.message);
-      }
-
-      // Notify-tier actions — execute and report
-      try {
-        const notifyResult = await autoActions.executeNotifyActions(msgsWithLabels);
-        if (notifyResult.executed > 0) {
-          workSummary.notifyActionsRun = notifyResult.executed;
-          await recordBackgroundEvidence(notifyResult.actions, 'workspace-notify-rule');
-          console.log(`[workspace-monitor] executed ${notifyResult.executed} notify auto-actions`);
-          // Persist for offline clients
-          persistActivity({
-            type: 'notify-action',
-            summary: `Executed ${notifyResult.executed} auto-action${notifyResult.executed > 1 ? 's' : ''} (notify tier)`,
-            details: { actions: notifyResult.actions },
-          }, 'notify auto-actions');
-
-          // Build human-readable descriptions for each action
-          const actionDescriptions = [];
-          for (const a of notifyResult.actions) {
-            if (a.action === 'failed') continue;
-            const desc = a.action === 'archived' ? 'Archived'
-              : a.action === 'marked-read' ? 'Marked as read'
-              : a.action === 'labeled' ? `Labeled as "${a.label}"`
-              : a.action === 'trashed' ? 'Trashed'
-              : `Performed ${a.action} on`;
-            actionDescriptions.push(`${desc}: "${a.subject}" (rule: ${a.ruleName || a.rule})`);
-          }
-
-          // Broadcast notify actions as a nudge so the user sees what happened
-          if (actionDescriptions.length > 0) {
-            broadcast('nudge', {
-              id: `notify-actions:${Date.now()}`,
-              type: 'auto-actions-executed',
-              title: `Executed ${notifyResult.executed} auto-action${notifyResult.executed > 1 ? 's' : ''}`,
-              detail: actionDescriptions.join('\n'),
-              dismissable: true,
-              detectedAt: new Date().toISOString(),
-            });
-            // Labels likely changed — trigger inbox refresh
-            broadcast('labels-changed', {
-              labelsApplied: notifyResult.executed,
-              actions: notifyResult.actions,
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }
-      } catch (err) {
-        console.error('[workspace-monitor] notify auto-actions error:', err.message);
-      }
-    }
-  }
-
-  // --- Step C: Detect and save entity facts ---
+  // --- Step C: Detect entity relationships for this observation only ---
   try {
     // Get calendar events for entity linking (next 48 hours)
     let todayEvents = [];
-    if (policy.calendarMonitoring !== false) {
+    if (policy.calendarMonitoring !== false && accountEmail) {
       const attemptedAt = new Date().toISOString();
       _lastCalendarCheck = {
         ..._lastCalendarCheck,
@@ -488,6 +379,7 @@ async function executeBackgroundWork(policy = {}) {
           timeMin: acNow.toISOString(),
           timeMax: new Date(acNow.getTime() + 48 * 60 * 60 * 1000).toISOString(),
           maxResults: 20,
+          account: accountEmail,
         });
         if (todayEventsRes?.ok) {
           todayEvents = todayEventsRes.events || [];
@@ -518,39 +410,10 @@ async function executeBackgroundWork(policy = {}) {
       _lastCalendarCheck = { ..._lastCalendarCheck, status: 'disabled', lastError: null };
     }
 
-    const freshEntities = detectEntities(inboxMessages, todayEvents);
-
-    if (freshEntities.length > 0) {
-      // Upsert entities to MongoDB
-      try {
-        const WorkspaceEntity = require('../models/WorkspaceEntity');
-        for (const entity of freshEntities) {
-          try {
-            await WorkspaceEntity.upsertDetected(entity);
-          } catch { /* best effort per entity */ }
-        }
-      } catch {
-        // WorkspaceEntity model might not exist — non-fatal
-      }
-
-      // Save entity facts to workspace memory
-      try {
-        const workspaceMemory = require('./workspace-memory');
-        const entitySaveResult = await autoActions.autoSaveEntityFacts(freshEntities, workspaceMemory);
-        if (entitySaveResult.saved > 0) {
-          workSummary.entitiesSaved = entitySaveResult.saved;
-          console.log(`[workspace-monitor] saved ${entitySaveResult.saved} entity facts`);
-          // Persist for offline clients
-          persistActivity({
-            type: 'entity-saved',
-            summary: `Saved ${entitySaveResult.saved} entity fact${entitySaveResult.saved > 1 ? 's' : ''} to workspace memory`,
-            details: { saved: entitySaveResult.saved },
-          }, 'entity fact saves');
-        }
-      } catch (err) {
-        console.error('[workspace-monitor] entity fact save error:', err.message);
-      }
-    }
+    // Entity detection is intentionally observation-only here. Persisting
+    // email/calendar-derived entities or memory requires a separately governed
+    // workflow with provenance and cross-process idempotency.
+    detectEntities(inboxMessages, todayEvents);
   } catch (err) {
     console.error('[workspace-monitor] entity detection error:', err.message);
   }
@@ -569,21 +432,21 @@ async function executeBackgroundWork(policy = {}) {
   const labeledDomains = new Set((workSummary.labelsApplied > 0 && workSummary._labeledActions)
     ? workSummary._labeledActions.map(a => a.domain)
     : []);
-  await checkForNudges(inboxMessages, labeledDomains);
+  await checkForNudges(inboxMessages, labeledDomains, policy);
 }
 
 // ---------------------------------------------------------------------------
 // Nudge detection — proactive suggestions (not urgent, just helpful)
 // ---------------------------------------------------------------------------
 
-async function checkForNudges(preloadedMessages, labeledDomains = new Set()) {
+async function checkForNudges(preloadedMessages, labeledDomains = new Set(), policy = {}) {
   const nudges = [];
 
   try {
     // Use preloaded messages if available, otherwise fetch fresh
     let messages = preloadedMessages;
     if (!messages || messages.length === 0) {
-      const acctEmail = await getMonitorAccount();
+      const acctEmail = await getMonitorAccount(policy);
       if (!acctEmail) return; // No Gmail account — skip nudges
       const inboxRes = await gmail.listMessages({ q: 'in:inbox', maxResults: 50, accountEmail: acctEmail });
       if (inboxRes?.ok && Array.isArray(inboxRes.messages)) {
@@ -607,6 +470,24 @@ async function checkForNudges(preloadedMessages, labeledDomains = new Set()) {
             domain: group.domain,
             count: group.count,
             messageIds: group.messageIds || [],
+            detectedAt: new Date().toISOString(),
+          });
+        }
+      }
+
+      const proposedRules = await autoActions.evaluateAutoActions(
+        messages.filter((message) => Array.isArray(message.labels)),
+      );
+      for (const tier of ['silent', 'notify', 'ask']) {
+        for (const action of proposedRules[tier] || []) {
+          nudges.push({
+            id: `rule:${action.ruleId}:${action.messageId}`,
+            type: 'workspace-rule-suggestion',
+            title: action.ruleName || 'Workspace rule matched',
+            detail: `Suggested for "${action.subject}" from ${action.from || 'unknown sender'}; not executed automatically (${tier} rule).`,
+            ruleId: action.ruleId,
+            messageId: action.messageId,
+            tier,
             detectedAt: new Date().toISOString(),
           });
         }
@@ -818,4 +699,6 @@ module.exports = {
   getStatus,
   getSnapshot,
   broadcast,
+  executeBackgroundWork,
+  getMonitorAccount,
 };

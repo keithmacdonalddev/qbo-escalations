@@ -123,6 +123,7 @@ test('agent-default-failover suite', async (t) => {
     codex.chat = ({ onChunk, onDone }) => { backupRan = true; onChunk('backup-answer'); onDone('backup-answer'); return () => {}; };
 
     const res = await runOrchestration({
+      executionPurpose: 'provider-comparison',
       mode: 'single',
       primaryProvider: PRIMARY,
       fallbackProvider: GLOBAL_ALTERNATE,
@@ -141,6 +142,7 @@ test('agent-default-failover suite', async (t) => {
     // Resolve the backup the way a leg would (from a profile selection), then run.
     const backup = resolveAgentBackup(PRIMARY, { fallbackProvider: CUSTOM_BACKUP, configured: true });
     const res = await runOrchestration({
+      executionPurpose: 'provider-comparison',
       mode: 'single',
       primaryProvider: PRIMARY,
       fallbackProvider: backup.provider,

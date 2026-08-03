@@ -79,6 +79,7 @@ function createApp() {
   app.use('/api/playbook', require('./routes/playbook'));
   app.use('/api/agent-prompts', require('./routes/agent-prompts'));
   app.use('/api/agent-identities', require('./routes/agent-identities'));
+  app.use('/api/agent-runs', require('./routes/agent-runs'));
   app.use('/api/templates', require('./routes/templates'));
   app.use('/api/analytics', require('./routes/analytics'));
   app.use('/api/copilot', require('./routes/copilot'));

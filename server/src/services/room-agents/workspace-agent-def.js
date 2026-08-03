@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeRoomMessageForAgent } = require('../room-message-trust');
+
 const { normalizeModelOverride, resolvePolicy } = require('../chat-orchestrator');
 const {
   getAlternateProvider,
@@ -80,18 +82,7 @@ module.exports = {
   buildContext: async (roomMessages, ctx) => {
     // 1. Normalise room messages — prefix other agents' responses so the
     //    model can distinguish speakers.  Mirrors chat-agent-def.js logic.
-    const normalizedMessages = roomMessages.map((msg) => {
-      if (msg.role === 'assistant' && msg.agentId && msg.agentName) {
-        return {
-          role: 'assistant',
-          content: `[${msg.agentName}]: ${msg.content}`,
-        };
-      }
-      return {
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: msg.content || '',
-      };
-    });
+    const normalizedMessages = roomMessages.map((msg) => normalizeRoomMessageForAgent(msg, 'workspace'));
 
     // 2. Extract the latest user message to seed the workspace prompt
     //    builder (it appends the prompt text to the enriched context).

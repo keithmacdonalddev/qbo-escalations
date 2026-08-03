@@ -83,6 +83,8 @@ async function parseWithServer(server, options = {}) {
   return parseImage(TINY_PNG_BASE64, {
     provider: 'kimi',
     timeoutMs: 300,
+    captureMode: 'diagnostic',
+    capturePurpose: 'provider-package-contract-test',
     ...options,
   });
 }
@@ -140,7 +142,7 @@ test('Kimi image-parser path captures Mongo package before parser extraction', a
     assert.equal(result.providerTrace.providerHarness, 'kimi-api');
     assert.equal(result.providerTrace.outcome, 'success');
     assert.equal(result.providerTrace.packageCaptureStatus, 'saved');
-    assert.equal(result.providerTrace.providerPayload.sourcePath, 'response.parsedJson.choices[0].message.content');
+    assert.equal(result.providerTrace.providerPayload.sourcePath, 'resultHandoff.response.choices[0].message.content');
 
     const saved = await ProviderCallPackage.findById(result.providerTrace.providerPackageId).lean();
     assert.equal(saved.providerId, 'kimi');

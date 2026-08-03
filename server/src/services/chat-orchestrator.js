@@ -10,6 +10,8 @@ const {
   recordFailure,
   getProviderHealth,
 } = require('./provider-health');
+const { getFallbackEligibility } = require('./agent-evaluation-contract');
+const { validateAgentTextOutput, validateCitationIndexes } = require('../lib/agent-output-contract');
 
 const VALID_MODES = new Set(['single', 'fallback', 'parallel']);
 
@@ -203,6 +205,8 @@ function runAttempt({
   serviceTier,
   timeoutMs,
   captureMetadata,
+  useCase,
+  streamImmediately = false,
   onChunk,
   onThinkingChunk,
   onSettled,
@@ -213,6 +217,9 @@ function runAttempt({
   let cleanup = null;
   let timeoutHandle = null;
   let thinkingText = '';
+  const outputChunks = [];
+  const thinkingChunks = [];
+  const healthScope = { model: resolveProviderModel(providerId, model), useCase };
 
   function finalize(result) {
     if (settled) return;
@@ -240,20 +247,24 @@ function runAttempt({
         : {}),
       onChunk: (text) => {
         if (settled) return;
-        onChunk({
+        const chunk = {
           provider: providerId,
           text,
-        });
+        };
+        outputChunks.push(chunk);
+        if (streamImmediately) onChunk(chunk);
       },
       onThinkingChunk: (thinking) => {
         if (settled) return;
         const chunk = typeof thinking === 'string' ? thinking : '';
         if (chunk) thinkingText += chunk;
-        onThinkingChunk?.({ provider: providerId, thinking: chunk });
+        const reasoningChunk = { provider: providerId, thinking: chunk };
+        thinkingChunks.push(reasoningChunk);
+        if (streamImmediately) onThinkingChunk?.(reasoningChunk);
       },
       onDone: (fullResponse, usageMeta) => {
         if (settled) return;
-        recordSuccess(providerId);
+        recordSuccess(providerId, healthScope);
         finalize({
           ok: true,
           provider: providerId,
@@ -262,12 +273,14 @@ function runAttempt({
           thinking: thinkingText,
           latencyMs: Date.now() - startedAt,
           usage: usageMeta || null,
+          outputChunks,
+          thinkingChunks,
         });
       },
       onError: (err) => {
         if (settled) return;
         const normalized = normalizeProviderError(providerId, err || {});
-        recordFailure(providerId, normalized.code, normalized.message);
+        recordFailure(providerId, normalized.code, normalized.message, healthScope);
         finalize({
           ok: false,
           provider: providerId,
@@ -276,12 +289,14 @@ function runAttempt({
           thinking: thinkingText,
           latencyMs: Date.now() - startedAt,
           usage: (err && err._usage) || null,
+          outputChunks,
+          thinkingChunks,
         });
       },
     });
   } catch (err) {
     const normalized = normalizeProviderError(providerId, err);
-    recordFailure(providerId, normalized.code, normalized.message);
+    recordFailure(providerId, normalized.code, normalized.message, healthScope);
     finalize({
       ok: false,
       provider: providerId,
@@ -290,6 +305,8 @@ function runAttempt({
       thinking: thinkingText,
       latencyMs: Date.now() - startedAt,
       usage: null,
+      outputChunks,
+      thinkingChunks,
     });
   }
 
@@ -305,7 +322,7 @@ function runAttempt({
         code: 'TIMEOUT',
         message: `${providerId} timed out after ${timeoutMs}ms`,
       }, 'TIMEOUT');
-      recordFailure(providerId, error.code, error.message);
+      recordFailure(providerId, error.code, error.message, healthScope);
       finalize({
         ok: false,
         provider: providerId,
@@ -314,6 +331,8 @@ function runAttempt({
         thinking: thinkingText,
         latencyMs: Date.now() - startedAt,
         usage: abortUsage,
+        outputChunks,
+        thinkingChunks,
       });
     }, timeoutMs);
     if (typeof timeoutHandle.unref === 'function') timeoutHandle.unref();
@@ -337,6 +356,8 @@ function runAttempt({
       thinking: thinkingText,
       latencyMs: Date.now() - startedAt,
       usage: abortUsage,
+      outputChunks,
+      thinkingChunks,
     });
   };
 }
@@ -377,6 +398,19 @@ function toAttempt(result) {
     attempt.model = result.model;
   }
 
+  attempt.reasoningEvidence = {
+    authority: 'diagnostic-only',
+    retained: typeof result.thinking === 'string' && result.thinking.length > 0,
+    chars: typeof result.thinking === 'string' ? result.thinking.length : 0,
+    provider: result.provider,
+    model: attempt.model || result.model || '',
+  };
+  attempt.bufferedOutput = {
+    committed: result.ok === true,
+    outputChunkCount: Array.isArray(result.outputChunks) ? result.outputChunks.length : 0,
+    reasoningChunkCount: Array.isArray(result.thinkingChunks) ? result.thinkingChunks.length : 0,
+  };
+
   return attempt;
 }
 
@@ -392,13 +426,11 @@ function resolveSequentialProviders(policy) {
     return [policy.primaryProvider];
   }
 
-  const primaryHealth = getProviderHealth(policy.primaryProvider);
-  const fallbackHealth = getProviderHealth(policy.fallbackProvider);
-  const preferFallbackFirst = !primaryHealth.healthy && fallbackHealth.healthy;
-
-  return preferFallbackFirst
-    ? [policy.fallbackProvider, policy.primaryProvider]
-    : [policy.primaryProvider, policy.fallbackProvider];
+  // Availability signals are scoped diagnostics, never quality approval and
+  // never authority to skip the configured primary. The primary is always
+  // attempted first; a fallback must separately pass the current evaluation
+  // contract before it can run.
+  return [policy.primaryProvider, policy.fallbackProvider];
 }
 
 function buildUnhealthyFallbackDetail(providerHealth) {
@@ -438,6 +470,11 @@ function startChatOrchestration({
   // and recorded as ProviderCallPackage.metadata (e.g. { conversationId,
   // caseNumber, agentId }). Callers that have no identity simply omit it.
   captureMetadata = null,
+  // Provider-comparison/evaluation paths remain explicit and do not grant
+  // ordinary product fallback authority. Product fallback is fail-closed and
+  // resolved from current, server-trusted agent evaluation evidence.
+  executionPurpose = 'product',
+  fallbackEligibilityResolver = getFallbackEligibility,
   onChunk,
   onThinkingChunk,
   onProviderError,
@@ -461,6 +498,11 @@ function startChatOrchestration({
   const activeCleanups = new Map();
   const attempts = [];
   const allSettledResults = [];
+  const useCase = typeof captureMetadata?.useCase === 'string' && captureMetadata.useCase.trim()
+    ? captureMetadata.useCase.trim()
+    : (typeof captureMetadata?.surface === 'string' && captureMetadata.surface.trim()
+      ? captureMetadata.surface.trim()
+      : 'chat');
 
   function getEffectiveTimeoutMs(providerId) {
     const providerMeta = getProvider(providerId);
@@ -481,9 +523,34 @@ function startChatOrchestration({
         serviceTier,
         timeoutMs: getEffectiveTimeoutMs(providerId),
         captureMetadata,
+        useCase,
+        streamImmediately: policy.mode === 'parallel',
         onChunk: onChunk || (() => {}),
         onThinkingChunk: onThinkingChunk || null,
         onSettled: (result) => {
+          const outputContract = validateAgentTextOutput(result?.fullResponse || '');
+          const citationContract = validateCitationIndexes(
+            result?.fullResponse || '',
+            captureMetadata?.citationSources || [],
+            { reliesOnKnowledge: captureMetadata?.reliesOnKnowledge === true }
+          );
+          result.validation = {
+            version: 'agent-live-output-validation-v1',
+            output: outputContract,
+            citations: citationContract,
+            promptEfficiency: captureMetadata?.promptManifest || null,
+          };
+          if (result.ok && (!outputContract.valid || !citationContract.valid)) {
+            result.ok = false;
+            result.error = {
+              code: 'OUTPUT_VALIDATION_FAILED',
+              message: outputContract.issues[0]?.message
+                || (citationContract.missingRequired
+                  ? 'Knowledge-backed output omitted required source citations.'
+                  : 'Provider output referenced an invalid source citation.'),
+              detail: JSON.stringify({ outputIssues: outputContract.issues, citations: citationContract }),
+            };
+          }
           activeCleanups.delete(providerId);
           allSettledResults.push(result);
           resolve(result);
@@ -491,6 +558,62 @@ function startChatOrchestration({
       });
       activeCleanups.set(providerId, cleanup);
     });
+  }
+
+  function commitAttemptStream(result) {
+    if (!result || policy.mode === 'parallel') return;
+    const outputChunks = Array.isArray(result.outputChunks) ? result.outputChunks : [];
+    const reasoningChunks = Array.isArray(result.thinkingChunks) ? result.thinkingChunks : [];
+    for (const chunk of reasoningChunks) onThinkingChunk?.(chunk);
+    if (outputChunks.length > 0) {
+      for (const chunk of outputChunks) onChunk?.(chunk);
+    } else if (result.ok && result.fullResponse) {
+      onChunk?.({ provider: result.provider, text: result.fullResponse });
+    }
+  }
+
+  async function resolveFallbackDecision(providerId) {
+    const model = resolveProviderModel(providerId, getPolicyModel(policy, providerId));
+    const health = getProviderHealth(providerId, { model, useCase });
+    if (executionPurpose === 'provider-comparison' || executionPurpose === 'agent-evaluation') {
+      return {
+        eligible: true,
+        reason: 'explicit-evaluation-path',
+        source: executionPurpose,
+        agentId: captureMetadata?.agentId || '',
+        useCase,
+        provider: providerId,
+        model,
+        health,
+      };
+    }
+    let evaluation;
+    try {
+      evaluation = await fallbackEligibilityResolver({
+        agentId: captureMetadata?.agentId || '',
+        useCase,
+        provider: providerId,
+        model,
+        promptId: captureMetadata?.promptId || '',
+      });
+    } catch (error) {
+      evaluation = {
+        eligible: false,
+        reason: 'evaluation_lookup_failed',
+        detail: error?.message || String(error),
+      };
+    }
+    return {
+      ...evaluation,
+      eligible: evaluation?.eligible === true,
+      source: 'agent-evaluation-contract',
+      agentId: captureMetadata?.agentId || evaluation?.agentId || '',
+      useCase,
+      provider: providerId,
+      model,
+      health,
+      healthIsAuthority: false,
+    };
   }
 
   (async () => {
@@ -546,6 +669,7 @@ function startChatOrchestration({
             thinking: result.thinking || '',
             latencyMs: result.latencyMs,
             usage: result.usage || null,
+            validation: result.validation || null,
           });
         } else {
           onProviderError?.({
@@ -619,6 +743,7 @@ function startChatOrchestration({
 
     const sequence = resolveSequentialProviders(policy);
     let fallbackFrom = null;
+    let fallbackDecision = null;
     for (let i = 0; i < sequence.length; i++) {
       if (cancelled) return;
 
@@ -629,6 +754,7 @@ function startChatOrchestration({
 
       if (result.ok) {
         attempts.push(toAttempt(result));
+        commitAttemptStream(result);
         orchestrationSettled = true;
         onDone?.({
           providerUsed: providerId,
@@ -640,6 +766,7 @@ function startChatOrchestration({
           thinking: result.thinking || '',
           providerThinking: buildProviderThinkingMap(allSettledResults),
           attempts,
+          fallbackDecision,
           mode: policy.mode,
           usage: result.usage || null,
         });
@@ -648,17 +775,16 @@ function startChatOrchestration({
 
       attempts.push(toAttempt(result));
 
-      onProviderError?.({
-        provider: providerId,
-        model: result.usage?.model || result.model || '',
-        code: result.error.code,
-        message: result.error.message,
-        detail: result.error.detail || '',
-        retriable: i < sequence.length - 1,
-      });
-
       const hasNext = i < sequence.length - 1;
       if (!hasNext) {
+        onProviderError?.({
+          provider: providerId,
+          model: result.usage?.model || result.model || '',
+          code: result.error.code,
+          message: result.error.message,
+          detail: result.error.detail || '',
+          retriable: false,
+        });
         orchestrationSettled = true;
         onError?.({
           code: result.error.code || 'PROVIDER_EXEC_FAILED',
@@ -666,6 +792,8 @@ function startChatOrchestration({
           detail: result.error.detail || '',
           modelUsed: result.usage?.model || result.model || '',
           attempts,
+          fallbackDecision,
+          providerThinking: buildProviderThinkingMap(allSettledResults),
           mode: policy.mode,
           usage: result.usage || null,
         });
@@ -673,6 +801,45 @@ function startChatOrchestration({
       }
 
       const nextProvider = sequence[i + 1];
+      fallbackDecision = await resolveFallbackDecision(nextProvider);
+      onProviderError?.({
+        provider: providerId,
+        model: result.usage?.model || result.model || '',
+        code: result.error.code,
+        message: result.error.message,
+        detail: result.error.detail || '',
+        retriable: fallbackDecision.eligible === true,
+        fallbackDecision,
+      });
+      if (!fallbackDecision.eligible) {
+        const detail = fallbackDecision.detail
+          || `Fallback ${nextProvider}/${fallbackDecision.model || ''} has not passed the current ${useCase} evaluation and prompt contract.`;
+        onFallback?.({
+          from: providerId,
+          fromModel: result.usage?.model || result.model || '',
+          to: nextProvider,
+          toModel: fallbackDecision.model || resolveProviderModel(nextProvider, getPolicyModel(policy, nextProvider)),
+          eligible: false,
+          blocked: true,
+          reason: 'FALLBACK_NOT_EVALUATED',
+          detail,
+          decision: fallbackDecision,
+        });
+        orchestrationSettled = true;
+        onError?.({
+          code: result.error.code || 'PROVIDER_EXEC_FAILED',
+          message: result.error.message || 'Primary provider failed',
+          detail,
+          modelUsed: result.usage?.model || result.model || '',
+          attempts,
+          fallbackDecision,
+          providerThinking: buildProviderThinkingMap(allSettledResults),
+          mode: policy.mode,
+          usage: result.usage || null,
+          validation: result.validation || null,
+        });
+        return;
+      }
       fallbackFrom = providerId;
       onFallback?.({
         from: providerId,
@@ -681,6 +848,9 @@ function startChatOrchestration({
         toModel: resolveProviderModel(nextProvider, getPolicyModel(policy, nextProvider)),
         reason: result.error.code || 'PROVIDER_EXEC_FAILED',
         detail: result.error.detail || '',
+        eligible: true,
+        blocked: false,
+        decision: fallbackDecision,
       });
     }
   })().catch((err) => {

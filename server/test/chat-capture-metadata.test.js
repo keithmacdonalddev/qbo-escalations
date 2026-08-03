@@ -2,8 +2,10 @@
 
 // Evidence-identity tests (Batch 2).
 //
-// House rule: every provider call saves its full response as a
-// ProviderCallPackage. Batch 2 adds the IDENTITY of the call — which
+// House rule: every provider call saves a purpose-labelled evidence package.
+// Ordinary product calls retain a safe manifest (hashes, timing, usage,
+// metadata, errors, and labelled reasoning); full payload bodies require an
+// explicit diagnostic/evaluation purpose. Batch 2 adds the IDENTITY of the call — which
 // conversation/case/room/agent produced it — so packages are matchable to
 // their source instead of only by timestamp. These tests pin:
 //
@@ -211,8 +213,11 @@ test('chat capture metadata (evidence identity)', async (t) => {
     assert.equal(pkg.outcome, 'success');
     assert.equal(pkg.cli.command, 'claude');
     assert.ok(pkg.cli.args.includes('--json-schema'), 'argv recorded');
-    assert.ok(pkg.cli.stdin.text.includes('CASE: 67890'), 'stdin prompt recorded');
-    assert.ok(pkg.cli.stdout.text.includes('reconciliation'), 'stdout recorded');
+    assert.equal(pkg.capturePolicy.mode, 'manifest');
+    assert.equal(pkg.cli.stdin.text, null, 'ordinary parse prompt body omitted');
+    assert.equal(pkg.cli.stdout.text, null, 'ordinary parse response body omitted');
+    assert.match(pkg.cli.stdin.sha256, /^[a-f0-9]{64}$/);
+    assert.match(pkg.cli.stdout.sha256, /^[a-f0-9]{64}$/);
     assert.equal(pkg.cli.process.exitCode, 0);
     assert.equal(pkg.source.spawnSite, 'claude.parseEscalation.text');
     assert.equal(pkg.metadata.escalationId, '64b000000000000000000013');
@@ -235,7 +240,9 @@ test('chat capture metadata (evidence identity)', async (t) => {
     assert.ok(pkg, 'failure package recorded');
     assert.equal(pkg.outcome, 'process_error');
     assert.equal(pkg.cli.process.exitCode, 1);
-    assert.ok(pkg.cli.stderr.text.includes('parse exploded'), 'stderr recorded');
+    assert.equal(pkg.capturePolicy.mode, 'manifest');
+    assert.equal(pkg.cli.stderr.text, null, 'ordinary stderr body omitted');
+    assert.match(pkg.cli.stderr.sha256, /^[a-f0-9]{64}$/);
     assert.ok(pkg.error, 'error recorded on the package');
   });
 

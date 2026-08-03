@@ -22,6 +22,20 @@ function getDefaultPayloadRoot() {
   return path.resolve(__dirname, '..', '..', 'data', 'provider-call-packages');
 }
 
+async function removeProviderPayloadDirectory(packageId, options = {}) {
+  const id = String(packageId || '');
+  if (!/^[a-f0-9]{24}$/i.test(id)) return { removed: false, reason: 'invalid-package-id' };
+  const payloadRoot = path.resolve(options.payloadRoot || getDefaultPayloadRoot());
+  const dateFolder = formatDateFolder(options.now || new Date());
+  const target = path.resolve(payloadRoot, dateFolder, id);
+  const relative = path.relative(payloadRoot, target);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+    return { removed: false, reason: 'outside-payload-root' };
+  }
+  await fs.rm(target, { recursive: true, force: true });
+  return { removed: true, target: relative.replace(/\\/g, '/') };
+}
+
 function sanitizeFileName(value) {
   return String(value || 'payload')
     .replace(/[^A-Za-z0-9_-]+/g, '-')
@@ -337,6 +351,7 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
       'response.bodyText': 'response_body',
       'response.parsedJson': 'response_parsed_json',
       'error.rawBody': 'error_raw_body',
+      reasoningEvidence: 'provider_reasoning_evidence',
       ...(options.kindByField || {}),
     },
   };
@@ -351,6 +366,7 @@ async function externalizeProviderCallPackagePayloads(envelope, options = {}) {
     'response.bodyText',
     'response.parsedJson',
     'error.rawBody',
+    'reasoningEvidence',
   ];
 
   const requestBodyText = readPath(prepared, 'request.bodyText');
@@ -489,5 +505,6 @@ module.exports = {
   DEFAULT_INLINE_TEXT_MAX_BYTES,
   externalizeProviderCallPackagePayloads,
   getDefaultPayloadRoot,
+  removeProviderPayloadDirectory,
   sha256,
 };

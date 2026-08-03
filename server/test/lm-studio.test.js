@@ -16,6 +16,10 @@ const origGet = http.get;
 
 let queuedResponses = [];
 let seenRequests = [];
+const CONTRACT_CAPTURE = Object.freeze({
+  captureMode: 'diagnostic',
+  capturePurpose: 'provider-package-contract-test',
+});
 
 function queueHttpResponses(responses) {
   queuedResponses = Array.isArray(responses) ? responses.slice() : [];
@@ -128,6 +132,7 @@ function runChat(chat, overrides = {}) {
       messages: [{ role: 'user', content: 'hello' }],
       systemPrompt: 'system',
       timeoutMs: 5000,
+      captureContext: CONTRACT_CAPTURE,
       onChunk: (chunk) => chunks.push(chunk),
       onDone: (text, usage) => resolve({ text, usage, chunks, cleanup }),
       onError: reject,
@@ -282,7 +287,7 @@ test('parseEscalation captures non-streaming LM Studio provider package when ena
   const { parseEscalation, clearModelCache } = loadService();
   clearModelCache();
 
-  const result = await parseEscalation('CASE: CS-123', { timeoutMs: 5000 });
+  const result = await parseEscalation('CASE: CS-123', { timeoutMs: 5000, ...CONTRACT_CAPTURE });
   await __waitForProviderPackageRecorderSettled();
   const saved = await ProviderCallPackage.findOne({ callSite: 'lm-studio:parseEscalation' }).lean();
 
@@ -333,7 +338,7 @@ test('transcribeImage captures non-streaming LM Studio provider package when ena
   const { transcribeImage, clearModelCache } = loadService();
   clearModelCache();
 
-  const result = await transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 5000 });
+  const result = await transcribeImage('data:image/png;base64,aGVsbG8=', { timeoutMs: 5000, ...CONTRACT_CAPTURE });
   await __waitForProviderPackageRecorderSettled();
   const saved = await ProviderCallPackage.findOne({ callSite: 'lm-studio:transcribeImage' }).lean();
 
@@ -411,7 +416,7 @@ test('parseEscalation preserves non-200 LM Studio response body in provider pack
   const { parseEscalation, clearModelCache } = loadService();
   clearModelCache();
 
-  await assert.rejects(parseEscalation('CASE: CS-500', { timeoutMs: 5000 }), /LM Studio parse error 500/);
+  await assert.rejects(parseEscalation('CASE: CS-500', { timeoutMs: 5000, ...CONTRACT_CAPTURE }), /LM Studio parse error 500/);
   await __waitForProviderPackageRecorderSettled();
   const saved = await ProviderCallPackage.findOne({ callSite: 'lm-studio:parseEscalation' }).lean();
 
@@ -442,7 +447,7 @@ test('parseEscalation preserves invalid JSON body and parse error in provider pa
   const { parseEscalation, clearModelCache } = loadService();
   clearModelCache();
 
-  await assert.rejects(parseEscalation('CASE: BADJSON', { timeoutMs: 5000 }), SyntaxError);
+  await assert.rejects(parseEscalation('CASE: BADJSON', { timeoutMs: 5000, ...CONTRACT_CAPTURE }), SyntaxError);
   await __waitForProviderPackageRecorderSettled();
   const saved = await ProviderCallPackage.findOne({ callSite: 'lm-studio:parseEscalation' }).lean();
 

@@ -291,7 +291,7 @@ function makeRequest(app, method, urlPath, body) {
 // Import service functions directly for unit-level tests
 // ---------------------------------------------------------------------------
 const {
-  parseImage,
+  parseImage: parseImageService,
   normalizeBase64,
   detectMediaTypeFromBase64,
   detectRole,
@@ -299,6 +299,14 @@ const {
   getStoredApiKey,
   SYSTEM_PROMPT,
 } = require('../src/services/image-parser');
+
+function parseImage(image, options = {}) {
+  return parseImageService(image, {
+    captureMode: 'diagnostic',
+    capturePurpose: 'provider-package-contract-test',
+    ...options,
+  });
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TEST SUITES

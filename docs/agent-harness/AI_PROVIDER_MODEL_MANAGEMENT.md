@@ -141,3 +141,11 @@ OpenAI and Anthropic spending reports require separate organization-admin creden
 - Provider spending parser, redaction, UI credential, and no-false-balance tests pass.
 - Desktop and mobile Settings layouts are visually checked.
 - No long-running local service is started, stopped, or restarted without the user's explicit request.
+
+## Provider capture, reasoning evidence, and retention
+
+Every provider attempt records a safe manifest by default: provider/model identity, prompt and payload hashes, timing, usage, outcome, errors, capture purpose, and labelled reasoning evidence when the provider exposes it. Ordinary product traffic does not retain unrestricted request/response bodies. Parser, triage, and KB readback use a `provider-result-handoff-v1` record containing only bounded final assistant text, allowlisted scalar token counts, source provenance, byte length, and SHA-256; the legacy raw/parsed response and CLI event fields are omitted. Full payload capture requires an explicit allowlisted `diagnostic` or `evaluation` purpose. `forceCapture` guarantees a manifest exists but does not authorize raw traffic retention.
+
+Reasoning evidence is preserved for debugging and provider/model comparison, with provider/model/source-path provenance and `diagnostic-only` authority. It is never proof that a case claim is correct. Evidence is bounded per entry and in aggregate; truncation and completeness are explicit in the stored summary, and larger bounded evidence may be externalized with an integrity manifest.
+
+MongoDB TTL removes the package document at its configured expiry. It does **not** delete external payload files. Recorder failures now remove the exact package sidecar directory they may have created, but no scheduled TTL reconciliation janitor exists. Packages with sidecar files therefore record `storage.externalRetention.state = janitor-required`, `cleanupImplemented = false`, and `orphanRisk = true`. Do not describe external-payload retention as complete.

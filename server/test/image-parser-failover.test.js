@@ -83,6 +83,7 @@ test('image parser fails over to the configured backup when the primary provider
 
     const events = [];
     const result = await parseImage(SAMPLE_IMAGE, {
+      executionPurpose: 'provider-comparison',
       provider: PRIMARY,
       // The operator's configured backup (as it would arrive from the profile /
       // request body). Honored as-is — NO capability filtering.
@@ -128,6 +129,7 @@ test('image parser attempts the neutral global alternate as backup when none is 
     // the neutral global alternate. The agent routes always pass this runtime,
     // so this is the real-world "no fallback picked" case (failover always on).
     const result = await parseImage(SAMPLE_IMAGE, {
+      executionPurpose: 'provider-comparison',
       provider: PRIMARY,
       agentRuntime: { provider: PRIMARY, configured: true },
       timeoutMs: 1000,
@@ -151,7 +153,12 @@ test('image parser: when BOTH primary and backup fail, the primary error propaga
     registerProviderStub(BACKUP, 'parseImage', failParseStub(BACKUP, calls, 'PROVIDER_ERROR'));
 
     await assert.rejects(
-      () => parseImage(SAMPLE_IMAGE, { provider: PRIMARY, fallbackProvider: BACKUP, timeoutMs: 1000 }),
+      () => parseImage(SAMPLE_IMAGE, {
+        provider: PRIMARY,
+        fallbackProvider: BACKUP,
+        timeoutMs: 1000,
+        executionPurpose: 'provider-comparison',
+      }),
       (err) => {
         // The ORIGINAL primary error is surfaced (parseImage has no generic
         // last resort of its own; the route turns this into its error response).
@@ -243,6 +250,7 @@ test('image parser failover REJECTS a malicious fallbackModel with INVALID_MODEL
       const events = [];
       await assert.rejects(
         () => parseImage(SAMPLE_IMAGE, {
+          executionPurpose: 'provider-comparison',
           provider: PRIMARY,
           fallbackProvider: BACKUP,
           fallbackModel: maliciousModel,
@@ -280,6 +288,7 @@ test('image parser failover still honors a legitimate catalog fallbackModel (gua
     });
 
     const result = await parseImage(SAMPLE_IMAGE, {
+      executionPurpose: 'provider-comparison',
       provider: PRIMARY,
       fallbackProvider: BACKUP,
       fallbackModel: 'gpt-5.4-mini', // catalog id — must pass the allowlist

@@ -97,6 +97,8 @@ test('chat context builder uses trusted KB records and excludes draft guidance',
   });
 
   assert.match(result.systemPrompt, /Retrieved Knowledgebase Context/);
+  assert.match(result.systemPrompt, /<untrusted-context source="retrieved-knowledge">/);
+  assert.match(result.systemPrompt, /<untrusted-context source="citation-source-labels">/);
   assert.match(result.systemPrompt, /Payroll archive summary fix/);
   assert.doesNotMatch(result.systemPrompt, /Draft payroll archive advice/);
   assert.equal(result.contextDebug.knowledgebase.source, 'knowledgebase');

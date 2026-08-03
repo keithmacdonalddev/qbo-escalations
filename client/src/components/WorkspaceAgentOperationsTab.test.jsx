@@ -52,7 +52,7 @@ describe('WorkspaceAgentOperationsTab', () => {
     render(<WorkspaceAgentOperationsTab section="configuration" />);
 
     expect(await screen.findByRole('heading', { name: 'Email and calendar authority' })).toBeVisible();
-    expect(screen.getByText('Runs automatically')).toBeVisible();
+    expect(screen.getByText('Pre-approved when requested')).toBeVisible();
     expect(screen.getByText('Requires your confirmation')).toBeVisible();
     expect(screen.getByText('Send an email')).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Your email and calendar operator' })).not.toBeInTheDocument();

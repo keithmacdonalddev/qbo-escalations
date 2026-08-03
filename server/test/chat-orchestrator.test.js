@@ -4,13 +4,14 @@ const assert = require('node:assert/strict');
 const claude = require('../src/services/claude');
 const codex = require('../src/services/codex');
 const { startChatOrchestration, resolvePolicy } = require('../src/services/chat-orchestrator');
-const { resetProviderHealth, getProviderHealth, recordFailure } = require('../src/services/provider-health');
+const { resetProviderHealth, listProviderHealth, recordFailure } = require('../src/services/provider-health');
 
 function runChat(options) {
   return new Promise((resolve) => {
     const events = [];
     startChatOrchestration({
       ...options,
+      executionPurpose: options.executionPurpose || 'provider-comparison',
       onChunk: (data) => events.push({ type: 'chunk', data }),
       onProviderError: (data) => events.push({ type: 'provider_error', data }),
       onFallback: (data) => events.push({ type: 'fallback', data }),
@@ -188,7 +189,7 @@ await t.test('timeout does not get overwritten by late provider success callback
   assert.equal(out.data.code, 'TIMEOUT');
 
   await new Promise((resolve) => setTimeout(resolve, 60));
-  const health = getProviderHealth('claude');
+  const health = listProviderHealth().find((entry) => entry.provider === 'claude');
   assert.equal(health.lastErrorCode, 'TIMEOUT');
   assert.equal(health.consecutiveFailures, 1, 'the primary timed out exactly once');
 });
@@ -220,12 +221,12 @@ await t.test('synchronous provider throw increments failure only once', async ()
   assert.equal(out.result, 'error');
   assert.equal(out.data.code, 'PROVIDER_EXEC_FAILED');
 
-  const health = getProviderHealth('claude');
+  const health = listProviderHealth().find((entry) => entry.provider === 'claude');
   assert.equal(health.lastErrorCode, 'PROVIDER_EXEC_FAILED');
   assert.equal(health.consecutiveFailures, 1, 'the primary recorded exactly one failure');
 });
 
-await t.test('fallback mode prefers healthy provider when primary is unhealthy', async () => {
+await t.test('provider health is diagnostic and never skips the configured primary', async () => {
   recordFailure('claude', 'E1', 'fail 1');
   recordFailure('claude', 'E2', 'fail 2');
   recordFailure('claude', 'E3', 'fail 3');
@@ -251,9 +252,41 @@ await t.test('fallback mode prefers healthy provider when primary is unhealthy',
   });
 
   assert.equal(out.result, 'done');
-  assert.equal(out.data.providerUsed, 'gpt-5.5');
+  assert.equal(out.data.providerUsed, 'claude');
   assert.equal(out.data.fallbackUsed, false);
   assert.equal(out.events.filter((e) => e.type === 'fallback').length, 0);
+});
+
+await t.test('ordinary product fallback is blocked without current evaluation and leaks no partial primary output', async () => {
+  claude.chat = ({ onChunk, onThinkingChunk, onError }) => {
+    onThinkingChunk?.('primary diagnostic reasoning');
+    onChunk('partial primary answer');
+    onError({ code: 'PRIMARY_FAILED', message: 'primary failed after streaming' });
+    return () => {};
+  };
+  let backupCalled = false;
+  codex.chat = ({ onDone }) => {
+    backupCalled = true;
+    onDone('backup answer');
+    return () => {};
+  };
+
+  const out = await runChat({
+    mode: 'fallback',
+    primaryProvider: 'claude',
+    fallbackProvider: 'gpt-5.5',
+    messages: [{ role: 'user', content: 'hi' }],
+    systemPrompt: '',
+    images: [],
+    executionPurpose: 'product',
+    fallbackEligibilityResolver: async () => ({ eligible: false, reason: 'no_current_matching_evaluation' }),
+  });
+
+  assert.equal(out.result, 'error');
+  assert.equal(backupCalled, false);
+  assert.equal(out.events.filter((event) => event.type === 'chunk').length, 0);
+  assert.equal(out.events.find((event) => event.type === 'fallback')?.data?.blocked, true);
+  assert.equal(out.data.providerThinking.claude, 'primary diagnostic reasoning');
 });
 
 await t.test('parallel mode returns both provider responses', async () => {

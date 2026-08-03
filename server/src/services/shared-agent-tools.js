@@ -1,5 +1,6 @@
 'use strict';
 
+const { createHash } = require('node:crypto');
 const Escalation = require('../models/Escalation');
 const Investigation = require('../models/Investigation');
 const Template = require('../models/Template');
@@ -13,6 +14,9 @@ const {
   updateAgentIdentity,
 } = require('./agent-identity-service');
 const { DEFAULT_PROFILES } = require('./room-agents/agent-profiles');
+const {
+  buildAgentToolActionEnvelopeInstructions,
+} = require('./agent-tool-action-envelope');
 
 const SHARED_AGENT_TOOL_METADATA = {
   'agentProfiles.list': {
@@ -96,8 +100,48 @@ const SHARED_AGENT_TOOL_METADATA = {
     params: '{ query, limit? }',
   },
 };
+const SHARED_AGENT_ALLOWED_TOOL_NAMES = Object.freeze(Object.keys(SHARED_AGENT_TOOL_METADATA));
+const WEB_SEARCH_QUERY_MAX_CHARS = 300;
 
-function buildSharedAgentToolLines() {
+function boundedText(value, maxChars = 4000) {
+  const text = String(value || '');
+  return text.length <= maxChars ? text : `${text.slice(0, maxChars)}... [truncated]`;
+}
+
+function attachSourceEvidence(type, doc, payload) {
+  const sourceId = String(doc?._id || '');
+  const updatedAt = doc?.updatedAt || null;
+  const sourceHash = createHash('sha256')
+    .update(JSON.stringify({ type, sourceId, updatedAt, payload }))
+    .digest('hex');
+  return {
+    ...payload,
+    id: sourceId,
+    source: { type, id: sourceId, updatedAt, hash: sourceHash },
+  };
+}
+
+function sanitizeSharedMessage(message = {}) {
+  return {
+    role: String(message.role || ''),
+    agentId: String(message.agentId || message.senderId || ''),
+    content: boundedText(message.content, 4000),
+    createdAt: message.createdAt || message.timestamp || null,
+  };
+}
+
+function getUnsafeWebQueryReason(query) {
+  if (query.length > WEB_SEARCH_QUERY_MAX_CHARS) return `query exceeds ${WEB_SEARCH_QUERY_MAX_CHARS} characters`;
+  if (/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i.test(query)) return 'query contains an email address';
+  if (/(?:\+?\d[\d\s().-]{7,}\d)/.test(query)) return 'query contains a phone number or long numeric identifier';
+  if (/\b(?:api[_ -]?key|password|passwd|secret|access[_ -]?token|refresh[_ -]?token|bearer)\b/i.test(query)) return 'query contains credential-like text';
+  if (/\b(?:sk|pk|ghp|github_pat)-?[a-z0-9_-]{12,}\b/i.test(query)) return 'query contains a token-like value';
+  if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/i.test(query)) return 'query contains a UUID';
+  return '';
+}
+
+function buildSharedAgentToolLines(allowedToolNames = SHARED_AGENT_ALLOWED_TOOL_NAMES) {
+  const allowed = new Set(Array.isArray(allowedToolNames) ? allowedToolNames : []);
   const lines = [
     'AVAILABLE TOOLS:',
     '- Use tools when the user asks for research, database lookup, profile inspection, verification, or external information.',
@@ -108,13 +152,15 @@ function buildSharedAgentToolLines() {
   ];
 
   for (const [tool, meta] of Object.entries(SHARED_AGENT_TOOL_METADATA)) {
+    if (!allowed.has(tool)) continue;
     lines.push(`- ${tool}: ${meta.description} Params: ${meta.params}`);
   }
 
   lines.push('');
-  lines.push('ACTION FORMAT:');
-  lines.push('ACTION: {"tool": "tool.name", "params": {...}}');
-  lines.push('You may emit multiple ACTION lines when needed. After results come back, either continue with more ACTION lines or provide the final answer without ACTION lines.');
+  lines.push(buildAgentToolActionEnvelopeInstructions({
+    exampleTool: 'db.searchInvestigations',
+    exampleParams: { query: 'payroll export', limit: 5 },
+  }));
   return lines.join('\n');
 }
 
@@ -234,7 +280,6 @@ async function searchEscalations(params = {}) {
       caseNumber: doc.caseNumber || null,
       category: doc.category || null,
       status: doc.status || null,
-      clientContact: doc.clientContact || null,
       attemptingTo: doc.attemptingTo || null,
       actualOutcome: doc.actualOutcome || null,
       createdAt: doc.createdAt || null,
@@ -251,7 +296,21 @@ async function getEscalation(params = {}) {
     doc = await Escalation.findOne({ caseNumber: params.caseNumber }).lean();
   }
   if (!doc) return { ok: false, error: 'Escalation not found' };
-  return { ok: true, escalation: doc };
+  const safeEscalation = {
+    caseNumber: doc.caseNumber || null,
+    category: doc.category || null,
+    status: doc.status || null,
+    attemptingTo: boundedText(doc.attemptingTo),
+    expectedOutcome: boundedText(doc.expectedOutcome),
+    actualOutcome: boundedText(doc.actualOutcome),
+    triedTestAccount: doc.triedTestAccount || 'unknown',
+    troubleshootingSteps: boundedText(doc.tsSteps),
+    resolution: boundedText(doc.resolution),
+    resolutionNotes: boundedText(doc.resolutionNotes),
+    createdAt: doc.createdAt || null,
+    updatedAt: doc.updatedAt || null,
+  };
+  return { ok: true, escalation: attachSourceEvidence('escalation', doc, safeEscalation) };
 }
 
 async function searchInvestigations(params = {}) {
@@ -332,7 +391,23 @@ async function getInvestigation(params = {}) {
     doc = await Investigation.findOne({ invNumber: params.invNumber }).lean();
   }
   if (!doc) return { ok: false, error: 'Investigation not found' };
-  return { ok: true, investigation: doc };
+  const safeInvestigation = {
+    invNumber: doc.invNumber || null,
+    subject: boundedText(doc.subject, 1000),
+    category: doc.category || null,
+    status: doc.status || null,
+    details: boundedText(doc.details),
+    notes: boundedText(doc.notes),
+    workaround: boundedText(doc.workaround),
+    resolution: boundedText(doc.resolution),
+    symptoms: Array.isArray(doc.symptoms) ? doc.symptoms.slice(0, 30).map((value) => boundedText(value, 500)) : [],
+    affectedCount: Number(doc.affectedCount) || 0,
+    reportedDate: doc.reportedDate || null,
+    lastMatchedAt: doc.lastMatchedAt || null,
+    resolvedAt: doc.resolvedAt || null,
+    updatedAt: doc.updatedAt || null,
+  };
+  return { ok: true, investigation: attachSourceEvidence('investigation', doc, safeInvestigation) };
 }
 
 async function searchTemplates(params = {}) {
@@ -399,17 +474,13 @@ async function getConversation(params = {}) {
   if (!params.id) return { ok: false, error: 'id is required' };
   const doc = await Conversation.findById(params.id).lean();
   if (!doc) return { ok: false, error: 'Conversation not found' };
-  return {
-    ok: true,
-    conversation: {
-      id: doc._id,
-      title: doc.title || 'Untitled',
-      provider: doc.provider || null,
-      messageCount: doc.messageCount || (Array.isArray(doc.messages) ? doc.messages.length : 0),
-      updatedAt: doc.updatedAt || null,
-      messages: Array.isArray(doc.messages) ? doc.messages.slice(-20) : [],
-    },
+  const safeConversation = {
+    title: boundedText(doc.title || 'Untitled', 300),
+    messageCount: doc.messageCount || (Array.isArray(doc.messages) ? doc.messages.length : 0),
+    updatedAt: doc.updatedAt || null,
+    messages: Array.isArray(doc.messages) ? doc.messages.slice(-20).map(sanitizeSharedMessage) : [],
   };
+  return { ok: true, conversation: attachSourceEvidence('conversation', doc, safeConversation) };
 }
 
 async function searchRooms(params = {}) {
@@ -452,27 +523,32 @@ async function getRoomRecord(params = {}) {
   if (!params.id) return { ok: false, error: 'id is required' };
   const doc = await ChatRoom.findById(params.id).lean();
   if (!doc) return { ok: false, error: 'Room not found' };
-  return {
-    ok: true,
-    room: {
-      id: doc._id,
-      title: doc.title || 'New Room',
-      activeAgents: Array.isArray(doc.activeAgents) ? doc.activeAgents : [],
-      settings: doc.settings || {},
-      messageCount: doc.messageCount || (Array.isArray(doc.messages) ? doc.messages.length : 0),
-      updatedAt: doc.updatedAt || null,
-      messages: Array.isArray(doc.messages) ? doc.messages.slice(-20) : [],
-      memory: doc.memory || null,
-    },
+  const safeRoom = {
+    title: boundedText(doc.title || 'New Room', 300),
+    activeAgents: Array.isArray(doc.activeAgents) ? doc.activeAgents.slice(0, 30).map(String) : [],
+    messageCount: doc.messageCount || (Array.isArray(doc.messages) ? doc.messages.length : 0),
+    updatedAt: doc.updatedAt || null,
+    messages: Array.isArray(doc.messages) ? doc.messages.slice(-20).map(sanitizeSharedMessage) : [],
   };
+  return { ok: true, room: attachSourceEvidence('room', doc, safeRoom) };
 }
 
-async function searchWeb(params = {}) {
+async function searchWeb(params = {}, { signal } = {}) {
   const query = String(params.query || '').trim();
   if (!query) return { ok: false, error: 'query is required' };
+  const unsafeReason = getUnsafeWebQueryReason(query);
+  if (unsafeReason) {
+    return {
+      ok: false,
+      error: `Web search blocked before external transmission: ${unsafeReason}. Remove private data and use generic public terms.`,
+      blocked: true,
+      code: 'EXTERNAL_QUERY_BLOCKED',
+    };
+  }
   const limit = Math.min(Math.max(Number(params.limit) || 5, 1), 10);
   const url = `https://duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
   const response = await fetch(url, {
+    signal,
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     },
@@ -669,7 +745,9 @@ const SHARED_AGENT_TOOL_HANDLERS = {
 };
 
 module.exports = {
+  SHARED_AGENT_ALLOWED_TOOL_NAMES,
   SHARED_AGENT_TOOL_HANDLERS,
   SHARED_AGENT_TOOL_LINES,
+  buildSharedAgentToolLines,
   SHARED_AGENT_TOOL_METADATA,
 };

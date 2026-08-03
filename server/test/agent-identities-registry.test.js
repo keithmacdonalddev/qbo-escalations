@@ -14,6 +14,15 @@ const {
   AGENT_PROMPT_VERSIONS_ROOT,
   CUSTOM_AGENT_PROMPTS_ROOT,
 } = require('../src/lib/agent-prompt-store');
+const { measurePromptSections } = require('../src/lib/agent-output-contract');
+const {
+  EVALUATION_CONTRACT_VERSION,
+  resolveCurrentBehaviorContract,
+} = require('../src/services/agent-evaluation-contract');
+const { recordTrustedAgentHarnessRun } = require('../src/services/agent-identity-service');
+const { getMaximumAgentToolNames } = require('../src/services/agent-tool-capabilities');
+const { WORKSPACE_TOOL_METADATA } = require('../src/services/workspace-tools/metadata');
+const { KB_AGENT_TOOL_METADATA } = require('../src/services/knowledgebase-agent-tools');
 
 function cleanupCustomPrompt(agentId) {
   fs.rmSync(path.join(CUSTOM_AGENT_PROMPTS_ROOT, `${agentId}.md`), { force: true });
@@ -236,6 +245,39 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
   assert.ok(ids.includes('billing-audit-agent'));
   assert.ok(ids.includes('refund-routing-agent'));
 
+  const identitiesById = new Map(listRes.body.agents.map((item) => [item.agentId, item]));
+  const expectedSharedContracts = [
+    ['chat', 'chat', 'room-chat'],
+    ['copilot', 'copilot', 'room-chat'],
+    ['image-analyst', 'image-analyst', 'room-chat'],
+    ['known-issue-search-agent', 'known-issue-search-agent', 'known-issue-search'],
+    ['triage-agent', 'triage-agent', 'triage'],
+  ];
+  for (const [directoryAgentId, capabilityAgentId, useCase] of expectedSharedContracts) {
+    const identity = identitiesById.get(directoryAgentId);
+    const expectedNames = [...getMaximumAgentToolNames(capabilityAgentId, useCase)].sort();
+    assert.deepEqual(
+      identity.tools.available.map((tool) => tool.name).sort(),
+      expectedNames,
+      `${directoryAgentId} must display its executable ${useCase} capability`,
+    );
+    assert.equal(identity.tools.authority.key, `${capabilityAgentId}:${useCase}`);
+    assert.match(identity.tools.authority.allowlistHash, /^[a-f0-9]{64}$/);
+  }
+
+  assert.deepEqual(
+    identitiesById.get('workspace').tools.available.map((tool) => tool.name).sort(),
+    Object.keys(WORKSPACE_TOOL_METADATA).sort(),
+    'Workspace must preserve its exact dedicated tool contract',
+  );
+  assert.deepEqual(
+    identitiesById.get('knowledgebase-agent').tools.available.map((tool) => tool.name).sort(),
+    Object.keys(KB_AGENT_TOOL_METADATA).sort(),
+    'Knowledgebase must display its dedicated draft-tool contract',
+  );
+  assert.deepEqual(identitiesById.get('billing-audit-agent').tools.available, []);
+  assert.deepEqual(identitiesById.get('refund-routing-agent').tools.available, []);
+
   const reviewsRes = await agent.get('/api/agent-identities/billing-audit-agent/reviews').expect(200);
   assert.equal(reviewsRes.body.reviews.length, 3);
 
@@ -261,7 +303,60 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
     kind: 'agent-harness',
     fingerprint: 'agent-harness:billing-audit-agent',
   }).lean();
-  assert.equal(harnessAttention.status, 'resolved');
+  assert.equal(harnessAttention.status, 'open', 'manual pass evidence cannot authorize fallback');
+  assert.equal(harnessAttention.metadata.fallbackEligible, false);
+
+  const identityConfig = await AgentIdentity.findOne({ agentId: 'billing-audit-agent' }).lean();
+  const behavior = resolveCurrentBehaviorContract(
+    'billing-audit-agent',
+    'custom-billing-audit-agent',
+    identityConfig,
+  );
+  const promptMetrics = measurePromptSections([
+    { id: 'system', kind: 'required', text: 'billing audit system prompt' },
+    { id: 'input', kind: 'user-input', text: 'billing case fixture' },
+  ], { maxChars: 1000 });
+  const requiredChecks = [
+    { id: 'output-contract', status: 'pass' },
+    { id: 'citation-uncertainty', status: 'pass' },
+    { id: 'tool-correctness', status: 'pass' },
+    { id: 'fallback-correctness', status: 'pass' },
+    { id: 'prompt-efficiency', status: 'pass', metrics: promptMetrics },
+  ];
+  await recordTrustedAgentHarnessRun('billing-audit-agent', {
+    status: 'pass',
+    summary: 'Server-trusted fallback evaluation passed.',
+    source: 'agent-evaluation',
+    cases: [{ caseId: 'billing-contract', name: 'Billing contract', status: 'pass' }],
+    metadata: {
+      evaluationContract: {
+        version: EVALUATION_CONTRACT_VERSION,
+        behaviorContractVersion: behavior.version,
+        behaviorHash: behavior.hash,
+        agentId: 'billing-audit-agent',
+        useCase: 'billing-audit',
+        targetRole: 'fallback',
+        provider: 'gpt-5.4-mini',
+        model: 'gpt-5.4-mini',
+        promptId: behavior.promptId,
+        promptHash: behavior.promptHash,
+        suiteId: 'billing-audit-regression',
+        suiteVersion: '1',
+        evaluatedAt: new Date().toISOString(),
+        checks: requiredChecks,
+      },
+    },
+  });
+
+  harnessAttention = await EscalationAttentionItem.findOne({
+    kind: 'agent-harness',
+    fingerprint: 'agent-harness:billing-audit-agent',
+  }).lean();
+  assert.equal(harnessAttention.status, 'open');
+  assert.equal(harnessAttention.metadata.fallbackEligible, false);
+  assert.ok(harnessAttention.metadata.evaluationIssues.some(
+    (issue) => issue.code === 'EVALUATION_AUTHORITY_NOT_IMPLEMENTED'
+  ));
 
   const runtimeRes = await agent
     .patch('/api/agent-identities/triage-agent/runtime')

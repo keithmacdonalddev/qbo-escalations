@@ -13,7 +13,7 @@ const workspaceActionRecordSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'ok', 'error', 'blocked'],
+    enum: ['pending', 'ok', 'error', 'blocked', 'outcome-unknown'],
     required: true,
     index: true,
   },

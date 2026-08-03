@@ -447,9 +447,126 @@ const redactionSchema = new mongoose.Schema({
 const storageSchema = new mongoose.Schema({
   inline: { type: Boolean, default: true },
   externalPayloads: { type: [payloadRefSchema], default: [] },
+  externalRetention: {
+    state: {
+      type: String,
+      enum: ['not-applicable', 'janitor-required'],
+      default: 'not-applicable',
+    },
+    documentExpiresAt: { type: Date, default: null },
+    policyKey: { type: String, default: 'provider-call-package' },
+    cleanupImplemented: { type: Boolean, default: false },
+    janitorRequired: { type: Boolean, default: false },
+    orphanRisk: { type: Boolean, default: false },
+    note: { type: String, default: '' },
+  },
   notes: { type: [String], default: [] },
   truncated: { type: Boolean, default: false },
   truncationReason: { type: String, default: null },
+}, strictSubdocumentOptions);
+
+const capturePolicySchema = new mongoose.Schema({
+  version: { type: String, required: true, default: 'provider-capture-policy-v1' },
+  mode: { type: String, enum: ['manifest', 'diagnostic', 'evaluation'], required: true, default: 'manifest' },
+  purpose: { type: String, required: true, default: 'product-observability' },
+  declared: { type: Boolean, default: false },
+  decisionReason: { type: String, default: 'safe-default' },
+  payloadBodiesRetained: { type: Boolean, default: false },
+  reasoningRetained: { type: Boolean, default: true },
+}, strictSubdocumentOptions);
+
+const reasoningEvidenceSchema = new mongoose.Schema({
+  version: {
+    type: String,
+    enum: ['provider-reasoning-evidence-v1-legacy', 'provider-reasoning-evidence-v2'],
+    default: 'provider-reasoning-evidence-v1-legacy',
+  },
+  evidenceId: { type: String, default: '', maxlength: 64, immutable: true },
+  packageId: { type: String, default: '', maxlength: 200, immutable: true },
+  runId: { type: String, default: '', maxlength: 300, immutable: true },
+  requestId: { type: String, default: '', maxlength: 300, immutable: true },
+  attemptId: { type: String, default: '', maxlength: 300, immutable: true },
+  attemptIndex: { type: Number, min: 0, default: null, immutable: true },
+  toolLoopRound: { type: Number, min: 0, default: null, immutable: true },
+  modelRound: { type: Number, min: 0, default: null, immutable: true },
+  provider: { type: String, default: '', maxlength: 200 },
+  providerId: { type: String, default: '', maxlength: 200 },
+  actualModel: { type: String, default: '', maxlength: 500 },
+  requestedModel: { type: String, default: '', maxlength: 500 },
+  // Compatibility alias for older consumers. New readers should use
+  // actualModel and requestedModel so requested is never mistaken for actual.
+  model: { type: String, default: '', maxlength: 500 },
+  promptId: { type: String, default: '', maxlength: 300 },
+  promptHash: { type: String, default: '', maxlength: 200 },
+  promptHashSource: {
+    type: String,
+    enum: ['caller', 'provider-request', 'unavailable', 'legacy'],
+    default: 'legacy',
+  },
+  promptVersion: { type: String, default: '', maxlength: 300 },
+  sequence: { type: Number, min: 0, required: true },
+  transportSequence: { type: Number, min: 0, default: null },
+  transportEventId: { type: String, default: '', maxlength: 500 },
+  transportEventHash: { type: String, default: '', maxlength: 64 },
+  sourcePath: { type: String, required: true, maxlength: 1000 },
+  kind: { type: String, default: 'provider-reasoning', maxlength: 100 },
+  authority: { type: String, enum: ['diagnostic-only'], default: 'diagnostic-only' },
+  text: { type: String, required: true, maxlength: 65536 },
+  originalChars: { type: Number, min: 0, default: 0 },
+  retainedChars: { type: Number, min: 0, default: 0 },
+  complete: { type: Boolean, default: false },
+  truncated: { type: Boolean, default: false },
+}, strictSubdocumentOptions);
+
+const reasoningEvidenceSummarySchema = new mongoose.Schema({
+  version: {
+    type: String,
+    enum: ['provider-reasoning-evidence-summary-v1-legacy', 'provider-reasoning-evidence-summary-v2'],
+    default: 'provider-reasoning-evidence-summary-v1-legacy',
+  },
+  entryCount: { type: Number, min: 0, default: 0 },
+  observedEntryCount: { type: Number, min: 0, default: 0 },
+  rawEntryCount: { type: Number, min: 0, default: 0 },
+  exactDuplicatesRemoved: { type: Number, min: 0, default: 0 },
+  deduplication: { type: String, default: 'legacy', maxlength: 200 },
+  totalChars: { type: Number, min: 0, default: 0 },
+  totalOriginalChars: { type: Number, min: 0, default: 0 },
+  sha256: { type: String, default: '', maxlength: 64 },
+  orderedEvidenceSha256: { type: String, default: '', maxlength: 64 },
+  authority: { type: String, enum: ['diagnostic-only'], default: 'diagnostic-only' },
+  redactionAppliedBeforeExtraction: { type: Boolean, default: false },
+  inlineLimitBytes: { type: Number, min: 0, default: 0 },
+  complete: { type: Boolean, default: false },
+  allBlocksComplete: { type: Boolean, default: false },
+  truncated: { type: Boolean, default: false },
+  entryLimitReached: { type: Boolean, default: false },
+  totalCharLimitReached: { type: Boolean, default: false },
+  entryCharLimitReached: { type: Boolean, default: false },
+  maxEntries: { type: Number, min: 0, default: 0 },
+  maxEntryChars: { type: Number, min: 0, default: 0 },
+  maxTotalChars: { type: Number, min: 0, default: 0 },
+}, strictSubdocumentOptions);
+
+const resultHandoffUsageSchema = new mongoose.Schema({
+  inputTokens: { type: Number, min: 0, default: 0 },
+  outputTokens: { type: Number, min: 0, default: 0 },
+  totalTokens: { type: Number, min: 0, default: 0 },
+}, strictSubdocumentOptions);
+
+const resultHandoffSchema = new mongoose.Schema({
+  version: { type: String, required: true, enum: ['provider-result-handoff-v1'] },
+  status: { type: String, required: true, enum: ['ready', 'rejected-too-large'] },
+  format: { type: String, required: true, enum: ['assistant-text'] },
+  text: { type: String, maxlength: 65536, default: '' },
+  byteLength: { type: Number, required: true, min: 0 },
+  sha256: { type: String, required: true, match: /^[a-f0-9]{64}$/ },
+  maxBytes: { type: Number, required: true, min: 1 },
+  authority: { type: String, required: true, enum: ['provider-output-unvalidated'] },
+  reasoningRemoved: { type: Boolean, required: true, default: true },
+  sourcePath: { type: String, required: true, maxlength: 500 },
+  providerId: { type: String, default: '', maxlength: 200 },
+  model: { type: String, default: '', maxlength: 500 },
+  usage: { type: resultHandoffUsageSchema, default: null },
 }, strictSubdocumentOptions);
 
 const providerCallPackageSchema = new mongoose.Schema({
@@ -469,6 +586,16 @@ const providerCallPackageSchema = new mongoose.Schema({
   // identity, and for the KB draft extraction the escalation Mongo _id +
   // human case number. Free-form so each call site can stamp what it knows.
   metadata: { type: mongoose.Schema.Types.Mixed, default: null },
+
+  // Explicit capture purpose. Historical documents may not have this field;
+  // no destructive migration is required. New records always resolve a mode.
+  capturePolicy: { type: capturePolicySchema, default: () => ({}) },
+  // Full labelled provider reasoning evidence, retained separately from raw
+  // traffic and marked diagnostic-only. It is never authoritative case truth.
+  reasoningEvidence: { type: [reasoningEvidenceSchema], default: [] },
+  reasoningEvidencePayloadRef: { type: payloadRefSchema, default: null },
+  reasoningEvidenceSummary: { type: reasoningEvidenceSummarySchema, default: null },
+  resultHandoff: { type: resultHandoffSchema, default: null },
 
   request: { type: mongoose.Schema.Types.Mixed, default: null },
   response: { type: mongoose.Schema.Types.Mixed, default: null },

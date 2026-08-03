@@ -30,6 +30,17 @@ function parseEvent(text, name) {
   return match ? JSON.parse(match[1]) : null;
 }
 
+function assertEvaluationBlocked(text) {
+  const fallback = parseEvent(text, 'fallback');
+  assert.ok(fallback, 'expected fallback decision event');
+  assert.equal(fallback.eligible, false);
+  assert.equal(fallback.blocked, true);
+  assert.equal(fallback.reason, 'FALLBACK_NOT_EVALUATED');
+  assert.equal(fallback.decision?.reason, 'server_evaluation_authority_not_implemented');
+  assert.ok(parseEvent(text, 'error'), 'expected terminal primary error');
+  assert.equal(parseEvent(text, 'done'), null);
+}
+
 async function withFailingFinalTraceWrite(run) {
   const originalFindByIdAndUpdate = AiTrace.findByIdAndUpdate;
   AiTrace.findByIdAndUpdate = function patchedFindByIdAndUpdate(traceId, update, options) {
@@ -87,14 +98,16 @@ test('chat-fallback-integration suite', async (t) => {
     await Conversation.deleteMany({});
   });
 
-  await t.test('chat fallback streams provider_error and fallback events then succeeds on alternate', async () => {
+  await t.test('chat fallback streams a blocked decision and never dispatches an unevaluated alternate', async () => {
     claude.chat = ({ onError }) => {
       const err = new Error('claude failed');
       err.code = 'PROVIDER_EXEC_FAILED';
       onError(err);
       return () => {};
     };
+    let backupCalls = 0;
     codex.chat = ({ onChunk, onDone }) => {
+      backupCalls += 1;
       onChunk('fallback response');
       onDone('fallback response');
       return () => {};
@@ -111,17 +124,11 @@ test('chat-fallback-integration suite', async (t) => {
 
     assert.equal(res.status, 200);
     assert.match(res.text, /event: provider_error/);
-    assert.match(res.text, /event: fallback/);
-    assert.match(res.text, /event: done/);
-
-    const done = parseEvent(res.text, 'done');
-    assert.ok(done);
-    assert.equal(done.providerUsed, 'gpt-5.5');
-    assert.equal(done.fallbackUsed, true);
-    assert.equal(done.fallbackFrom, 'claude');
+    assertEvaluationBlocked(res.text);
+    assert.equal(backupCalls, 0);
   });
 
-  await t.test('chat retry supports fallback policy and emits fallback metadata', async () => {
+  await t.test('chat retry preserves failed evidence when its alternate lacks evaluation authority', async () => {
     const first = await agent
       .post('/api/chat')
       .send({ message: 'first', provider: 'claude' });
@@ -161,7 +168,9 @@ test('chat-fallback-integration suite', async (t) => {
       onError(err);
       return () => {};
     };
+    let backupCalls = 0;
     codex.chat = ({ onDone }) => {
+      backupCalls += 1;
       onDone('retry fallback');
       return () => {};
     };
@@ -176,19 +185,15 @@ test('chat-fallback-integration suite', async (t) => {
       });
 
     assert.equal(retry.status, 200);
-    assert.match(retry.text, /event: fallback/);
-    const done = parseEvent(retry.text, 'done');
-    assert.ok(done);
-    assert.equal(done.providerUsed, 'gpt-5.5');
-    assert.equal(done.fallbackUsed, true);
-    assert.equal(done.fallbackFrom, 'claude');
+    assertEvaluationBlocked(retry.text);
+    assert.equal(backupCalls, 0);
 
     const saved = await Conversation.findById(start.conversationId).lean();
-    assert.equal(saved.caseIntake.status, 'analyst-complete');
-    assert.equal(saved.caseIntake.evidence.receipts.analyst.completed, true);
-    assert.equal(saved.caseIntake.evidence.receipts.analyst.failed, false);
-    assert.equal(saved.caseIntake.evidence.receipts.analyst.messageSaved, true);
-    assert.equal(saved.caseIntake.evidence.receipts.analyst.errorCode, '');
+    assert.equal(saved.caseIntake.status, 'failed');
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.completed, false);
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.failed, true);
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.messageSaved, false);
+    assert.equal(saved.caseIntake.evidence.receipts.analyst.errorCode, 'PROVIDER_EXEC_FAILED');
   });
 
   await t.test('primary chat keeps the saved answer and sends done when its final trace write fails', async () => {

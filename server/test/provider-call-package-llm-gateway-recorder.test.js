@@ -260,7 +260,10 @@ test('recordLlmGatewayProviderCallPackage persists and redacts gateway packages'
       apiKey: 'request-secret',
     },
     responseHeaders: { 'set-cookie': 'sid=response-secret' },
-  }), { log: false });
+  }), {
+    log: false,
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
+  });
 
   assert.equal(result.ok, true);
   const saved = await ProviderCallPackage.findById(result.id).lean();
@@ -290,6 +293,7 @@ test('recordLlmGatewayProviderCallPackage externalizes large gateway payloads wi
     maxInlineBytes: 64,
     payloadRoot,
     now: new Date('2026-05-21T12:00:00.000Z'),
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
   });
 
   try {

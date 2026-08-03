@@ -62,7 +62,7 @@ const relationshipNoteSchema = new mongoose.Schema({
 const reviewEntrySchema = new mongoose.Schema({
   reviewId: { type: String, required: true },
   surface: { type: String, default: 'overall' },
-  status: { type: String, default: 'approved' },
+  status: { type: String, enum: ['approved', 'rejected', 'needs-follow-up'], default: 'needs-follow-up' },
   summary: { type: String, required: true },
   actor: { type: String, default: 'user' },
   versionRef: { type: String, default: '' },
@@ -73,7 +73,7 @@ const reviewEntrySchema = new mongoose.Schema({
 const harnessCaseSchema = new mongoose.Schema({
   caseId: { type: String, required: true },
   name: { type: String, required: true },
-  status: { type: String, default: 'pass' },
+  status: { type: String, enum: ['pass', 'fail', 'warn'], default: 'warn' },
   expected: { type: String, default: '' },
   actual: { type: String, default: '' },
   detail: { type: String, default: '' },
@@ -81,7 +81,7 @@ const harnessCaseSchema = new mongoose.Schema({
 
 const harnessRunSchema = new mongoose.Schema({
   runId: { type: String, required: true },
-  status: { type: String, default: 'pass' },
+  status: { type: String, enum: ['pass', 'fail', 'warn'], default: 'warn' },
   summary: { type: String, required: true },
   actor: { type: String, default: 'user' },
   source: { type: String, default: 'manual' },

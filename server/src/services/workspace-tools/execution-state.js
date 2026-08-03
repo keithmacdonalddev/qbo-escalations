@@ -7,6 +7,10 @@ function normalizeWorkspaceLabelRef(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function normalizeWorkspaceAccountEmail(value) {
+  return normalizeWorkspaceLabelRef(value).toLowerCase();
+}
+
 function dedupeStrings(values) {
   return [...new Set((values || []).map((value) => normalizeWorkspaceLabelRef(value)).filter(Boolean))];
 }
@@ -137,8 +141,42 @@ async function normalizeWorkspaceBatchLabels(params, executionState) {
   };
 }
 
+function resolveEffectiveWorkspaceAccount(tool, params = {}, executionState = null) {
+  const explicitAccount = normalizeWorkspaceAccountEmail(params.account);
+  if (explicitAccount) return explicitAccount;
+  if (String(tool || '').startsWith('calendar.')) {
+    return executionState?.defaultCalendarAccount || executionState?.primaryGmailAccount || '';
+  }
+  if (tool === 'gmail.send' || tool === 'gmail.draft') {
+    return executionState?.defaultSendingAccount
+      || executionState?.defaultGmailAccount
+      || executionState?.primaryGmailAccount
+      || '';
+  }
+  if (String(tool || '').startsWith('gmail.')) {
+    return executionState?.defaultGmailAccount || executionState?.primaryGmailAccount || '';
+  }
+  return '';
+}
+
+function normalizeWorkspaceActionAccount(action, executionState) {
+  const params = { ...(action?.params || {}) };
+  const tool = String(action?.tool || '');
+  if (tool.startsWith('gmail.') || tool.startsWith('calendar.')) {
+    const effectiveAccount = resolveEffectiveWorkspaceAccount(tool, params, executionState);
+    if (effectiveAccount) params.account = effectiveAccount;
+    else delete params.account;
+  } else if (Object.prototype.hasOwnProperty.call(params, 'account')) {
+    const normalizedAccount = normalizeWorkspaceAccountEmail(params.account);
+    if (normalizedAccount) params.account = normalizedAccount;
+    else delete params.account;
+  }
+  return { ...action, tool, params };
+}
+
 async function prepareActionForExecution(action, executionState) {
-  const params = { ...(action.params || {}) };
+  const normalizedAction = normalizeWorkspaceActionAccount(action, executionState);
+  const params = { ...normalizedAction.params };
 
   if (action.tool === 'gmail.createLabel') {
     params.name = normalizeWorkspaceLabelRef(params.name || params.labelName || params.label);
@@ -166,14 +204,29 @@ async function prepareActionForExecution(action, executionState) {
     Object.assign(params, await normalizeWorkspaceBatchLabels(params, executionState));
   }
 
-  return { ...action, params };
+  return { ...normalizedAction, params };
 }
 
-function createWorkspaceExecutionState({ connectedGmailAccounts = [] } = {}) {
-  const accounts = (Array.isArray(connectedGmailAccounts) ? connectedGmailAccounts : []).filter(Boolean);
+function createWorkspaceExecutionState({
+  connectedGmailAccounts = [],
+  defaultGmailAccount = '',
+  defaultSendingAccount = '',
+  defaultCalendarAccount = '',
+} = {}) {
+  const accounts = dedupeStrings(
+    Array.isArray(connectedGmailAccounts) ? connectedGmailAccounts.map(normalizeWorkspaceAccountEmail) : [],
+  );
+  const primaryGmailAccount = accounts[0] || null;
+  const selectConnectedDefault = (value, fallback = '') => {
+    const normalized = normalizeWorkspaceAccountEmail(value);
+    return normalized && accounts.includes(normalized) ? normalized : fallback;
+  };
   return {
     connectedGmailAccounts: accounts,
-    primaryGmailAccount: accounts[0] || null,
+    primaryGmailAccount,
+    defaultGmailAccount: selectConnectedDefault(defaultGmailAccount, primaryGmailAccount || ''),
+    defaultSendingAccount: selectConnectedDefault(defaultSendingAccount, ''),
+    defaultCalendarAccount: selectConnectedDefault(defaultCalendarAccount, primaryGmailAccount || ''),
     gmailLabelCache: new Map(),
     gmailAccountsTouched: new Set(),
     gmailSearchAccounts: new Set(),
@@ -182,7 +235,23 @@ function createWorkspaceExecutionState({ connectedGmailAccounts = [] } = {}) {
     recentGmailSearches: [],
     recentCalendarQueries: [],
     createdLabels: [],
+    failureFingerprints: new Map(),
   };
+}
+
+async function createWorkspaceExecutionStateFromStore({ connectedAccounts = null } = {}) {
+  const GmailAuth = require('../../models/GmailAuth');
+  const UserPreferences = require('../../models/UserPreferences');
+  const [accountDocs, preferences] = await Promise.all([
+    Array.isArray(connectedAccounts) ? connectedAccounts : GmailAuth.getAll().catch(() => []),
+    UserPreferences.findById('singleton').lean().catch(() => null),
+  ]);
+  return createWorkspaceExecutionState({
+    connectedGmailAccounts: (accountDocs || []).map((account) => account?.email || account).filter(Boolean),
+    defaultGmailAccount: preferences?.defaultGmailAccount || '',
+    defaultSendingAccount: preferences?.defaultSendingAccount || '',
+    defaultCalendarAccount: preferences?.defaultCalendarAccount || '',
+  });
 }
 
 function resolveWorkspaceAccount(account, executionState) {
@@ -313,6 +382,9 @@ function orderWorkspaceActionsByDependency(actions) {
 module.exports = {
   buildWorkspaceExecutionCoverageLines,
   createWorkspaceExecutionState,
+  createWorkspaceExecutionStateFromStore,
+  normalizeWorkspaceAccountEmail,
+  normalizeWorkspaceActionAccount,
   normalizeWorkspaceLabelRef,
   orderWorkspaceActionsByDependency,
   prepareActionForExecution,

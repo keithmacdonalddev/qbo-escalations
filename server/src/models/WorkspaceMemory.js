@@ -3,6 +3,15 @@
 const mongoose = require('mongoose');
 
 const MEMORY_TYPES = ['trip', 'preference', 'pattern', 'fact', 'alert'];
+const MEMORY_TRUST_STATUSES = ['durable', 'pending'];
+const MEMORY_PROVENANCE_KINDS = [
+  'explicit-user-statement',
+  'assistant-observation',
+  'email-observation',
+  'manual-review',
+  'legacy',
+];
+const LEGACY_UNTRUSTED_SOURCE_PATTERN = /^(?:email:|auto-extracted from agent response|auto-detected entity)/i;
 
 const workspaceMemorySchema = new mongoose.Schema({
   type: {
@@ -32,6 +41,31 @@ const workspaceMemorySchema = new mongoose.Schema({
     min: 0,
     max: 1,
   },
+  trustStatus: {
+    type: String,
+    enum: MEMORY_TRUST_STATUSES,
+    default: 'pending',
+    index: true,
+  },
+  provenance: {
+    kind: {
+      type: String,
+      enum: MEMORY_PROVENANCE_KINDS,
+      default: 'legacy',
+    },
+    sourceId: {
+      type: String,
+      default: '',
+    },
+    excerpt: {
+      type: String,
+      default: '',
+    },
+    capturedAt: {
+      type: Date,
+      default: null,
+    },
+  },
   expiresAt: {
     type: Date,
     default: null,
@@ -58,6 +92,7 @@ workspaceMemorySchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 // Query by type
 workspaceMemorySchema.index({ type: 1, updatedAt: -1 });
+workspaceMemorySchema.index({ trustStatus: 1, type: 1, updatedAt: -1 });
 
 // Text index for search on content + key
 workspaceMemorySchema.index({ content: 'text', key: 'text' });
@@ -74,6 +109,17 @@ workspaceMemorySchema.pre('save', function () {
 // Static methods
 // ---------------------------------------------------------------------------
 
+workspaceMemorySchema.statics.buildDurableFilter = function (additional = {}) {
+  return {
+    $and: [
+      additional,
+      { $or: [{ trustStatus: 'durable' }, { trustStatus: { $exists: false } }] },
+      { source: { $not: LEGACY_UNTRUSTED_SOURCE_PATTERN } },
+      { $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] },
+    ],
+  };
+};
+
 /**
  * Full-text search on content + key fields.
  * Falls back to regex search if text index yields no results.
@@ -82,7 +128,7 @@ workspaceMemorySchema.pre('save', function () {
  */
 workspaceMemorySchema.statics.findRelevant = async function (query, limit = 10) {
   if (!query || typeof query !== 'string' || !query.trim()) {
-    return this.find({ $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] })
+    return this.find(this.buildDurableFilter())
       .sort({ updatedAt: -1 })
       .limit(limit)
       .lean();
@@ -93,10 +139,7 @@ workspaceMemorySchema.statics.findRelevant = async function (query, limit = 10) 
   // Try text search first (uses the text index)
   try {
     const textResults = await this.find(
-      {
-        $text: { $search: trimmed },
-        $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
-      },
+      this.buildDurableFilter({ $text: { $search: trimmed } }),
       { score: { $meta: 'textScore' } },
     )
       .sort({ score: { $meta: 'textScore' } })
@@ -111,12 +154,7 @@ workspaceMemorySchema.statics.findRelevant = async function (query, limit = 10) 
   // Fallback: case-insensitive regex search on content and key
   const escapedQuery = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(escapedQuery, 'i');
-  return this.find({
-    $and: [
-      { $or: [{ content: regex }, { key: regex }] },
-      { $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }] },
-    ],
-  })
+  return this.find(this.buildDurableFilter({ $or: [{ content: regex }, { key: regex }] }))
     .sort({ updatedAt: -1 })
     .limit(limit)
     .lean();
@@ -148,10 +186,7 @@ workspaceMemorySchema.statics.upsertFact = async function (key, data) {
  * @param {string} type - Memory type
  */
 workspaceMemorySchema.statics.getByType = async function (type) {
-  return this.find({
-    type,
-    $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
-  })
+  return this.find(this.buildDurableFilter({ type }))
     .sort({ updatedAt: -1 })
     .lean();
 };

@@ -1,6 +1,6 @@
 # Observability Review
 
-Static review of `C:\Projects\qbo-escalations` completed 2026-07-09 and refreshed for AI Management and Connected Accounts on 2026-07-21. The evidence collector ran again in read-only mode on 2026-07-23 UTC while the development-startup experience was reviewed. No application server, client server, gateway, model server, database process, or other long-running service was started or changed by that review.
+Static review of `C:\Projects\qbo-escalations` completed 2026-07-09 and refreshed for AI Management and Connected Accounts on 2026-07-21. The evidence collector ran again in read-only mode on 2026-07-23 UTC while the development-startup experience was reviewed. An agent-execution hardening review was added on 2026-07-24. No application server, client server, gateway, model server, database process, or other long-running service was started or changed by those reviews.
 
 ## 1. Plain-English summary
 
@@ -30,7 +30,7 @@ The most important next fix is to make the existing evidence joinable and durabl
 | Development startup             | Friendly port preflight, API-before-client readiness, concise restart/proxy explanations, and launcher-owned process-tree cleanup                                  | `scripts/dev-launcher.js`, `server/nodemon.json`, `client/vite.config.js`                                                      | Temporary terminal output                                                                                          | Why the current development run started, reused an existing stack, stopped safely, or refused to start             |
 | Request tracking                | Every Express request receives or generates `req.requestId`; the response includes `X-Request-ID`                                                                   | `server/src/middleware/request-id.js:4-13`, `server/src/app.js:32-35`                                                         | Request ID itself is durable only when copied into another record                                                  | A server-side label for following a request                                    |
 | AI chat and parse traces        | Mongo-backed `AiTrace` records include request ID, route, status, prompt preview, providers/models, attempts, fallbacks, timings, usage, outcomes, and stage events | `server/src/models/AiTrace.js:134-169`, `server/src/services/ai-traces.js:216-247`, `server/src/routes/traces.js`             | Durable MongoDB records                                                                                            | What the app believes happened during chat and parse operations                |
-| Provider-call evidence          | Provider-specific request/response, CLI stdout/stderr/events, errors, timing, gateway request ID, and redaction metadata can be captured                            | `server/src/models/ProviderCallPackage.js:462-507`, `server/src/services/provider-call-package-recorder.js:1201-1240`         | Durable MongoDB plus possible files under `server/data/provider-call-packages`; default Mongo retention is 30 days | Detailed forensic evidence for captured provider calls                         |
+| Provider-call evidence          | Product calls default to a minimal manifest plus a bounded, integrity-checked final-result handoff; full request/response and CLI events require an explicit diagnostic or evaluation purpose. Provider reasoning is retained separately as labelled diagnostic evidence. | `server/src/models/ProviderCallPackage.js`, `server/src/services/provider-capture-policy.js`, `server/src/services/provider-reasoning-evidence.js` | Durable MongoDB plus possible files under `server/data/provider-call-packages`; default Mongo retention is 30 days | Which provider/model ran, the bounded product result, integrity/provenance, and—when deliberately enabled—deeper diagnostic evidence |
 | Usage and cost                  | Provider, model, request ID, attempt, tokens, calculated cost, status, and latency                                                                                  | `server/src/models/UsageLog.js:17-68`, `server/src/lib/usage-writer.js`                                                       | Durable MongoDB with a default 365-day TTL                                                                         | Usage and cost accounting when usage/rates are available                       |
 | Image-parser history            | Provider/model, requested model, fallback, prompt ID, image sizes, parse output, validation, errors, provider trace/package reference, and source image metadata    | `server/src/models/ImageParseResult.js:14-87`, `server/src/routes/image-parser.js:503-662`                                    | Durable MongoDB with a default 90-day TTL; source images are archived separately                                   | Why a stored image parse succeeded, failed, or used a fallback                 |
 | Provider-health history         | Provider readiness/canary snapshots, status, diagnostics, latency, usage, fallback attempts, and provider errors                                                    | `server/src/lib/provider-health-log-store.js:10-143`, `server/src/routes/agent-identities.js:292-317`                         | JSONL file, path controlled by `PROVIDER_HEALTH_LOG_PATH`                                                          | Historical provider-health checks                                              |
@@ -58,7 +58,8 @@ Important retention limits:
 - `UsageLog` defaults to 365 days through `USAGE_LOG_TTL_DAYS`.
 - `ImageParseResult` defaults to 90 days through `IMAGE_PARSE_RESULT_TTL_DAYS`.
 - `ProviderCallPackage` defaults to 30 days through `PROVIDER_CALL_PACKAGE_TTL_DAYS`.
-- Large provider payloads can be externalized to disk. The provider-package model explicitly notes that MongoDB TTL does not delete those external files, so an on-disk cleanup job is still missing.
+- Product calls now omit raw request/response traffic by default. Full traffic is limited to explicit diagnostic/evaluation capture, while bounded provider reasoning remains available as labelled evidence for model and prompt review.
+- Large diagnostic provider payloads can be externalized to disk. Failed recorder saves clean up their exact sidecar directory, but MongoDB TTL still does not delete expired external files, so a scheduled on-disk reconciliation job is still missing.
 - The server-error ring buffer and client breadcrumbs are not durable at all.
 
 There is no single platform-wide event record that consistently answers: actor, action, target, old value, new value, request ID, trace ID, result, and reason.
@@ -416,3 +417,34 @@ These ideas were mentioned in the original scrap-paper note but are not fully de
 | `recent-session-skill-miner` | Personal Codex workflow | Decide whether reviewing recent Codex sessions for repeated workflows is valuable enough to automate. |
 
 `repo-observability-reviewer` is already selected and used for this QBO review, so it is not part of the pending-decision list.
+
+---
+
+## 18. Agent architecture hardening addendum (2026-07-24)
+
+### What is safer now
+
+- Shared tools are selected from immutable, versioned capability sets for each agent and use case. The server rejects unknown tools, unknown agent/use-case pairs, and requests for more authority than the assigned set. The effective allowlist and its hash are recorded with provider evidence.
+- Workspace email, calendar, current-view, alert, memory, and tool-result content is bounded and serialized as untrusted evidence. Room summaries, room memory, peer-agent messages, image transcription, parsing output, and investigation matches receive the same treatment before they can influence a model.
+- Main chat, retry, room, and Workspace requests check the final assembled prompt size before initial provider dispatch. Oversized Workspace input fails explicitly rather than being silently truncated into a misleading request.
+- Product provider packages default to a minimal manifest. The durable product handoff contains only bounded final assistant text, allowlisted scalar usage, provider/model/source provenance, byte length, and SHA-256. Raw provider traffic requires an explicit approved diagnostic/evaluation purpose.
+- Provider reasoning remains available for provider comparison and prompt-efficiency work, but it is labelled diagnostic evidence rather than answer authority. Retrieval verifies path containment, maximum size, stored byte length, and SHA-256.
+- Consequential Workspace actions have exact parameter hashes, account proof, expiring single-use approvals, pre-dispatch evidence, execution leases, and an `outcome-unknown` state that is never automatically replayed.
+- Product fallback cannot be unlocked by a caller claiming its own test is trusted. Until the server owns the canonical evaluation fixtures and signs the result, fallback is selected as a candidate but receives no production call.
+- `AgentRun` now provides a tested persistence foundation for idempotency, leases, attempts, cancellation, stale runs, prompt/provider/context hashes, and success evidence requirements.
+
+### What this does not prove yet
+
+- `AgentRun` is not connected to the live chat, room, or Workspace execution paths. Browser closure or an API restart can still abort current SSE-owned work, and room/Workspace coordination still relies on process-local maps.
+- There is no server-owned evaluation authority yet, so ordinary product fallback is intentionally unavailable. Harness runs remain useful diagnostic history and reasoning evidence, not production authorization.
+- The shared tool loop still needs one end-to-end deadline covering every model round and tool call, plus prompt re-budgeting as the multi-round transcript grows.
+- Cost estimates begin before all late prompt augmentation and do not yet price every actual fallback/parallel model and tool round from the final request.
+- Reasoning evidence still needs immutable run/attempt/round identity; some compatibility aggregation remains provider-keyed or substring-based.
+- External diagnostic payloads have save-failure cleanup but no scheduled janitor for files orphaned by MongoDB TTL expiry.
+- Prompt-file edits and Knowledge Base edits still need stronger optimistic concurrency so two simultaneous editors cannot silently overwrite one another.
+- Workspace briefing and other schedulers still use process-local timing/locks; multiple API instances can duplicate provider work even if the final database upsert is unique.
+- The local server is loopback-bound by default. If remote exposure is ever enabled, add trusted Host validation and real operator/session authentication; CORS alone is not an authorization boundary.
+
+### Confidence boundary
+
+Focused deterministic tests cover authority rejection, prompt-injection payloads, provider capture/readback, fallback blocking, action ambiguity, Workspace memory provenance, room peer-message attribution, and AgentRun invariants. The client build and focused component tests pass. A read-only browser check confirmed the changed Workspace authority copy and the effective per-agent tool counts on the already-running local app, with no browser-console errors. No live provider, connected-Google mutation, or repeated browser reliability run was performed for this hardening, so those gates remain incomplete rather than passed.

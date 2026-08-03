@@ -2404,27 +2404,18 @@ test('recovery execution keeps the reviewed runtime snapshot when live defaults 
   assert.equal(operation.runtimeSnapshot.model, reviewedRuntime.model);
 });
 
-test('confirmation refuses a reviewed provider that server-side readiness knows is unsupported', async () => {
+test('recovery planning rejects an unknown provider before exposing a confirmable plan', async () => {
   runtimeDefaultsStub = {
     ...runtimeDefaultsStub,
     provider: 'unsupported-recovery-provider',
     model: 'unsupported-model',
   };
   const seeded = await seedConversation({ state: 'rerun' });
-  const recovery = await getRecoveryOptions(app, seeded.conversation._id);
-  const plan = triagePlan(recovery);
-  assert.match(plan.readiness.label, /not supported/i);
-
-  const confirmation = await confirmPlan(
-    app,
-    seeded.conversation._id,
-    recovery,
-    plan,
-    'unsupported-readiness'
-  );
-  assert.equal(confirmation.status, 409, JSON.stringify(confirmation.body));
-  assert.equal(confirmation.body.code, 'RECOVERY_PROVIDER_NOT_READY');
-  assert.match(confirmation.body.error, /not supported/i);
+  const response = await supertest(app)
+    .get(`/api/conversations/${seeded.conversation._id}/evidence/recovery`);
+  assert.equal(response.status, 400, JSON.stringify(response.body));
+  assert.equal(response.body.code, 'UNKNOWN_PROVIDER');
+  assert.match(response.body.error, /unknown provider/i);
   assert.equal(await RecoveryOperation.countDocuments({}), 0);
   assert.equal(providerStub.calls.length, 0);
 });

@@ -6,12 +6,17 @@ const Conversation = require('../../models/Conversation');
 const ParallelCandidateTurn = require('../../models/ParallelCandidateTurn');
 const { normalizeChatRuntimeSettings } = require('../../lib/chat-settings');
 const { normalizeChatImages } = require('../../lib/chat-image');
+const { measurePromptSections, validateAgentTextOutput, validateCitationIndexes } = require('../../lib/agent-output-contract');
 const { applyImageResponseCompliance } = require('../../lib/chat-triage');
 const { createRateLimiter } = require('../../middleware/rate-limit');
 const { isValidProvider, normalizeProvider } = require('../../services/providers/registry');
 const { normalizeModelOverride, startChatOrchestration } = require('../../services/chat-orchestrator');
+const { createDurableAgentExecution } = require('../../services/durable-agent-dispatcher');
 const { runAgentToolLoop } = require('../../services/agent-tool-loop');
-const { SHARED_AGENT_TOOL_LINES } = require('../../services/shared-agent-tools');
+const {
+  buildSharedAgentToolLines,
+} = require('../../services/shared-agent-tools');
+const { getMaximumAgentToolNames } = require('../../services/agent-tool-capabilities');
 const {
   createAiOperation,
   updateAiOperation,
@@ -94,12 +99,44 @@ const SSE_SAFETY_TIMEOUT_MS = Number.isFinite(rawSseSafetyTimeoutMs) && rawSseSa
   ? rawSseSafetyTimeoutMs
   : 180_000;
 const MAIN_CHAT_TOOL_AGENT_ID = 'main-chat-assistant';
+const MAIN_CHAT_TOOL_USE_CASE = 'main-chat';
+const MAIN_CHAT_ALLOWED_TOOL_NAMES = getMaximumAgentToolNames(
+  MAIN_CHAT_TOOL_AGENT_ID,
+  MAIN_CHAT_TOOL_USE_CASE,
+);
 const CHAT_ACTIVITY_AGENT_ID = 'chat';
 // The image-parser leg of chat is owned by the `image-analyst` AgentIdentity
 // (see AGENT_RUNTIME_DEFINITIONS: id `image-parser` maps to agentId
 // `image-analyst`). Its persisted profile runtime carries the operator's
 // configured backup.
 const IMAGE_PARSER_AGENT_ID = 'image-analyst';
+
+async function resolveMainChatAgentGate() {
+  try {
+    const identity = await getAgentIdentity(CHAT_ACTIVITY_AGENT_ID);
+    if (!identity) {
+      return {
+        ok: false,
+        status: 503,
+        body: { ok: false, code: 'AGENT_STATE_UNAVAILABLE', error: 'QBO Assistant availability could not be verified.' },
+      };
+    }
+    if (identity.enabled === false) {
+      return {
+        ok: false,
+        status: 409,
+        body: { ok: false, code: 'AGENT_DISABLED', error: 'QBO Assistant is disabled. Re-enable it from Agents before sending or retrying chat.' },
+      };
+    }
+    return { ok: true, identity };
+  } catch {
+    return {
+      ok: false,
+      status: 503,
+      body: { ok: false, code: 'AGENT_STATE_UNAVAILABLE', error: 'QBO Assistant availability could not be verified.' },
+    };
+  }
+}
 
 async function persistRetryAnalystFailure(conversation, {
   provider,
@@ -297,7 +334,7 @@ async function buildMainChatSystemPrompt(basePrompt, enableTools) {
     buildIdentityMemoryContext(identity),
     buildRelationshipCoordinationContext(identity, identities.map((item) => item.agentId).filter((id) => id !== 'chat')),
     buildCommunityProfilesContext('chat', identities),
-    enableTools ? SHARED_AGENT_TOOL_LINES : '',
+    enableTools ? buildSharedAgentToolLines(MAIN_CHAT_ALLOWED_TOOL_NAMES) : '',
   ].filter(Boolean).join('\n\n');
 }
 
@@ -309,10 +346,29 @@ function buildConversationCaptureMetadata(conversation) {
   const caseNumber = safeString(conversation?.caseIntake?.parseFields?.caseNumber, '').trim();
   return {
     agentId: CHAT_ACTIVITY_AGENT_ID,
+    surface: 'chat',
+    useCase: 'chat',
+    promptId: 'chat-core',
     conversationId: conversation?._id ? conversation._id.toString() : '',
     ...(caseNumber ? { caseNumber } : {}),
     ...(conversation?.escalationId ? { escalationId: String(conversation.escalationId) } : {}),
   };
+}
+
+function messageContentForBudget(message) {
+  if (typeof message?.content === 'string') return message.content;
+  try { return JSON.stringify(message?.content ?? ''); } catch { return ''; }
+}
+
+function buildFinalPromptManifest(systemPrompt, messages, runtimeSettings) {
+  return measurePromptSections([
+    { id: 'orchestration-system', kind: 'required', text: safeString(systemPrompt, '') },
+    ...(Array.isArray(messages) ? messages : []).map((entry, index) => ({
+      id: `message-${index + 1}`,
+      kind: entry?.role === 'user' ? 'user-input' : 'required',
+      text: messageContentForBudget(entry),
+    })),
+  ], { maxChars: Math.max(1000, Number(runtimeSettings?.context?.maxInputTokens || 12000) * 4) });
 }
 
 function startMainChatExecution({
@@ -380,6 +436,7 @@ function startMainChatExecution({
       systemPrompt,
       messagesForModel: messages,
       timeoutMs,
+      toolUseCase: MAIN_CHAT_TOOL_USE_CASE,
       captureMetadata,
       runtimePolicy: {
         mode: policy.mode,
@@ -390,6 +447,7 @@ function startMainChatExecution({
         autoFailover: policy.autoFailover === true,
         reasoningEffort,
       },
+      allowedToolNames: MAIN_CHAT_ALLOWED_TOOL_NAMES,
       onChunk,
       onThinkingChunk,
       onStatus: handleToolLoopStatus,
@@ -406,6 +464,23 @@ function startMainChatExecution({
       },
     });
     if (cancelled) return;
+    const outputValidation = validateAgentTextOutput(result.fullResponse || '');
+    const citationValidation = validateCitationIndexes(
+      result.fullResponse || '',
+      captureMetadata?.citationSources || [],
+      { reliesOnKnowledge: captureMetadata?.reliesOnKnowledge === true }
+    );
+    if (!outputValidation.valid || !citationValidation.valid) {
+      const validationError = new Error(
+        outputValidation.issues[0]?.message
+          || (citationValidation.missingRequired
+            ? 'Knowledge-backed output omitted required source citations.'
+            : 'Agent output referenced an invalid source citation.')
+      );
+      validationError.code = 'OUTPUT_VALIDATION_FAILED';
+      validationError.validation = { output: outputValidation, citations: citationValidation };
+      throw validationError;
+    }
     await onDone({
       fullResponse: result.fullResponse,
       usage: result.usage || null,
@@ -416,6 +491,7 @@ function startMainChatExecution({
       fallbackFrom: result.fallbackFrom || null,
       attempts: Array.isArray(result.attempts) ? result.attempts : [],
       thinking: result.thinking || '',
+      validation: { output: outputValidation, citations: citationValidation, promptEfficiency: captureMetadata?.promptManifest || null },
       providerThinking: result.providerThinking || {},
       toolActions: result.actions || [],
       toolIterations: result.iterations || 0,
@@ -514,6 +590,11 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   if (generationValidationError) {
     return res.status(generationValidationError.status).json(generationValidationError.body);
   }
+  const analystGate = await resolveMainChatAgentGate();
+  if (!analystGate.ok) {
+    return res.status(analystGate.status).json(analystGate.body);
+  }
+  const analystIdentity = analystGate.identity;
   // Get or create conversation
   let conversation;
   let isNewConversation = false;
@@ -577,7 +658,6 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   // resolved policy so the analyst leg fails over to its profile-configured
   // backup when the primary provider crashes — even in single mode. The
   // profile is the single source of truth for provider/model selection.
-  const analystIdentity = await getAgentIdentity('chat').catch(() => null);
   const policy = resolveAnalystFailoverPolicy(resolvedPolicy, analystIdentity?.runtime || null);
   const primaryTraceModel = resolveRequestedModel(policy.primaryProvider, policy.primaryModel);
   const fallbackTraceModel = resolveRequestedModel(policy.fallbackProvider, policy.fallbackModel);
@@ -944,6 +1024,30 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   }
   const useSharedAgentTools = policy.mode !== 'parallel' && !runtimeSettings.debug.disableSharedAgentTools;
   const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
+  const promptManifest = buildFinalPromptManifest(
+    orchestrationSystemPrompt,
+    contextBundle.messagesForModel,
+    runtimeSettings
+  );
+  if (!promptManifest.withinBudget) {
+    await appendTraceEvent(trace?._id, {
+      key: 'final_prompt_budget_exceeded',
+      label: 'Final prompt budget exceeded',
+      status: 'error',
+      code: 'FINAL_PROMPT_BUDGET_EXCEEDED',
+      message: `Final assembled prompt is ${promptManifest.totalChars} characters; budget is ${promptManifest.maxChars}.`,
+      detail: promptManifest,
+    }, traceStartedAt);
+    try {
+      res.write('event: error\ndata: ' + JSON.stringify({
+        error: 'The fully assembled request exceeded the configured input budget. Shorten the conversation or remove optional evidence.',
+        code: 'FINAL_PROMPT_BUDGET_EXCEEDED',
+        promptManifest,
+      }) + '\n\n');
+      res.end();
+    } catch { /* client disconnected */ }
+    return;
+  }
   if (invMatchResult.matches.length > 0) {
     await appendTraceEvent(trace?._id, {
       key: 'inv_match_completed',
@@ -1008,6 +1112,58 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     }
   }
 
+  let durableExecution;
+  try {
+    durableExecution = await createDurableAgentExecution({
+      idempotencyKey: `chat:${req.requestId}:main`,
+      manifest: {
+        agentId: CHAT_ACTIVITY_AGENT_ID,
+        useCase: 'chat',
+        surface: 'chat',
+        purpose: 'product-chat-response',
+        trigger: 'operator-request',
+        requestId: req.requestId,
+        promptId: 'chat-core',
+        promptVersion: 'runtime-assembled-v1',
+        actor: 'local-operator',
+        refs: {
+          conversationId: conversation._id.toString(),
+          escalationId: conversation.escalationId ? conversation.escalationId.toString() : null,
+          caseNumber: safeString(conversation.caseIntake?.parseFields?.caseNumber, '') || null,
+          contextRef: trace ? `ai-trace:${trace._id}` : null,
+        },
+      },
+      inputs: {
+        prompt: orchestrationSystemPrompt,
+        provider: policy,
+        context: contextBundle.messagesForModel,
+        request: {
+          mode: policy.mode,
+          reasoningEffort: effectiveReasoningEffort,
+          timeoutMs: effectiveTimeoutMs,
+          useSharedAgentTools,
+          promptManifest,
+        },
+      },
+    });
+    await durableExecution.beginAttempt({
+      agentId: CHAT_ACTIVITY_AGENT_ID,
+      provider: policy.primaryProvider,
+      model: policy.primaryModel || primaryTraceModel,
+      role: 'primary',
+    });
+  } catch (error) {
+    try {
+      res.write('event: error\ndata: ' + JSON.stringify({
+        error: error.message || 'The durable agent run could not be started.',
+        code: error.code || 'AGENT_RUN_START_FAILED',
+        agentRun: error.run || null,
+      }) + '\n\n');
+      res.end();
+    } catch { /* client disconnected */ }
+    return;
+  }
+
   const contextDebugPayload = buildContextDebugPayload(runtimeSettings, contextBundle.contextDebug, guardrail.costEstimate);
   let responseClosed = false;
   let streamSettled = false;
@@ -1016,17 +1172,18 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   let sseSafetyTimeout = null;
   let cleanupFn = null;
 
-  // Clean up on client disconnect. Attach this before any SSE writes so fast
-  // disconnects cannot miss the close event and leave timers alive.
+  // The SSE connection is presentation only. A browser close detaches the
+  // client but the durable run keeps working and persists its result.
   res.on('close', () => {
     responseClosed = true;
+    durableExecution.detachClient();
     if (heartbeat) clearInterval(heartbeat);
     if (sseSafetyTimeout) clearTimeout(sseSafetyTimeout);
     if (!streamSettled) {
       if (runtimeOperationId) {
         updateAiOperation(runtimeOperationId, {
           clientConnected: false,
-          phase: 'aborting',
+          phase: 'background',
         });
       }
       appendTraceEvent(trace?._id, {
@@ -1038,7 +1195,6 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
         code: 'CLIENT_DISCONNECTED',
         message: 'The client connection closed before the request settled.',
       }, traceStartedAt).catch(() => {});
-      if (cleanupFn) cleanupFn();
     }
   });
 
@@ -1055,6 +1211,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     conversationId: conversation._id.toString(),
     requestId: req.requestId,
     traceId: trace ? trace._id.toString() : null,
+    agentRunId: durableExecution.run.id,
     provider: policy.primaryProvider, // backward-compat
     primaryProvider: policy.primaryProvider,
     primaryModel: policy.primaryModel || null,
@@ -1121,62 +1278,23 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
   }, 15000);
   if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
-  // SSE safety timeout — force-close if stream never settles
+  // Close only the presentation stream. The durable executor continues and
+  // saves the result after the browser-facing deadline.
   sseSafetyTimeout = setTimeout(async () => {
     if (streamSettled || responseClosed) return;
-    console.error('[chat] SSE safety timeout hit after %dms — force-closing hung stream', SSE_SAFETY_TIMEOUT_MS);
-    streamSettled = true;
+    console.warn('[chat] SSE presentation timeout hit after %dms; durable run continues', SSE_SAFETY_TIMEOUT_MS);
+    responseClosed = true;
+    durableExecution.detachClient();
     clearInterval(heartbeat);
-    if (conversation.caseIntake && conversation.caseIntake.status === 'analyst-running') {
-      mainEventBus.emit('error', {
-        code: 'SSE_STREAM_TIMEOUT',
-        message: 'Request timed out - please try again',
-      });
-      mainEventBus.emit('stage.completed', {
-        status: 'failed',
-        durationMs: SSE_SAFETY_TIMEOUT_MS,
-        provider: policy.primaryProvider,
-        model: primaryTraceModel,
-      });
-      conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
-        provider: policy.primaryProvider,
-        model: primaryTraceModel,
-        traceId: trace ? trace._id.toString() : null,
-        error: {
-          code: 'SSE_STREAM_TIMEOUT',
-          message: 'Request timed out - please try again',
-        },
-        evidenceReceipt: {
-          attempted: true,
-          completed: false,
-          failed: true,
-          messageSaved: false,
-          thinkingCaptured: false,
-          traceId: trace ? trace._id.toString() : '',
-          requestId: req.requestId,
-          provider: policy.primaryProvider,
-          packageCaptureEnabled,
-          errorCode: 'SSE_STREAM_TIMEOUT',
-          completedAt: new Date(),
-          reportedVia: 'server',
-        },
-        completedAt: new Date(),
-      });
-      conversation.caseIntake = applyStageEventsToCaseIntake(conversation.caseIntake, 'main', mainEventBus.flush());
-      conversation.markModified?.('caseIntake');
-      await saveConversationLenient(conversation).catch(() => {});
-    }
     try {
       res.write('event: error\ndata: ' + JSON.stringify({
-        error: 'Request timed out — please try again',
-        code: 'SSE_STREAM_TIMEOUT',
+        error: 'The live stream closed, but the agent is still working in the background.',
+        code: 'SSE_PRESENTATION_TIMEOUT',
+        agentRunId: durableExecution.run.id,
         caseIntake: conversation.caseIntake || null,
       }) + '\n\n');
       res.end();
     } catch { /* client already gone */ }
-    if (cleanupFn) {
-      try { cleanupFn(); } catch { /* ignore */ }
-    }
   }, SSE_SAFETY_TIMEOUT_MS);
   if (typeof sseSafetyTimeout.unref === 'function') sseSafetyTimeout.unref();
 
@@ -1202,7 +1320,15 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
     systemPrompt: orchestrationSystemPrompt,
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
-    captureMetadata: buildConversationCaptureMetadata(conversation),
+    captureMetadata: {
+      ...buildConversationCaptureMetadata(conversation),
+      promptManifest,
+      citationSources: new Array(Array.isArray(contextBundle.citations) ? contextBundle.citations.length : 0).fill(null),
+      // Available sources do not prove that the answer relied on them. Keep
+      // validating any citation the provider emits, but require a citation only
+      // when a caller can explicitly prove knowledge reliance.
+      reliesOnKnowledge: false,
+    },
     onChunk: ({ provider: chunkProvider, text }) => {
       recordAiChunk(runtimeOperationId, text, { provider: chunkProvider });
       traceStats.chunkCount += 1;
@@ -1373,6 +1499,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       const quickActions = (compliantData.mode !== 'parallel')
         ? extractQuickActions(compliantData.fullResponse)
         : [];
+      const assistantMessageStartIndex = conversation.messages.length;
 
       try {
         if (compliantData.mode === 'parallel' && Array.isArray(compliantData.results)) {
@@ -1647,6 +1774,24 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           await recordAnalystTraceWriteFailure(conversation, traceWriteError, { route: '/api/chat' });
         }
 
+        const evidenceRefs = conversation.messages
+          .slice(assistantMessageStartIndex)
+          .map((entry, index) => ({ entry, index: assistantMessageStartIndex + index }))
+          .filter(({ entry }) => entry.role === 'assistant' && safeString(entry.content, '').trim())
+          .map(({ index }) => ({
+            kind: 'conversation-message',
+            id: `${conversation._id}:${index}`,
+          }));
+        await durableExecution.completeSucceeded({
+          attempts,
+          evidenceRefs,
+          result: {
+            providerUsed: compliantData.providerUsed || policy.primaryProvider,
+            modelUsed: compliantData.modelUsed || '',
+            usage: compliantData.usage || null,
+          },
+        });
+
         // Fire-and-forget: archive images to disk with full metadata
         if (normalizedImages.length > 0) {
           try {
@@ -1718,6 +1863,14 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
           res.end();
         } catch { /* client gone */ }
       } catch (onDoneErr) {
+        await durableExecution.completeFailed({
+          attempts,
+          incomplete: true,
+          error: {
+            code: onDoneErr.code || 'DURABLE_RESULT_SAVE_FAILED',
+            message: onDoneErr.message || 'The response was produced but its durable proof could not be completed.',
+          },
+        }).catch(() => {});
         if (conversation.caseIntake?.evidence?.receipts) {
           const failedAt = new Date();
           conversation.caseIntake = failCaseIntakeAnalystRun(conversation.caseIntake, {
@@ -1819,6 +1972,15 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       });
       const latencyMs = Date.now() - turnStartedAt;
       const attempts = err.attempts || [];
+      await durableExecution.completeFailed({
+        attempts,
+        timedOut: err.code === 'TIMEOUT' || err.code === 'PROVIDER_TIMEOUT',
+        error: {
+          code: err.code || 'PROVIDER_EXEC_FAILED',
+          message: err.message || 'Chat failed',
+          usage: err.usage || null,
+        },
+      }).catch(() => {});
       logAttemptsUsage(attempts, { requestId, service: 'chat', conversationId: conversation._id, mode: policy.mode });
       logChatTurn({
         route: '/api/chat',
@@ -1952,6 +2114,10 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       streamSettled = true;
       clearInterval(heartbeat);
       clearTimeout(sseSafetyTimeout);
+      await durableExecution.requestCancellation({
+        requestedBy: 'agent-runtime-supervisor',
+        reason: 'The active provider execution was explicitly aborted.',
+      }).catch(() => {});
       recordAiEvent(runtimeOperationId, 'aborting', {
         lastError: {
           code: 'CLIENT_ABORT',
@@ -2038,6 +2204,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       deleteAiOperation(runtimeOperationId);
     },
   });
+  durableExecution.registerAbort(cleanupFn);
   attachAiOperationController(runtimeOperationId, {
     abort: async (reason = 'Chat request aborted by supervisor') => {
       if (streamSettled) return;
@@ -2092,7 +2259,7 @@ chatRouter.post('/', chatRateLimit, async (req, res) => {
       deleteAiOperation(runtimeOperationId);
     },
   });
-  if (responseClosed && cleanupFn && !streamSettled) cleanupFn();
+  if (responseClosed) durableExecution.detachClient();
 });
 
 // POST /api/chat/retry -- Retry last message in a conversation (removes bad assistant response, re-sends)
@@ -2141,6 +2308,11 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   if (retryValidationError) {
     return res.status(retryValidationError.status).json(retryValidationError.body);
   }
+  const analystGate = await resolveMainChatAgentGate();
+  if (!analystGate.ok) {
+    return res.status(analystGate.status).json(analystGate.body);
+  }
+  const analystIdentity = analystGate.identity;
 
   const conversation = await Conversation.findById(conversationId);
   if (!conversation) {
@@ -2229,7 +2401,6 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   }
   // Same analyst auto-failover layering as the main send path so retries keep
   // the QBO Assistant profile's resilient backup.
-  const analystIdentity = await getAgentIdentity('chat').catch(() => null);
   const policy = resolveAnalystFailoverPolicy(resolvedPolicy, analystIdentity?.runtime || null);
   const primaryTraceModel = resolveRequestedModel(policy.primaryProvider, policy.primaryModel);
   const fallbackTraceModel = resolveRequestedModel(policy.fallbackProvider, policy.fallbackModel);
@@ -2462,6 +2633,30 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
   });
   const useSharedAgentTools = policy.mode !== 'parallel' && !runtimeSettings.debug.disableSharedAgentTools;
   const orchestrationSystemPrompt = await buildMainChatSystemPrompt(effectiveSystemPrompt, useSharedAgentTools);
+  const promptManifest = buildFinalPromptManifest(
+    orchestrationSystemPrompt,
+    contextBundle.messagesForModel,
+    runtimeSettings
+  );
+  if (!promptManifest.withinBudget) {
+    await appendTraceEvent(trace?._id, {
+      key: 'final_prompt_budget_exceeded',
+      label: 'Final prompt budget exceeded',
+      status: 'error',
+      code: 'FINAL_PROMPT_BUDGET_EXCEEDED',
+      message: `Final assembled retry prompt is ${promptManifest.totalChars} characters; budget is ${promptManifest.maxChars}.`,
+      detail: promptManifest,
+    }, traceStartedAt);
+    try {
+      res.write('event: error\ndata: ' + JSON.stringify({
+        error: 'The fully assembled retry exceeded the configured input budget. Shorten the conversation or remove optional evidence.',
+        code: 'FINAL_PROMPT_BUDGET_EXCEEDED',
+        promptManifest,
+      }) + '\n\n');
+      res.end();
+    } catch { /* client disconnected */ }
+    return;
+  }
   if (invMatchResult.matches.length > 0) {
     await appendTraceEvent(trace?._id, {
       key: 'inv_match_completed',
@@ -2628,7 +2823,14 @@ chatRouter.post('/retry', retryRateLimit, async (req, res) => {
     systemPrompt: orchestrationSystemPrompt,
     reasoningEffort: effectiveReasoningEffort,
     timeoutMs: effectiveTimeoutMs,
-    captureMetadata: buildConversationCaptureMetadata(conversation),
+    captureMetadata: {
+      ...buildConversationCaptureMetadata(conversation),
+      promptManifest,
+      citationSources: new Array(Array.isArray(contextBundle.citations) ? contextBundle.citations.length : 0).fill(null),
+      // Source availability is not evidence of source use. Invalid citations
+      // still fail validation; missing citations require explicit reliance.
+      reliesOnKnowledge: false,
+    },
     onChunk: ({ provider: chunkProvider, text }) => {
       recordAiChunk(retryRuntimeOperationId, text, { provider: chunkProvider });
       traceStats.chunkCount += 1;

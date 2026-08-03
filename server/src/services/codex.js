@@ -979,10 +979,12 @@ async function transcribeImage(imageBase64OrPath, options = {}) {
     operation: 'image-transcribe',
     modelRequested: effectiveModel,
     reasoningEffort: effectiveReasoningEffort,
+    ...(options.captureContext || {}),
     source: {
       file: 'server/src/services/codex.js',
       functionName: 'transcribeImage',
       spawnSite: 'codex.transcribeImage',
+      ...(options.captureContext?.source || {}),
     },
   };
 

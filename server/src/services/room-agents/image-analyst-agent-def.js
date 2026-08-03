@@ -1,5 +1,7 @@
 'use strict';
 
+const { normalizeRoomMessageForAgent } = require('../room-message-trust');
+
 module.exports = {
   id: 'image-analyst',
   name: 'Image Analyst',
@@ -97,18 +99,7 @@ module.exports = {
     ].join('\n');
 
     // --- 3. Format room messages ---
-    const messagesForModel = roomMessages.map((msg) => {
-      if (msg.role === 'assistant' && msg.agentId && msg.agentName) {
-        return {
-          role: 'assistant',
-          content: `[${msg.agentName}]: ${msg.content}`,
-        };
-      }
-      return {
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: msg.content || '',
-      };
-    });
+    const messagesForModel = roomMessages.map((msg) => normalizeRoomMessageForAgent(msg, 'image-analyst'));
 
     return { systemPrompt, messagesForModel };
   },

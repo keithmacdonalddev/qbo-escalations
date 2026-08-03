@@ -26,6 +26,8 @@ function testCaptureContext(callSite) {
     providerPathType: 'direct-http',
     callSite,
     operation: 'chat',
+    captureMode: 'diagnostic',
+    capturePurpose: 'provider-package-contract-test',
     source: {
       file: 'server/src/services/remote-api-providers.js',
       functionName: 'jsonRequestCancelable',
@@ -387,6 +389,8 @@ test('jsonRequestCancelable captures HTTP package when enabled', async () => {
         providerPathType: 'direct-http',
         callSite: 'remote-api-providers:requestKimiChat',
         operation: 'chat',
+        captureMode: 'diagnostic',
+        capturePurpose: 'provider-package-contract-test',
         source: {
           file: 'server/src/services/remote-api-providers.js',
           functionName: 'requestKimiChat',
@@ -460,6 +464,10 @@ test('requestLlmGatewayChat captures gateway package in gateway-specific shape',
         messages: [{ role: 'user', content: 'Use the gateway' }],
         systemPrompt: 'Be brief.',
         model: 'auto',
+        captureMetadata: {
+          captureMode: 'diagnostic',
+          capturePurpose: 'provider-package-contract-test',
+        },
         getApiKeyFn: async () => 'gw-secret',
         requestFn: (method, _baseUrl, urlPath, body, headers, timeoutMs, captureContext) => (
           remoteApiProviders._internal.jsonRequestCancelable(

@@ -155,7 +155,7 @@ http.get = function patchedHttpGet(...args) {
 };
 
 const {
-  parseImage,
+  parseImage: parseImageService,
   checkProviderAvailability,
   clearProviderAvailabilityCache,
   normalizeBase64,
@@ -163,6 +163,14 @@ const {
   getApiKey,
   KEYS_FILE,
 } = require('../src/services/image-parser');
+
+function parseImage(image, options = {}) {
+  return parseImageService(image, {
+    captureMode: 'diagnostic',
+    capturePurpose: 'provider-package-contract-test',
+    ...options,
+  });
+}
 
 test.beforeEach(() => {
   clearProviderAvailabilityCache();

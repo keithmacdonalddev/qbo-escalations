@@ -70,6 +70,8 @@ function makeCaptureContext(overrides = {}) {
     operation: 'image-parse',
     functionName: 'testAnthropic',
     forceCapture: true,
+    captureMode: 'diagnostic',
+    capturePurpose: 'provider-package-contract-test',
     modelRequested: 'claude-sonnet-4-20250514',
     ...overrides,
   };
@@ -293,6 +295,8 @@ test('parseImage Anthropic direct path extracts only after captured package is r
       provider: 'anthropic',
       structured: false,
       timeoutMs: 500,
+      captureMode: 'diagnostic',
+      capturePurpose: 'provider-package-contract-test',
     });
 
     assert.equal(result.text, PARSE_TEXT);
@@ -300,7 +304,7 @@ test('parseImage Anthropic direct path extracts only after captured package is r
     assert.equal(result.usage.outputTokens, 17);
     assert.equal(result.providerTrace.outcome, 'success');
     assert.equal(result.providerTrace.packageCaptureStatus, 'saved');
-    assert.equal(result.providerTrace.providerPayload.sourcePath, 'response.parsedJson.content[type=text].text');
+    assert.equal(result.providerTrace.providerPayload.sourcePath, 'resultHandoff.response.content[type=text]');
 
     const saved = await ProviderCallPackage.findById(result.providerTrace.providerPackageId).lean();
     assert.ok(saved, 'provider package must be readable before parseImage extracts provider content');

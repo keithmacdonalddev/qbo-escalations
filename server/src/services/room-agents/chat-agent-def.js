@@ -2,6 +2,7 @@
 
 const { buildChatModelContext } = require('../../lib/chat-context-builder');
 const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../../lib/chat-settings');
+const { normalizeRoomMessageForAgent } = require('../room-message-trust');
 const { buildRoomImageContextSection } = require('./image-context-section');
 
 module.exports = {
@@ -34,18 +35,7 @@ module.exports = {
     // Normalize room messages for the chat-context-builder.
     // Other agents' messages get a [AgentName] prefix so the LLM can
     // distinguish different speakers. User messages pass through as-is.
-    const normalizedMessages = roomMessages.map(msg => {
-      if (msg.role === 'assistant' && msg.agentId && msg.agentName) {
-        return {
-          role: 'assistant',
-          content: `[${msg.agentName}]: ${msg.content}`,
-        };
-      }
-      return {
-        role: msg.role === 'assistant' ? 'assistant' : 'user',
-        content: msg.content || '',
-      };
-    });
+    const normalizedMessages = roomMessages.map((msg) => normalizeRoomMessageForAgent(msg, 'chat'));
 
     const settings = ctx.aiSettings || DEFAULT_CHAT_RUNTIME_SETTINGS;
 

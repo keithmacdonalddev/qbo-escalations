@@ -99,6 +99,10 @@ function runChat(claude, fakeChild, { lines, exitCode = 0 } = {}) {
     claude.chat({
       messages: [{ role: 'user', content: 'hello evidence layer' }],
       systemPrompt: 'You are the QBO assistant.',
+      captureContext: {
+        captureMode: 'diagnostic',
+        capturePurpose: 'provider-package-contract-test',
+      },
       onChunk: (text) => chunks.push(text),
       onThinkingChunk: (text) => thinking.push(text),
       onDone: (text, usage) => resolve({ ok: true, text, usage }),
@@ -188,6 +192,10 @@ test('claude CLI provider package capture', async (t) => {
     const failure = new Promise((resolve) => {
       claude.chat({
         messages: [{ role: 'user', content: 'will fail' }],
+        captureContext: {
+          captureMode: 'diagnostic',
+          capturePurpose: 'provider-package-contract-test',
+        },
         onChunk() {},
         onDone: () => resolve({ ok: true }),
         onError: (err) => resolve({ ok: false, err }),
@@ -266,7 +274,13 @@ test('claude CLI provider package capture', async (t) => {
     fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 
     try {
-      const pending = claude.transcribeImage(imagePath, { timeoutMs: 5000 });
+      const pending = claude.transcribeImage(imagePath, {
+        timeoutMs: 5000,
+        captureContext: {
+          captureMode: 'diagnostic',
+          capturePurpose: 'provider-package-contract-test',
+        },
+      });
       fakeChild.stdout.emit('data', Buffer.from('TRANSCRIBED: COID 12345, CASE 67890'));
       closeChild(fakeChild, 0);
       const result = await pending;

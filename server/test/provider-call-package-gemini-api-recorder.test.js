@@ -165,7 +165,9 @@ test('buildGeminiApiProviderCallPackage builds a provider-status package', () =>
   const envelope = buildGeminiApiProviderCallPackage(buildGeminiInput({
     callSite: 'image-parser:validateRemoteProvider:gemini',
     operation: 'provider-status',
-  }));
+  }), {
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
+  });
 
   assert.equal(envelope.operation, 'provider-status');
   assert.equal(envelope.geminiApi.providerStatus.ok, true);
@@ -185,7 +187,9 @@ test('buildGeminiApiProviderCallPackage classifies Gemini outcomes and Google er
         details: [{ '@type': 'type.googleapis.com/google.rpc.BadRequest' }],
       },
     },
-  }));
+  }), {
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
+  });
   const invalidJson = buildGeminiApiProviderCallPackage(buildGeminiInput({
     responseBodyText: 'not-json',
   }));
@@ -222,7 +226,9 @@ test('recordGeminiApiProviderCallPackage persists and redacts Gemini packages', 
       apiKey: 'request-secret',
       contents: [{ parts: [{ text: 'keep prompt text' }] }],
     },
-  }));
+  }), {
+    captureContext: { captureMode: 'diagnostic', capturePurpose: 'provider-package-contract-test' },
+  });
 
   assert.equal(result.ok, true);
   const saved = await ProviderCallPackage.findById(result.id).lean();

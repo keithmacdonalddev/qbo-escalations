@@ -1,28 +1,12 @@
 'use strict';
 
-// Regression coverage for analyst (QBO Assistant) auto-failover.
+// Regression coverage for analyst (QBO Assistant) fallback policy.
 //
-// Incident: the analyst ran in mode:'single' with provider sequence [codex]
-// only. When Codex crashed ("Codex CLI exited with code 1") the analyst leg did
-// NOT fail over to a backup, because resolveSequentialProviders only appended a
-// fallback when mode === 'fallback'.
-//
-// Product direction (now): automatic failover is the DEFAULT for EVERY agent.
-// resolveSequentialProviders ALWAYS appends the (distinct) backup for sequential
-// policies — there is no per-agent "mode" or flag that disables it. resolvePolicy
-// guarantees a distinct backup (the neutral global alternate when none is set,
-// re-derived if a configured backup collapses to the primary). The analyst still
-// SOURCES its backup from the "QBO Assistant" agent profile (AgentIdentity key
-// 'chat') runtime fallbackProvider/Model, via the shared resolveAgentBackup
-// helper, but failover itself is unconditional.
-//
-// These tests prove: with a profile-configured distinct backup, a single-mode
-// analyst fails over to THAT backup (proving profile sourcing, since the backup
-// id differs from the global alternate); the same holds on both the plain
-// orchestration path and the shared-agent-tool path; with no profile backup the
-// analyst still fails over to the global alternate; and that the orchestrator now
-// fails over by DEFAULT for any caller (no flag required) while the success path
-// runs only the primary and parallel mode is unaffected.
+// Production failover is fail-closed until a server-owned evaluation authority
+// can prove that the exact backup provider/model and current behavior contract
+// passed. Caller flags and stored profile choices can select a candidate, but
+// cannot authorize it. Explicit provider-comparison/evaluation harness paths may
+// still exercise fallback mechanics without granting product authority.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -36,6 +20,7 @@ const claude = require('../src/services/claude');
 const codex = require('../src/services/codex');
 const { updateAgentRuntime } = require('../src/services/agent-identity-service');
 const { startChatOrchestration } = require('../src/services/chat-orchestrator');
+const { startRoomOrchestration } = require('../src/services/room-orchestrator');
 const { resetProviderHealth } = require('../src/services/provider-health');
 
 const ANALYST_AGENT_ID = 'chat';
@@ -50,22 +35,38 @@ const PROFILE_BACKUP_PROVIDER = 'gpt-5.4';
 const GLOBAL_ALTERNATE_PROVIDER = 'codex';
 
 function stubPrimaryFailsBackupSucceeds(backupText) {
+  const calls = { primary: 0, backup: 0 };
   claude.chat = ({ onError }) => {
+    calls.primary += 1;
     const err = new Error('Codex CLI exited with code 1');
     err.code = 'PROVIDER_EXEC_FAILED';
     onError(err);
     return () => {};
   };
   codex.chat = ({ onChunk, onDone }) => {
+    calls.backup += 1;
     onChunk(backupText);
     onDone(backupText);
     return () => {};
   };
+  return calls;
 }
 
 function parseEvent(text, name) {
   const match = text.match(new RegExp(`event: ${name}\\s+data: (.+)`));
   return match ? JSON.parse(match[1]) : null;
+}
+
+function assertProductFallbackBlocked(text) {
+  const fallback = parseEvent(text, 'fallback');
+  const error = parseEvent(text, 'error');
+  assert.ok(fallback, 'expected a fallback decision event');
+  assert.equal(fallback.blocked, true);
+  assert.equal(fallback.eligible, false);
+  assert.equal(fallback.reason, 'FALLBACK_NOT_EVALUATED');
+  assert.equal(fallback.decision?.reason, 'server_evaluation_authority_not_implemented');
+  assert.ok(error, 'expected the primary failure to terminate the request');
+  assert.equal(parseEvent(text, 'done'), null, 'an unevaluated backup must never complete the product request');
 }
 
 async function seedAnalystRuntime(runtime) {
@@ -127,7 +128,62 @@ test('chat-analyst-failover suite', async (t) => {
   });
 
   await t.test(
-    'single-mode analyst request inherits the profile-configured backup and fails over (plain orchestration path)',
+    'disabled QBO Assistant is rejected before main-chat provider work or conversation creation',
+    async () => {
+      await AgentIdentity.create({ agentId: ANALYST_AGENT_ID, enabled: false });
+      let providerCalls = 0;
+      claude.chat = () => { providerCalls += 1; throw new Error('must not run'); };
+      codex.chat = () => { providerCalls += 1; throw new Error('must not run'); };
+
+      const createResponse = await agent
+        .post('/api/chat')
+        .send({ message: 'do not run a disabled agent' });
+      assert.equal(createResponse.status, 409);
+      assert.equal(createResponse.body.code, 'AGENT_DISABLED');
+      assert.equal(providerCalls, 0);
+      assert.equal(await Conversation.countDocuments({}), 0);
+
+      const conversation = await Conversation.create({
+        title: 'Retry gate fixture',
+        messages: [{ role: 'user', content: 'original question' }],
+      });
+      const retryResponse = await agent
+        .post('/api/chat/retry')
+        .send({ conversationId: conversation._id.toString() });
+      assert.equal(retryResponse.status, 409);
+      assert.equal(retryResponse.body.code, 'AGENT_DISABLED');
+      assert.equal(providerCalls, 0);
+      const unchanged = await Conversation.findById(conversation._id).lean();
+      assert.equal(unchanged.messages.length, 1);
+    }
+  );
+
+  await t.test(
+    'disabled room mention is rejected before provider or tool execution',
+    async () => {
+      await AgentIdentity.create({ agentId: ANALYST_AGENT_ID, enabled: false });
+      let agentStarts = 0;
+      const error = await new Promise((resolve) => {
+        startRoomOrchestration({
+          room: {
+            activeAgents: [ANALYST_AGENT_ID],
+            settings: { orchestrationMode: 'mentioned-only' },
+            messages: [],
+          },
+          userMessage: '@chat help',
+          mentions: [ANALYST_AGENT_ID],
+          onAgentStart: () => { agentStarts += 1; },
+          onError: resolve,
+        });
+      });
+      assert.equal(error.code, 'AGENT_DISABLED');
+      assert.deepEqual(error.agentIds, [ANALYST_AGENT_ID]);
+      assert.equal(agentStarts, 0);
+    }
+  );
+
+  await t.test(
+    'single-mode analyst request selects the profile backup but blocks it without server evaluation authority',
     async () => {
       // The agent profile carries a CUSTOM backup. Per the runtime schema, a
       // custom (non-global-alternate) backup can only be persisted via
@@ -141,7 +197,7 @@ test('chat-analyst-failover suite', async (t) => {
         fallbackProvider: PROFILE_BACKUP_PROVIDER,
         configured: true,
       });
-      stubPrimaryFailsBackupSucceeds('profile backup answer');
+      const calls = stubPrimaryFailsBackupSucceeds('profile backup answer');
 
       const res = await agent
         .post('/api/chat')
@@ -156,21 +212,15 @@ test('chat-analyst-failover suite', async (t) => {
 
       assert.equal(res.status, 200);
       assert.match(res.text, /event: provider_error/);
-      assert.match(res.text, /event: fallback/);
-      assert.match(res.text, /event: done/);
-
-      const done = parseEvent(res.text, 'done');
-      assert.ok(done, 'expected a done event');
-      // Proves profile sourcing: gpt-5.4 is NOT the global alternate (codex).
-      assert.equal(done.providerUsed, PROFILE_BACKUP_PROVIDER);
-      assert.equal(done.fallbackUsed, true);
-      assert.equal(done.fallbackFrom, PRIMARY_PROVIDER);
-      assert.equal(done.fullResponse, 'profile backup answer');
+      assertProductFallbackBlocked(res.text);
+      const fallback = parseEvent(res.text, 'fallback');
+      assert.equal(fallback.to, PROFILE_BACKUP_PROVIDER, 'the profile candidate should still be resolved');
+      assert.equal(calls.backup, 0, 'blocked product fallback must not dispatch the backup provider');
     }
   );
 
   await t.test(
-    'single-mode analyst request inherits the profile backup on the shared-agent-tool path too',
+    'shared-agent-tool path also blocks an unevaluated product backup',
     async () => {
       await seedAnalystRuntime({
         provider: PRIMARY_PROVIDER,
@@ -178,7 +228,7 @@ test('chat-analyst-failover suite', async (t) => {
         fallbackProvider: PROFILE_BACKUP_PROVIDER,
         configured: true,
       });
-      stubPrimaryFailsBackupSucceeds('tool path backup answer');
+      const calls = stubPrimaryFailsBackupSucceeds('tool path backup answer');
 
       const res = await agent
         .post('/api/chat')
@@ -190,18 +240,18 @@ test('chat-analyst-failover suite', async (t) => {
         });
 
       assert.equal(res.status, 200);
-      const done = parseEvent(res.text, 'done');
-      assert.ok(done, 'expected a done event');
-      assert.equal(done.providerUsed, PROFILE_BACKUP_PROVIDER);
-      assert.equal(done.fallbackUsed, true);
+      assertProductFallbackBlocked(res.text);
+      assert.equal(parseEvent(res.text, 'fallback').to, PROFILE_BACKUP_PROVIDER);
+      assert.equal(calls.primary, 1);
+      assert.equal(calls.backup, 0);
     }
   );
 
   await t.test(
-    'single-mode analyst with no profile backup still fails over to the global alternate',
+    'single-mode analyst resolves the global alternate but blocks it without evaluation authority',
     async () => {
       // No analyst runtime seeded -> getAgentIdentity('chat').runtime is null.
-      stubPrimaryFailsBackupSucceeds('global alternate answer');
+      const calls = stubPrimaryFailsBackupSucceeds('global alternate answer');
 
       const res = await agent
         .post('/api/chat')
@@ -213,17 +263,14 @@ test('chat-analyst-failover suite', async (t) => {
         });
 
       assert.equal(res.status, 200);
-      const done = parseEvent(res.text, 'done');
-      assert.ok(done, 'expected a done event');
-      // Fallback-of-last-resort: the global alternate of claude is codex.
-      assert.equal(done.providerUsed, GLOBAL_ALTERNATE_PROVIDER);
-      assert.equal(done.fallbackUsed, true);
-      assert.equal(done.fallbackFrom, PRIMARY_PROVIDER);
+      assertProductFallbackBlocked(res.text);
+      assert.equal(parseEvent(res.text, 'fallback').to, GLOBAL_ALTERNATE_PROVIDER);
+      assert.equal(calls.backup, 0);
     }
   );
 
   await t.test(
-    'analyst with a stored mode:"single" profile still auto-fails-over (single mode is not honored as no-backup)',
+    'stored mode:"single" still resolves a candidate but cannot authorize product fallback',
     async () => {
       // The QBO Assistant profile shows MODE = "Single provider". Per the
       // runtime schema this persists fallbackProvider = the global alternate
@@ -233,7 +280,7 @@ test('chat-analyst-failover suite', async (t) => {
         mode: 'single',
         configured: true,
       });
-      stubPrimaryFailsBackupSucceeds('single-mode profile still fails over');
+      const calls = stubPrimaryFailsBackupSucceeds('single-mode profile still fails over');
 
       const res = await agent
         .post('/api/chat')
@@ -245,16 +292,14 @@ test('chat-analyst-failover suite', async (t) => {
         });
 
       assert.equal(res.status, 200);
-      const done = parseEvent(res.text, 'done');
-      assert.ok(done, 'expected a done event');
-      assert.equal(done.providerUsed, GLOBAL_ALTERNATE_PROVIDER);
-      assert.equal(done.fallbackUsed, true);
-      assert.equal(done.fallbackFrom, PRIMARY_PROVIDER);
+      assertProductFallbackBlocked(res.text);
+      assert.equal(parseEvent(res.text, 'fallback').to, GLOBAL_ALTERNATE_PROVIDER);
+      assert.equal(calls.backup, 0);
     }
   );
 
   await t.test(
-    'analyst with a profile backup equal to the primary re-derives a distinct global alternate and still fails over',
+    'degenerate profile backup re-derives a distinct candidate but remains blocked',
     async () => {
       // Degenerate profile: operator set the backup to the same provider as the
       // analyst primary. The analyst must not be left without a usable backup —
@@ -265,7 +310,7 @@ test('chat-analyst-failover suite', async (t) => {
         fallbackProvider: PRIMARY_PROVIDER, // == primary (degenerate)
         configured: true,
       });
-      stubPrimaryFailsBackupSucceeds('re-derived alternate answer');
+      const calls = stubPrimaryFailsBackupSucceeds('re-derived alternate answer');
 
       const res = await agent
         .post('/api/chat')
@@ -277,16 +322,14 @@ test('chat-analyst-failover suite', async (t) => {
         });
 
       assert.equal(res.status, 200);
-      const done = parseEvent(res.text, 'done');
-      assert.ok(done, 'expected a done event');
-      assert.equal(done.providerUsed, GLOBAL_ALTERNATE_PROVIDER);
-      assert.equal(done.fallbackUsed, true);
-      assert.equal(done.fallbackFrom, PRIMARY_PROVIDER);
+      assertProductFallbackBlocked(res.text);
+      assert.equal(parseEvent(res.text, 'fallback').to, GLOBAL_ALTERNATE_PROVIDER);
+      assert.equal(calls.backup, 0);
     }
   );
 
   await t.test(
-    'orchestrator fails over by DEFAULT (no flag) and only when a distinct backup exists',
+    'explicit provider-comparison orchestration exercises fallback while healthy primary stays single-attempt',
     async () => {
       // Locks the NEW contract: automatic failover is always on. Any caller —
       // analyst or not, with or without a flag — fails over to its distinct
@@ -312,6 +355,7 @@ test('chat-analyst-failover suite', async (t) => {
       resetProviderHealth();
       codexCalled = false;
       const noFlag = await runOrchestration({
+        executionPurpose: 'provider-comparison',
         mode: 'single',
         primaryProvider: PRIMARY_PROVIDER,
         fallbackProvider: PROFILE_BACKUP_PROVIDER,
@@ -331,6 +375,7 @@ test('chat-analyst-failover suite', async (t) => {
       resetProviderHealth();
       codexCalled = false;
       const degenerate = await runOrchestration({
+        executionPurpose: 'provider-comparison',
         mode: 'single',
         primaryProvider: PRIMARY_PROVIDER,
         fallbackProvider: PRIMARY_PROVIDER, // collapses to primary -> re-derived

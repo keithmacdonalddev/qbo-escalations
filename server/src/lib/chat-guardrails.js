@@ -1,10 +1,10 @@
 const UsageLog = require('../models/UsageLog');
-const { calculateCost, microsToUsd, getRates } = require('./pricing');
+const { calculateCost, microsToUsd } = require('./pricing');
 const { getAlternateProvider } = require('../services/providers/registry');
 const { getDefaultProvider } = require('../services/providers/registry');
-const { getSelectableProviderIds } = require('../services/providers/catalog');
 
-const SUPPORTED_PROVIDERS = getSelectableProviderIds();
+const DEFAULT_EXPECTED_OUTPUT_TOKENS = 2000;
+const DEFAULT_MAX_TOOL_ROUNDS = 4;
 
 function toMicrosFromUsd(value) {
   const parsed = Number(value);
@@ -14,21 +14,6 @@ function toMicrosFromUsd(value) {
 
 function formatBudgetMessage(prefix, projectedMicros, limitMicros) {
   return `${prefix}: projected ${microsToUsd(projectedMicros)} exceeds limit ${microsToUsd(limitMicros)}`;
-}
-
-function chooseCheapestProvider() {
-  let best = SUPPORTED_PROVIDERS[0];
-  let bestRate = Number.POSITIVE_INFINITY;
-  for (const provider of SUPPORTED_PROVIDERS) {
-    const rates = getRates('', provider);
-    const inputRate = Number(rates && rates.inputNanosPerToken);
-    const normalizedRate = Number.isFinite(inputRate) && inputRate > 0 ? inputRate : 999999;
-    if (normalizedRate < bestRate) {
-      bestRate = normalizedRate;
-      best = provider;
-    }
-  }
-  return best;
 }
 
 async function getTodayChatSpendMicros() {
@@ -42,7 +27,7 @@ async function getTodayChatSpendMicros() {
 
   try {
     const out = await UsageLog.aggregate([
-      { $match: { service: 'chat', createdAt: { $gte: start } } },
+      { $match: { createdAt: { $gte: start } } },
       { $group: { _id: null, total: { $sum: '$totalCostMicros' } } },
     ]);
     const total = out && out[0] ? Number(out[0].total) : 0;
@@ -53,10 +38,11 @@ async function getTodayChatSpendMicros() {
 }
 
 function buildFallbackOverride(currentPolicy) {
-  const cheapest = chooseCheapestProvider();
+  const approved = currentPolicy?.costEligibleFallback;
+  if (!approved || approved.eligible !== true || !approved.provider) return null;
   const mode = 'single';
-  const primaryProvider = cheapest;
-  const fallbackProvider = getAlternateProvider(cheapest);
+  const primaryProvider = approved.provider;
+  const fallbackProvider = approved.fallbackProvider || getAlternateProvider(primaryProvider);
 
   const changed = currentPolicy.mode !== mode || currentPolicy.primaryProvider !== primaryProvider;
   if (!changed) return null;
@@ -64,25 +50,43 @@ function buildFallbackOverride(currentPolicy) {
   return {
     mode,
     primaryProvider,
+    primaryModel: approved.model || '',
     fallbackProvider,
+    authority: {
+      source: approved.source || 'agent-evaluation-contract',
+      runId: approved.runId || '',
+      eligible: true,
+    },
   };
 }
 
 async function evaluateChatGuardrails({
   settings,
   estimatedInputTokens,
+  expectedOutputTokens = DEFAULT_EXPECTED_OUTPUT_TOKENS,
+  maxToolRounds = DEFAULT_MAX_TOOL_ROUNDS,
   policy,
 }) {
   const guardrails = settings.guardrails || {};
   const action = guardrails.onBudgetExceeded || 'warn';
   const primaryProvider = policy.primaryProvider || getDefaultProvider();
-  const estimateCost = calculateCost(estimatedInputTokens, 0, '', primaryProvider);
-  const estimatedInputCostMicros = Number(estimateCost.inputCostMicros) || 0;
+  const primaryModel = policy.primaryModel || '';
+  const perAttemptCost = calculateCost(estimatedInputTokens, expectedOutputTokens, primaryModel, primaryProvider);
+  const attemptsPerRound = policy.mode === 'parallel'
+    ? Math.max(1, Array.isArray(policy.parallelProviders) ? policy.parallelProviders.length : 2)
+    : (policy.fallbackProvider && policy.fallbackProvider !== primaryProvider ? 2 : 1);
+  const boundedToolRounds = Number.isFinite(Number(maxToolRounds)) && Number(maxToolRounds) > 0
+    ? Math.min(8, Math.floor(Number(maxToolRounds)))
+    : DEFAULT_MAX_TOOL_ROUNDS;
+  const estimatedAttemptCount = attemptsPerRound * boundedToolRounds;
+  const estimatedInputCostMicros = (Number(perAttemptCost.inputCostMicros) || 0) * estimatedAttemptCount;
+  const estimatedOutputCostMicros = (Number(perAttemptCost.outputCostMicros) || 0) * estimatedAttemptCount;
+  const estimatedRequestCostMicros = (Number(perAttemptCost.totalCostMicros) || 0) * estimatedAttemptCount;
 
   const maxRequestMicros = toMicrosFromUsd(guardrails.maxEstimatedRequestCostUsd);
   const dailyBudgetMicros = toMicrosFromUsd(guardrails.dailyBudgetUsd);
   const todaySpentMicros = dailyBudgetMicros > 0 ? await getTodayChatSpendMicros() : 0;
-  const projectedDailyMicros = todaySpentMicros + estimatedInputCostMicros;
+  const projectedDailyMicros = todaySpentMicros + estimatedRequestCostMicros;
 
   const warnings = [];
   let blocked = false;
@@ -90,20 +94,20 @@ async function evaluateChatGuardrails({
   let blockError = '';
   let policyOverride = null;
 
-  const requestExceeded = maxRequestMicros > 0 && estimatedInputCostMicros > maxRequestMicros;
+  const requestExceeded = maxRequestMicros > 0 && estimatedRequestCostMicros > maxRequestMicros;
   const dailyExceeded = dailyBudgetMicros > 0 && projectedDailyMicros > dailyBudgetMicros;
 
   if (requestExceeded) {
     warnings.push({
       code: 'MAX_REQUEST_COST_EXCEEDED',
-      message: formatBudgetMessage('Estimated request cost over limit', estimatedInputCostMicros, maxRequestMicros),
+      message: formatBudgetMessage('Estimated request cost over limit', estimatedRequestCostMicros, maxRequestMicros),
     });
   }
 
   if (dailyExceeded) {
     warnings.push({
       code: 'DAILY_BUDGET_EXCEEDED',
-      message: formatBudgetMessage('Daily projected chat spend over limit', projectedDailyMicros, dailyBudgetMicros),
+      message: formatBudgetMessage('Daily projected agent spend over limit', projectedDailyMicros, dailyBudgetMicros),
     });
   }
 
@@ -116,12 +120,12 @@ async function evaluateChatGuardrails({
     if (policyOverride) {
       warnings.push({
         code: 'GUARDRAIL_FALLBACK_APPLIED',
-        message: `Guardrail fallback applied: switched to ${policyOverride.primaryProvider} in single mode`,
+        message: `Guardrail fallback applied from current evaluation evidence: switched to ${policyOverride.primaryProvider} in single mode`,
       });
     } else {
       warnings.push({
-        code: 'GUARDRAIL_FALLBACK_NOOP',
-        message: 'Guardrail fallback requested but no cheaper strategy available; continuing current policy',
+        code: 'GUARDRAIL_FALLBACK_NOT_AUTHORIZED',
+        message: 'Guardrail fallback requested, but no current quality-approved cost fallback is bound to this agent and workflow; continuing the current policy.',
       });
     }
   }
@@ -134,8 +138,18 @@ async function evaluateChatGuardrails({
     policyOverride,
     costEstimate: {
       estimatedInputTokens,
+      expectedOutputTokens,
+      estimatedAttemptCount,
+      attemptsPerRound,
+      maxToolRounds: boundedToolRounds,
       estimatedInputCostMicros,
+      estimatedOutputCostMicros,
+      estimatedRequestCostMicros,
+      estimatedRequestCostUsd: microsToUsd(estimatedRequestCostMicros),
       estimatedInputCostUsd: microsToUsd(estimatedInputCostMicros),
+      rateFound: perAttemptCost.rateFound === true,
+      model: primaryModel,
+      provider: primaryProvider,
       todaySpentMicros,
       dailyBudgetMicros,
       projectedDailyMicros,

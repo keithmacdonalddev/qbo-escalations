@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { connect, disconnect } = require('./_mongo-helper');
+const Escalation = require('../src/models/Escalation');
 const Investigation = require('../src/models/Investigation');
 const { SHARED_AGENT_TOOL_HANDLERS } = require('../src/services/shared-agent-tools');
 
@@ -15,7 +16,37 @@ test.after(async () => {
 });
 
 test.beforeEach(async () => {
+  await Escalation.deleteMany({});
   await Investigation.deleteMany({});
+});
+
+test('shared detail tools return explicit safe projections with source evidence', async () => {
+  await Investigation.create({
+    invNumber: 'INV-SAFE-1',
+    subject: 'Safe projection fixture',
+    category: 'technical',
+    status: 'in-progress',
+    agentName: 'Internal Person',
+    team: 'Internal Team',
+    details: 'Visible operational detail',
+  });
+  const detail = await SHARED_AGENT_TOOL_HANDLERS['db.getInvestigation']({ invNumber: 'INV-SAFE-1' });
+  assert.equal(detail.ok, true);
+  assert.equal(detail.investigation.details, 'Visible operational detail');
+  assert.equal(detail.investigation.agentName, undefined);
+  assert.equal(detail.investigation.team, undefined);
+  assert.equal(detail.investigation.source.type, 'investigation');
+  assert.match(detail.investigation.source.hash, /^[a-f0-9]{64}$/);
+
+  await Escalation.create({
+    caseNumber: 'CASE-SAFE-1',
+    clientContact: 'private.person@example.com',
+    attemptingTo: 'Reconcile an account',
+    category: 'reconciliation',
+  });
+  const search = await SHARED_AGENT_TOOL_HANDLERS['db.searchEscalations']({ query: 'Reconcile' });
+  assert.equal(search.ok, true);
+  assert.equal(search.results[0].clientContact, undefined);
 });
 
 test('db.searchInvestigations searches active investigations by category and symptom text', async () => {

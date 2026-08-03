@@ -1604,6 +1604,7 @@ router.post('/run', async (req, res) => {
         fallbackModel: safeString(runtime.fallbackModel, ''),
         agentRuntime: runtime,
         promptId: 'escalation-template-parser',
+        executionPurpose: 'agent-evaluation',
         timeoutMs: TEST_TIMEOUT_MS,
         eventBus: bus,
         signal: requestAbortController.signal,
@@ -1744,6 +1745,7 @@ router.post('/run', async (req, res) => {
       fallbackProvider: safeString(runtime.fallbackProvider, ''),
       fallbackModel: safeString(runtime.fallbackModel, ''),
       agentRuntime: runtime,
+      executionPurpose: 'agent-evaluation',
     });
     return res.json({
       ok: Boolean(result?.card),
