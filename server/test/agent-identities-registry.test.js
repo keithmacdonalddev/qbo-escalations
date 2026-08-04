@@ -352,11 +352,9 @@ test('agent identity registry persists custom agents, reviews, and harness runs'
     kind: 'agent-harness',
     fingerprint: 'agent-harness:billing-audit-agent',
   }).lean();
-  assert.equal(harnessAttention.status, 'open');
-  assert.equal(harnessAttention.metadata.fallbackEligible, false);
-  assert.ok(harnessAttention.metadata.evaluationIssues.some(
-    (issue) => issue.code === 'EVALUATION_AUTHORITY_NOT_IMPLEMENTED'
-  ));
+  assert.equal(harnessAttention.status, 'resolved');
+  assert.equal(harnessAttention.metadata.fallbackEligible, true);
+  assert.deepEqual(harnessAttention.metadata.evaluationIssues, []);
 
   const runtimeRes = await agent
     .patch('/api/agent-identities/triage-agent/runtime')

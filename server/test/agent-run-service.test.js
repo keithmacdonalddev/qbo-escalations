@@ -16,6 +16,7 @@ const {
   hashAgentRunInputs,
   heartbeatAgentRunLease,
   markAgentRunStale,
+  reconcileAbandonedAgentRun,
   recordAgentRunAttempt,
   setAgentRunOutputValidation,
 } = require('../src/services/agent-run-service');
@@ -38,6 +39,7 @@ function baseManifest(overrides = {}) {
     agentId: 'escalation-investigation-agent',
     useCase: 'escalation-investigation',
     surface: 'case-workspace',
+    purpose: 'product-escalation-investigation',
     trigger: 'operator-request',
     requestId: 'request-case-42',
     promptId: 'escalation-investigation',
@@ -298,7 +300,7 @@ test('attempt records preserve provider provenance and caller-supplied evidence 
   assert.equal(withAttempt.attempts[0].model, 'claude-opus-4-6');
   assert.equal(withAttempt.attempts[0].role, 'fallback-specialist');
   assert.equal(withAttempt.attempts[0].packageRefs[0].id, 'provider-package-123');
-  assert.equal(withAttempt.attempts[0].usage.providerReported.serviceTier, 'priority');
+  assert.equal(withAttempt.attempts[0].usage.serviceTier, 'priority');
   assert.equal(withAttempt.attempts[0].fallbackDecision.used, true);
   assert.equal(withAttempt.attempts[0].fallbackDecision.fromProvider, 'openai');
 
@@ -792,4 +794,18 @@ test('expired leased runs become stale atomically while live leases remain prote
   assert.equal(stale.run.lease, null);
   assert.equal(replay.idempotent, true);
   assert.equal(replay.run.staleness.reason, 'executor-heartbeat-expired');
+});
+
+test('queued runs that never acquire a lease are reconciled as stale', async () => {
+  const run = await createRun('queued-without-worker');
+  const checkedAt = new Date(new Date(run.createdAt).getTime() + 60_001);
+  const reconciled = await reconcileAbandonedAgentRun({
+    runId: run.id,
+    now: checkedAt,
+    queuedGraceMs: 60_000,
+  });
+
+  assert.equal(reconciled.status, 'stale');
+  assert.equal(reconciled.staleness.reason, 'executor-never-acquired-lease');
+  assert.equal(reconciled.terminalReason, 'lease-expired');
 });

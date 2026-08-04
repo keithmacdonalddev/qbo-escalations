@@ -38,7 +38,7 @@ function passingChecks(metrics) {
   ];
 }
 
-test('manifest capture omits raw traffic but preserves labelled reasoning evidence', () => {
+test('manifest capture omits raw traffic and reasoning text while retaining summary proof', () => {
   const captured = applyProviderCapturePolicy({
     providerId: 'openai',
     operation: 'chat',
@@ -58,9 +58,10 @@ test('manifest capture omits raw traffic but preserves labelled reasoning eviden
   assert.equal(captured.resultHandoff.format, 'assistant-text');
   assert.equal(captured.resultHandoff.text, 'answer');
   assert.equal(JSON.stringify(captured.resultHandoff).includes('diagnostic chain'), false);
-  assert.equal(captured.reasoningEvidence.length, 1);
-  assert.equal(captured.reasoningEvidence[0].text, 'diagnostic chain');
-  assert.equal(captured.reasoningEvidence[0].authority, 'diagnostic-only');
+  assert.equal(captured.capturePolicy.reasoningRetained, false);
+  assert.equal(captured.reasoningEvidence.length, 0);
+  assert.equal(captured.reasoningEvidenceSummary.entryCount, 1);
+  assert.match(captured.reasoningEvidenceSummary.sha256, /^[a-f0-9]{64}$/);
   assert.equal(captured.reasoningEvidenceSummary.complete, true);
   assert.equal(captured.reasoningEvidenceSummary.redactionAppliedBeforeExtraction, true);
 });
@@ -154,9 +155,9 @@ test('evaluation contract binds prompt efficiency and the broader behavior hash'
       },
     },
   });
-  assert.equal(assessment.eligible, false);
-  assert.equal(assessment.trusted, false);
-  assert.ok(assessment.issues.some((issue) => issue.code === 'EVALUATION_AUTHORITY_NOT_IMPLEMENTED'));
+  assert.equal(assessment.eligible, true);
+  assert.equal(assessment.trusted, true);
+  assert.match(assessment.evidenceId, /^[a-f0-9]{64}$/);
 
   const changed = assessEvaluationContract({
     agentId: 'triage-agent',

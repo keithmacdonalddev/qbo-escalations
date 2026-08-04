@@ -392,9 +392,9 @@ test('recordLmStudioProviderCallPackage externalizes large LM Studio payloads wi
     const saved = await ProviderCallPackage.findById(result.id).lean();
     assert.equal(saved.storage.truncated, false);
     assert.ok(saved.storage.externalPayloads.length > 0);
-    assert.equal(saved.storage.externalRetention.state, 'janitor-required');
-    assert.equal(saved.storage.externalRetention.cleanupImplemented, false);
-    assert.equal(saved.storage.externalRetention.orphanRisk, true);
+    assert.equal(saved.storage.externalRetention.state, 'managed');
+    assert.equal(saved.storage.externalRetention.cleanupImplemented, true);
+    assert.equal(saved.storage.externalRetention.orphanRisk, false);
     assert.equal(saved.lmStudio.request.bodyText, null);
     assert.ok(saved.lmStudio.request.bodyTextPayloadRef);
     assert.equal(saved.lmStudio.request.bodyJson, null);

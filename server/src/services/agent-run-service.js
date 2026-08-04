@@ -545,7 +545,23 @@ async function recordAgentRunAttempt({
 } = {}) {
   const credentials = normalizeLeaseCredentials({ owner, leaseToken });
   const recordedAt = asDate(now, 'now');
-  const normalizedAttempt = normalizeAttempt(attempt, recordedAt);
+  const leaseOwner = await AgentRun.findOne(
+    activeLeaseFilter(runId, credentials.owner, credentials.leaseToken, recordedAt)
+  ).select('agentId leaseGeneration cancellation').lean();
+  if (!leaseOwner) {
+    const current = await AgentRun.findById(normalizeRunId(runId)).select('cancellation').lean();
+    if (current?.cancellation?.requestedAt) {
+      throw createServiceError('AGENT_RUN_CANCEL_REQUESTED', 'The agent run is awaiting cancellation acknowledgement.', 409);
+    }
+    throw createServiceError('AGENT_RUN_LEASE_LOST', 'The agent-run lease is missing, expired, or owned elsewhere.', 409);
+  }
+  // Lease provenance is stamped from the server-owned run. A caller may not
+  // select another agent or claim a different executor generation.
+  const normalizedAttempt = normalizeAttempt({
+    ...attempt,
+    agentId: leaseOwner.agentId,
+    leaseGeneration: leaseOwner.leaseGeneration,
+  }, recordedAt);
   const run = await AgentRun.findOneAndUpdate(
     {
       ...activeLeaseFilter(runId, credentials.owner, credentials.leaseToken, recordedAt),
@@ -1211,6 +1227,51 @@ async function markAgentRunStale({
   throw createServiceError('AGENT_RUN_NOT_STALE', 'Agent run still has a live lease.', 409);
 }
 
+async function reconcileAbandonedAgentRun({ runId, now = new Date(), queuedGraceMs = 60_000 } = {}) {
+  const normalizedRunId = normalizeRunId(runId);
+  const checkedAt = asDate(now, 'now');
+  const current = await AgentRun.findById(normalizedRunId);
+  if (!current) throw createServiceError('AGENT_RUN_NOT_FOUND', 'Agent run not found.', 404);
+
+  if (current.status === 'running') {
+    const leaseExpiry = current.lease?.expiresAt ? new Date(current.lease.expiresAt) : null;
+    if (leaseExpiry && leaseExpiry.getTime() <= checkedAt.getTime()) {
+      return (await markAgentRunStale({
+        runId: normalizedRunId,
+        reason: 'executor-heartbeat-expired',
+        now: checkedAt,
+      })).run;
+    }
+  }
+
+  if (current.status === 'queued') {
+    const graceMs = Number.isFinite(Number(queuedGraceMs)) ? Math.max(0, Number(queuedGraceMs)) : 60_000;
+    const createdAt = current.createdAt ? new Date(current.createdAt) : null;
+    if (createdAt && createdAt.getTime() <= checkedAt.getTime() - graceMs) {
+      const staleness = {
+        detectedAt: checkedAt,
+        reason: 'executor-never-acquired-lease',
+      };
+      const stale = await AgentRun.findOneAndUpdate(
+        { _id: normalizedRunId, status: 'queued', createdAt: { $lte: new Date(checkedAt.getTime() - graceMs) } },
+        {
+          $set: {
+            status: 'stale',
+            staleness,
+            terminalReason: 'lease-expired',
+            completedAt: checkedAt,
+          },
+        },
+        { returnDocument: 'after', runValidators: true }
+      );
+      if (stale) return stale;
+      return AgentRun.findById(normalizedRunId);
+    }
+  }
+
+  return current;
+}
+
 module.exports = {
   DEFAULT_LEASE_TTL_MS,
   acknowledgeAgentRunCancellation,
@@ -1223,6 +1284,7 @@ module.exports = {
   hashAgentRunInputs,
   heartbeatAgentRunLease,
   markAgentRunStale,
+  reconcileAbandonedAgentRun,
   recordAgentRunAttempt,
   setAgentRunOutputValidation,
   verifySavedAgentRunOutput,

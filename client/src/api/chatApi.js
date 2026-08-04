@@ -2,6 +2,12 @@ import { apiFetch, apiFetchJson } from './http.js';
 import { consumeSSEStream } from './sse.js';
 import { normalizeError } from '../utils/normalizeError.js';
 import { serializeJsonRequestBody } from '../lib/jsonRequestBody.js';
+import {
+  cancelAgentRun,
+  clearPendingChatAgentRun,
+  isAgentRunRecoverableStreamError,
+  rememberPendingChatAgentRun,
+} from './agentRunsApi.js';
 const BASE = '/api';
 const STREAM_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -15,6 +21,7 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
   const controller = new AbortController();
   const url = `${BASE}/chat`;
   const hasImages = Array.isArray(body.images) && body.images.length > 0;
+  let agentRunId = '';
 
   (async () => {
     try {
@@ -61,7 +68,13 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
       }
 
       await consumeSSEStream(res, (eventType, data) => {
-        if (eventType === 'start' || eventType === 'init') onInit?.(data);
+        if (eventType === 'start' || eventType === 'init') {
+          if (data?.agentRunId) {
+            agentRunId = data.agentRunId;
+            rememberPendingChatAgentRun({ agentRunId, conversationId: data.conversationId });
+          }
+          onInit?.(data);
+        }
         else if (eventType === 'status') onStatus?.(data);
         else if (eventType === 'message' && data?.type === 'status') onStatus?.(data);
         else if (eventType === 'image_transcription') onLocalStage?.({ stage: 'transcription', phase: 'done', ...data });
@@ -75,10 +88,14 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
         else if (eventType === 'fallback') onFallback?.(data);
         else if (eventType === 'done') {
           streamSettled = true;
+          clearPendingChatAgentRun(agentRunId);
           onDone?.(data);
         } else if (eventType === 'error') {
           streamSettled = true;
-          onError?.(normalizeError(data, data?.error || 'Request failed'));
+          if (!agentRunId || !isAgentRunRecoverableStreamError(data)) {
+            clearPendingChatAgentRun(agentRunId);
+          }
+          onError?.(normalizeError({ ...data, agentRunId }, data?.error || 'Request failed'));
         }
       });
 
@@ -87,6 +104,7 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
           code: 'STREAM_INCOMPLETE',
           error: 'The response stream ended before completion.',
           detail: 'The connection closed without a final done/error event.',
+          agentRunId,
         }, 'The response stream ended before completion.'));
       }
     } catch (err) {
@@ -94,14 +112,30 @@ export function sendChatMessage(body, { onInit, onChunk, onThinking, onDone, onE
         window.dispatchEvent(new CustomEvent('sse-stream-error', {
           detail: { url, error: err.message },
         }));
-        onError?.(normalizeError({ message: err.message }, err.message));
+        onError?.(normalizeError({
+          message: err.message,
+          code: err.code,
+          detail: err.detail,
+          status: err.status,
+          agentRunId,
+        }, err.message));
       }
     } finally {
       if (hasImages) window.__imageRequestActive = false;
     }
   })();
 
-  return { abort: () => controller.abort() };
+  return {
+    abort: () => {
+      controller.abort();
+      if (agentRunId) {
+        void cancelAgentRun(agentRunId).catch(() => {
+          // Keep the saved run id in session storage so recovery can show the
+          // truthful server result if cancellation could not be confirmed.
+        });
+      }
+    },
+  };
 }
 
 /**

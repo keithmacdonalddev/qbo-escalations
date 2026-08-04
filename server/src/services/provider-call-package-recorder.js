@@ -8,6 +8,7 @@ const { redactProviderCallPackage } = require('./provider-call-package-redaction
 const { externalizeProviderCallPackagePayloads, removeProviderPayloadDirectory, sha256 } = require('./provider-call-package-payload-store');
 const { applyProviderCapturePolicy } = require('./provider-capture-policy');
 const { resolveProviderPromptHash } = require('./provider-reasoning-evidence');
+const { maybeRunProviderPayloadJanitor } = require('./provider-payload-janitor');
 const { RETENTION_KEYS, resolveRetentionDays } = require('../lib/retention-config');
 
 const CAPTURE_VERSION = 'provider-harness-http-v0.1';
@@ -22,7 +23,8 @@ const inFlightBackgroundRecords = new Set();
 // manifest. Callers must explicitly request an allowlisted
 // diagnostic/evaluation purpose to retain full request/response bodies;
 // forceCapture guarantees recording but grants no raw-traffic authority.
-// Provider reasoning remains bounded, labelled evidence in every mode. Set
+// Provider reasoning text is retained only for allowlisted diagnostic or
+// evaluation purposes; normal manifests keep summary metrics only. Set
 // ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE=false to explicitly disable; any other
 // value (including unset) leaves capture enabled, so a lost env line can no
 // longer silently kill the evidence layer.
@@ -1261,18 +1263,22 @@ async function recordProviderCallPackage(envelope, options = {}) {
     const hasExternalPayloads = Array.isArray(prepared.storage.externalPayloads)
       && prepared.storage.externalPayloads.length > 0;
     prepared.storage.externalRetention = {
-      state: hasExternalPayloads ? 'janitor-required' : 'not-applicable',
+      state: hasExternalPayloads ? 'managed' : 'not-applicable',
       documentExpiresAt: prepared.expiresAt,
       policyKey: RETENTION_KEYS.PROVIDER_CALL_PACKAGE,
-      cleanupImplemented: false,
-      janitorRequired: hasExternalPayloads,
-      orphanRisk: hasExternalPayloads,
+      cleanupImplemented: hasExternalPayloads,
+      janitorRequired: false,
+      orphanRisk: false,
       note: hasExternalPayloads
-        ? 'MongoDB TTL does not delete external payload files. A payload janitor is required before this retention state can be considered complete.'
+        ? 'External payload files are removed by the bounded payload janitor after their package expires or becomes orphaned.'
         : 'No external payload files were created for this package.',
     };
 
     const doc = await ProviderCallPackage.create(prepared);
+    if (process.env.NODE_ENV !== 'test') {
+      void maybeRunProviderPayloadJanitor({ payloadRoot: options.payloadRoot })
+        .catch((error) => console.warn('[provider-payload-janitor] Cleanup failed:', error.message));
+    }
     return { ok: true, id: String(doc._id) };
   } catch (err) {
     await removeProviderPayloadDirectory(packageId, {

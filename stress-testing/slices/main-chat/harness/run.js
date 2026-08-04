@@ -22,6 +22,7 @@ const {
   CODEX_FALLBACK_PROVIDER_ID,
   makeFailingChatStub,
   makeFallbackChatStub,
+  recordTrustedChatFallbackFixtureEvaluation,
   retryChatTurn,
   sendChatTurn,
   waitForConversationMessage,
@@ -52,6 +53,8 @@ async function runSlice(context = {}) {
 
     registerProviderStub('claude', 'chat', makeFailingChatStub(`Primary provider failed for ${seed}`));
     registerProviderStub('codex', 'chat', makeFallbackChatStub(fallbackText));
+    resetProviderHealth();
+    await recordTrustedChatFallbackFixtureEvaluation();
     resetProviderHealth();
 
     const retryTurn = await retryChatTurn(harness.baseUrl, {

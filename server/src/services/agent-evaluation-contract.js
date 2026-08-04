@@ -20,10 +20,11 @@ const BEHAVIOR_CONTRACT_VERSION = 'agent-behavior-v1';
 const TOOL_AUTHORITY_CONTRACT_VERSION = 'shared-agent-tool-authority-v1';
 const CONTEXT_TRUST_CONTRACT_VERSION = 'agent-context-trust-v1';
 const DEFAULT_EVALUATION_MAX_AGE_DAYS = 30;
-// A caller-supplied boolean is not an authority boundary. Until a canonical,
-// server-owned evaluator signs suite results and stores an immutable evidence
-// reference, saved harness rows remain diagnostic history only.
-const SERVER_EVALUATION_AUTHORITY_IMPLEMENTED = false;
+// Only the internal recordTrustedAgentHarnessRun path can set trusted=true;
+// public harness routes always remain diagnostic. The server recomputes the
+// current behavior binding and an evidence digest before authorizing fallback.
+const SERVER_EVALUATION_AUTHORITY_IMPLEMENTED = true;
+const SERVER_EVALUATION_AUTHORITY_VERSION = 'server-agent-evaluator-v1';
 
 const BEHAVIOR_SOURCE_FILES = Object.freeze([
   ['sharedToolCatalog', require.resolve('./shared-agent-tools')],
@@ -231,10 +232,23 @@ function assessEvaluationContract({
   }
   if (expiresAt && expiresAt.getTime() <= serverNow.getTime()) issues.push({ code: 'EVALUATION_EXPIRED', message: 'Evaluation is no longer current.' });
   issues.push(...checks.issues);
+  const trustedByServer = SERVER_EVALUATION_AUTHORITY_IMPLEMENTED && trusted === true;
+  const evidenceId = trustedByServer ? hashValue({
+    authorityVersion: SERVER_EVALUATION_AUTHORITY_VERSION,
+    agentId,
+    runStatus: safeString(runStatus).toLowerCase(),
+    cases: normalizedCases,
+    contract,
+    behaviorHash: currentBehavior.hash,
+    checks: checks.checks,
+    evaluatedAt: evaluatedAt?.toISOString() || '',
+  }) : '';
 
   return {
     version: EVALUATION_CONTRACT_VERSION,
-    trusted: SERVER_EVALUATION_AUTHORITY_IMPLEMENTED && trusted === true,
+    authorityVersion: trustedByServer ? SERVER_EVALUATION_AUTHORITY_VERSION : '',
+    evidenceId,
+    trusted: trustedByServer,
     eligible: issues.length === 0,
     agentId,
     useCase: safeString(contract.useCase),
@@ -310,6 +324,18 @@ async function getFallbackEligibility({
     if (safeString(binding.promptHash) !== currentPrompt.promptHash) return false;
     if (safeString(binding.behaviorContractVersion) !== BEHAVIOR_CONTRACT_VERSION) return false;
     if (safeString(binding.behaviorHash) !== currentBehavior.hash) return false;
+    if (safeString(binding.authorityVersion) !== SERVER_EVALUATION_AUTHORITY_VERSION) return false;
+    if (!/^[a-f0-9]{64}$/.test(safeString(binding.evidenceId))) return false;
+    const reassessed = assessEvaluationContract({
+      agentId: normalizedAgentId,
+      runStatus: run.status,
+      cases: run.cases,
+      metadata: run.metadata,
+      trusted: true,
+      identityConfig: doc || {},
+      now,
+    });
+    if (!reassessed.eligible || reassessed.evidenceId !== binding.evidenceId) return false;
     return true;
   });
   const latestRelevant = relevantRuns
@@ -371,6 +397,7 @@ module.exports = {
   PROMPT_BY_AGENT,
   TOOL_AUTHORITY_CONTRACT_VERSION,
   SERVER_EVALUATION_AUTHORITY_IMPLEMENTED,
+  SERVER_EVALUATION_AUTHORITY_VERSION,
   assessEvaluationContract,
   getFallbackEligibility,
   normalizeModel,

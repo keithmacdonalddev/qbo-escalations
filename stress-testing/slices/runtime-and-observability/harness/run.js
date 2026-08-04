@@ -22,6 +22,7 @@ const {
   makeDelayedChatStub,
   makeFailingChatStub,
   makeFallbackChatStub,
+  recordTrustedChatFallbackFixtureEvaluation,
   retryChatTurn,
   sendChatTurn,
 } = require('../../../scripts/fixtures/chat');
@@ -92,6 +93,8 @@ async function runSlice(context = {}) {
 
     registerProviderStub('claude', 'chat', makeFailingChatStub(`Runtime fallback failure for ${seed}`));
     registerProviderStub('codex', 'chat', makeFallbackChatStub(`Runtime fallback success for ${seed}`));
+    resetProviderHealth();
+    await recordTrustedChatFallbackFixtureEvaluation();
     resetProviderHealth();
 
     const retryRes = await retryChatTurn(harness.baseUrl, {

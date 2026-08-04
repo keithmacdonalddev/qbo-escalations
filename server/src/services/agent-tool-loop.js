@@ -187,11 +187,20 @@ async function runAgentToolLoop({
         err.code = 'ABORTED';
         throw err;
       }
+      const remainingModelBudgetMs = toolLoopDeadlineAt - Date.now();
+      if (remainingModelBudgetMs <= 0) {
+        const err = new Error('Agent tool loop exceeded its total execution deadline.');
+        err.code = 'TIMEOUT';
+        throw err;
+      }
 
       const collectedChat = startWorkspaceCollectedChat({
         messages: currentMessages,
         systemPrompt,
-        timeoutMs: effectiveTimeoutMs,
+        // Every model round shares one total deadline. Giving each round the
+        // original timeout would multiply the operator's limit by the number
+        // of tool iterations.
+        timeoutMs: remainingModelBudgetMs,
         mode: policy.mode,
         primaryProvider: policy.primaryProvider,
         primaryModel: policy.primaryModel,

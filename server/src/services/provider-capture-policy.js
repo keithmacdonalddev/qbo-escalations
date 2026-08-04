@@ -47,7 +47,7 @@ function resolveCapturePolicy(context = {}, envelope = {}) {
       declared: true,
       decisionReason: 'caller-declared',
       payloadBodiesRetained: false,
-      reasoningRetained: true,
+      reasoningRetained: false,
     };
   }
 
@@ -71,7 +71,7 @@ function resolveCapturePolicy(context = {}, envelope = {}) {
       declared: Boolean(requestedPurpose),
       decisionReason: 'provider-health-manifest',
       payloadBodiesRetained: false,
-      reasoningRetained: true,
+      reasoningRetained: false,
     };
   }
 
@@ -96,7 +96,7 @@ function resolveCapturePolicy(context = {}, envelope = {}) {
       ? 'rich-capture-purpose-not-allowlisted'
       : (context.forceCapture === true ? 'force-capture-does-not-authorize-raw-traffic' : 'safe-default'),
     payloadBodiesRetained: false,
-    reasoningRetained: true,
+    reasoningRetained: false,
   };
 }
 
@@ -323,7 +323,7 @@ function applyProviderCapturePolicy(envelope, context = {}) {
   // full provider reasoning signal in a purpose-labelled field even when an
   // ordinary product call does not retain unrestricted prompt/response bodies.
   const reasoningCapture = buildReasoningEvidence(prepared, context);
-  prepared.reasoningEvidence = reasoningCapture.evidence;
+  prepared.reasoningEvidence = policy.reasoningRetained ? reasoningCapture.evidence : [];
   prepared.reasoningEvidenceSummary = {
     ...reasoningCapture.summary,
     redactionAppliedBeforeExtraction: prepared.redaction?.applied === true,
@@ -344,7 +344,7 @@ function applyProviderCapturePolicy(envelope, context = {}) {
     prepared.storage.externalPayloads = [];
     prepared.storage.notes = [
       ...(Array.isArray(prepared.storage.notes) ? prepared.storage.notes : []),
-      'Raw provider request/response bodies omitted by manifest capture policy; hashes, usage, timing, errors, provenance, and labelled reasoning evidence retained.',
+      'Raw provider request/response bodies and reasoning text omitted by manifest capture policy; hashes, usage, timing, errors, provenance, and reasoning summary metrics retained.',
     ];
   }
 

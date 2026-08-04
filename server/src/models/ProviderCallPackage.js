@@ -450,7 +450,7 @@ const storageSchema = new mongoose.Schema({
   externalRetention: {
     state: {
       type: String,
-      enum: ['not-applicable', 'janitor-required'],
+      enum: ['not-applicable', 'janitor-required', 'managed'],
       default: 'not-applicable',
     },
     documentExpiresAt: { type: Date, default: null },
@@ -472,7 +472,7 @@ const capturePolicySchema = new mongoose.Schema({
   declared: { type: Boolean, default: false },
   decisionReason: { type: String, default: 'safe-default' },
   payloadBodiesRetained: { type: Boolean, default: false },
-  reasoningRetained: { type: Boolean, default: true },
+  reasoningRetained: { type: Boolean, default: false },
 }, strictSubdocumentOptions);
 
 const reasoningEvidenceSchema = new mongoose.Schema({

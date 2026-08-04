@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "lastHumanReviewDate": "2026-07-24",
+  "lastHumanReviewDate": "2026-08-03",
   "knownGlobalGaps": [
     "The five dedicated QBO Chat V5 browser journeys are structurally implemented but have not passed repeatedly because native browser transport cannot currently open even a static local known-good page within its hard bound.",
     "There is no broad automated accessibility audit, visual-regression suite, hosted multi-user run, mutation testing, or large-list browser pressure profile.",
@@ -365,6 +365,7 @@
       "owner": "QBO reporting integration",
       "sourcePaths": [
         "client/src/components/reporting/UserReportDialog.jsx",
+        "client/src/components/reporting/ScreenshotEditor.jsx",
         "client/src/components/reporting/customerReceipts.js",
         "client/src/components/reporting/screenshotCapture.js",
         "client/src/api/ticketSnitchReporting.js",
@@ -376,7 +377,7 @@
       "requiredCheckTypes": ["unit", "component", "server"],
       "evidence": [
         { "type": "unit", "groupId": "client-components", "paths": ["client/src/api/ticketSnitchReporting.test.js", "client/src/components/reporting/customerReceipts.test.js", "client/src/components/reporting/screenshotCapture.test.js"] },
-        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/reporting/UserReportDialog.test.jsx"] },
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/components/reporting/UserReportDialog.test.jsx", "client/src/components/reporting/ScreenshotEditor.test.js"] },
         { "type": "server", "groupId": "server-suite", "paths": ["server/test/reporting-session.test.js", "server/test/ticket-snitch-client.test.js", "server/test/ticket-snitch-screenshot.test.js", "server/test/ticket-snitch-user-reporting.test.js", "server/test/rate-limit.test.js"] }
       ],
       "knownGaps": ["The sibling Ticket Snitch repository owns isolated real-HTTP QBO-sign-in-to-case and Chromium production-build acceptance checks; QBO Escalations' app-check profiles do not invoke those cross-repository checks. The original local intake/screenshot runtime was verified on 2026-07-23. Customer receipts and accountability remain runtime-pending until the approved Ticket Snitch index preparation, service restart, and authenticated receipt/reply/validation proof are completed for that environment."],
@@ -456,7 +457,7 @@
     {
       "id": "agent-execution-safety",
       "label": "Agent execution evidence and prompt safety",
-      "userOutcome": "Agent requests keep external and peer content untrusted, respect final prompt limits, retain bounded provider reasoning for evaluation, store only integrity-checked product-result handoffs by default, and refuse unevaluated production fallback or unevidenced durable-run success.",
+      "userOutcome": "Agent requests keep external and peer content untrusted, respect one total deadline, omit reasoning text from ordinary product captures, restore saved work after a connection loss, stop active providers on explicit cancellation, and refuse unevaluated production fallback or unevidenced run success.",
       "risk": "critical",
       "owner": "Coordinated agent system",
       "sourcePaths": [
@@ -465,30 +466,41 @@
         "server/src/lib/chat-guardrails.js",
         "server/src/models/AgentRun.js",
         "server/src/models/ProviderCallPackage.js",
+        "server/src/routes/agent-runs.js",
         "server/src/routes/chat/send.js",
         "server/src/routes/provider-packages.js",
         "server/src/services/agent-evaluation-contract.js",
         "server/src/services/agent-run-service.js",
+        "server/src/services/durable-agent-dispatcher.js",
         "server/src/services/chat-orchestrator.js",
         "server/src/services/provider-call-package-recorder.js",
         "server/src/services/provider-capture-policy.js",
         "server/src/services/provider-payload-loader.js",
+        "server/src/services/provider-payload-janitor.js",
         "server/src/services/provider-reasoning-evidence.js",
         "server/src/services/room-context-builder.js",
-        "server/src/services/room-memory.js"
+        "server/src/services/room-memory.js",
+        "client/src/api/agentRunsApi.js",
+        "client/src/api/chatApi.js",
+        "client/src/api/roomApi.js",
+        "client/src/hooks/useChat.js",
+        "client/src/hooks/useChatRequestCallbacks.js",
+        "client/src/hooks/useChatRoomRequestFlow.js",
+        "client/src/components/chat-v5/useStageOrchestrator.js"
       ],
-      "requiredCheckTypes": ["unit", "server"],
+      "requiredCheckTypes": ["unit", "component", "server", "browser"],
       "evidence": [
-        { "type": "unit", "groupId": "server-suite", "paths": ["server/test/agent-architecture-contracts.test.js", "server/test/agent-run-service.test.js"] },
-        { "type": "server", "groupId": "server-suite", "paths": ["server/test/provider-payload-loader.test.js", "server/test/room-memory-context-hardening.test.js", "server/test/provider-packages-routes.test.js", "server/test/chat-orchestrator.test.js"] }
+        { "type": "unit", "groupId": "server-suite", "paths": ["server/test/agent-architecture-contracts.test.js", "server/test/agent-run-service.test.js", "server/test/provider-reasoning-evidence.test.js", "server/test/provider-payload-janitor.test.js"] },
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/api/agentRunsApi.test.js", "client/src/components/chat-v5/useStageOrchestrator.test.jsx"] },
+        { "type": "server", "groupId": "server-suite", "paths": ["server/test/abort.test.js", "server/test/agent-identities-registry.test.js", "server/test/provider-payload-loader.test.js", "server/test/room-memory-context-hardening.test.js", "server/test/provider-packages-routes.test.js", "server/test/chat-orchestrator.test.js", "server/test/usage-integration.test.js"] }
       ],
       "knownGaps": [
-        "AgentRun is a tested persistence and lease foundation but is not yet wired into live agent execution, and repository-owned result evidence verification is not implemented.",
-        "Server-owned evaluation authority is not implemented, so ordinary product fallback intentionally remains disabled while diagnostic and provider-comparison harness runs remain available.",
-        "Provider reasoning remains available for prompt and model evaluation, but immutable cross-attempt reasoning identity and a scheduled orphan-payload janitor are not yet implemented.",
-        "No live-provider or repeated browser acceptance run is mapped to this capability; the checks use deterministic provider fixtures and local persistence contracts."
+        "AgentRun is wired into Chat and Rooms with server-owned leases, attempts, cancellation, validation, evidence verification, connection-loss continuation, client recovery, and stale-run reconciliation. It deliberately does not replay provider calls after a server restart; an abandoned run becomes stale and must be retried.",
+        "Server-trusted evaluation evidence can authorize fallback only when it matches the current agent, use case, provider, model, prompt, behavior hash, and expiry. No trusted evaluation is created by ordinary manual harness submission.",
+        "Ordinary manifests omit reasoning text; allowlisted diagnostic and evaluation captures retain bounded labelled reasoning. External payload cleanup runs opportunistically during later provider activity rather than as a continuously scheduled service.",
+        "No live-provider or repeated browser acceptance run yet proves the connection-loss restore and explicit Stop experience on the current rendered app."
       ],
-      "lastHumanReviewDate": "2026-07-24"
+      "lastHumanReviewDate": "2026-08-03"
     },
     {
       "id": "provider-controls",

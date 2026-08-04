@@ -1,5 +1,10 @@
 import { useCallback, useRef } from 'react';
 import { getConversation } from '../api/chatApi.js';
+import {
+  agentRunFailureMessage,
+  isAgentRunRecoverableStreamError,
+  waitForAgentRunTerminal,
+} from '../api/agentRunsApi.js';
 import { normalizeError } from '../utils/normalizeError.js';
 import { tel, TEL } from '../lib/devTelemetry.js';
 import {
@@ -45,7 +50,7 @@ function shouldAttemptStreamRecovery(normalized) {
   const code = String(normalized?.code || '').trim().toUpperCase();
   const message = String(normalized?.message || '').trim().toLowerCase();
   if (!code && !message) return false;
-  if (code === 'STREAM_INCOMPLETE' || code === 'REQUEST_FAILED' || code === 'SSE_STREAM_TIMEOUT') return true;
+  if (isAgentRunRecoverableStreamError({ code })) return true;
   return (
     message.includes('network error')
     || message.includes('failed to fetch')
@@ -459,11 +464,31 @@ export default function useChatRequestCallbacks({
       streamingTextRef,
     }),
     onError: async (errPayload) => {
-      const normalized = normalizeError(errPayload);
+      let normalized = normalizeError(errPayload);
       let recovered = false;
 
       if (conversationIdRef?.current && shouldAttemptStreamRecovery(normalized)) {
         try {
+          if (normalized.agentRunId) {
+            pushProcessEvent({
+              level: 'info',
+              title: 'Connection interrupted',
+              message: 'The saved request is still running. Waiting for its final result…',
+              code: 'AGENT_RUN_RECOVERY_STARTED',
+            });
+            const run = await waitForAgentRunTerminal(normalized.agentRunId);
+            if (requestTokenRef.current !== requestToken) return;
+            if (run?.status !== 'succeeded') {
+              normalized = normalizeError({
+                ...normalized,
+                code: `AGENT_RUN_${String(run?.status || 'FAILED').toUpperCase().replace(/-/g, '_')}`,
+                message: agentRunFailureMessage(run),
+                detail: run?.completionError?.message || normalized.detail,
+                agentRun: run,
+              });
+              throw normalized;
+            }
+          }
           const conversation = await getConversation(conversationIdRef.current);
           // Superseded-request guard: if a newer request started while this
           // recovery fetch was in flight, the newer request now owns all chat

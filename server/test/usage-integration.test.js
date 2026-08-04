@@ -289,7 +289,7 @@ test('POST /api/chat (single, error) → UsageLog status=error, partial usage', 
 });
 
 // ================================================================
-//  /api/chat — product fallback is blocked without evaluation authority
+//  /api/chat — product fallback is blocked without trusted evaluation evidence
 // ================================================================
 test('POST /api/chat (fallback) → primary error is logged and unevaluated backup is not dispatched', async () => {
   currentClaudeStub = makeFakeStreamError(null);
@@ -310,7 +310,7 @@ test('POST /api/chat (fallback) → primary error is logged and unevaluated back
   assert.ok(fallbackEvent, 'blocked fallback decision');
   const fallbackData = JSON.parse(fallbackEvent.data);
   assert.equal(fallbackData.blocked, true);
-  assert.equal(fallbackData.decision?.reason, 'server_evaluation_authority_not_implemented');
+  assert.equal(fallbackData.decision?.reason, 'no_evaluation_evidence');
   assert.ok(events.find((e) => e.event === 'error'), 'terminal error event');
   assert.equal(events.some((e) => e.event === 'done'), false);
 
@@ -451,11 +451,17 @@ test('POST /api/chat/retry (error) → UsageLog status=error', async () => {
 });
 
 // ================================================================
-//  /api/chat — client disconnect / abort fires onAbort usage log
+//  /api/chat — client disconnect keeps the saved run alive
 // ================================================================
-test('POST /api/chat client disconnect → abort path does not misclassify as ok', async () => {
-  // Hanging stub: never resolves, returned cleanup carries abort usage
-  currentClaudeStub = makeFakeStreamHanging({ model: 'claude-sonnet-4-5-20250514', inputTokens: 42, outputTokens: 0, usageComplete: false });
+test('POST /api/chat client disconnect → saved run finishes and logs actual usage', async () => {
+  currentClaudeStub = ({ onChunk, onDone }) => {
+    onChunk?.('saved ');
+    const handle = setTimeout(() => onDone?.('saved after disconnect', FAKE_USAGE), 75);
+    return () => {
+      clearTimeout(handle);
+      return { usage: FAKE_USAGE };
+    };
+  };
 
   // Use raw HTTP so we can destroy the connection mid-stream.
   await postAndAbort({
@@ -464,19 +470,16 @@ test('POST /api/chat client disconnect → abort path does not misclassify as ok
     body: { message: 'abort me' },
   });
 
-  // Give the server a moment to process the close event and fire onAbort
-  await new Promise((r) => setTimeout(r, 150));
+  // The response stream is only presentation; the saved run completes after
+  // the socket closes and records the provider's real terminal usage.
+  await new Promise((r) => setTimeout(r, 300));
   await drainPendingWrites(5000);
   resetDrain();
 
-  // The orchestrator's onAbort only fires with settled attempts.
-  // With the hanging stub, no attempts have settled, so logAttemptsUsage may
-  // receive an empty array. The key regression guard: if any doc exists, it
-  // must NOT be classified as 'ok' (the misclassification risk from the issue).
   const docs = await UsageLog.find({ service: 'chat' }).lean();
-  for (const doc of docs) {
-    assert.notEqual(doc.status, 'ok', 'abort scenario must not log status=ok');
-  }
+  assert.equal(docs.length, 1);
+  assert.equal(docs[0].status, 'ok');
+  assert.equal(docs[0].inputTokens, FAKE_USAGE.inputTokens);
 });
 
 // ================================================================

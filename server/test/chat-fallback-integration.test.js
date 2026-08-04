@@ -36,7 +36,7 @@ function assertEvaluationBlocked(text) {
   assert.equal(fallback.eligible, false);
   assert.equal(fallback.blocked, true);
   assert.equal(fallback.reason, 'FALLBACK_NOT_EVALUATED');
-  assert.equal(fallback.decision?.reason, 'server_evaluation_authority_not_implemented');
+  assert.equal(fallback.decision?.reason, 'no_evaluation_evidence');
   assert.ok(parseEvent(text, 'error'), 'expected terminal primary error');
   assert.equal(parseEvent(text, 'done'), null);
 }

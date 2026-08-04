@@ -21,6 +21,11 @@ import useChatConversationLifecycle from './useChatConversationLifecycle.js';
 import useChatParallelActions from './useChatParallelActions.js';
 import useChatRequestFlow from './useChatRequestFlow.js';
 import useChatStreamState from './useChatStreamState.js';
+import {
+  agentRunFailureMessage,
+  readPendingChatAgentRun,
+  waitForAgentRunTerminal,
+} from '../api/agentRunsApi.js';
 
 const DEFAULT_MODE = 'single';
 const SUPPORTED_MODES = ['single', 'fallback', 'parallel'];
@@ -267,6 +272,52 @@ export function useChat(options = {}) {
     setMode,
     setProvider,
   });
+
+  useEffect(() => {
+    const pending = readPendingChatAgentRun();
+    if (!pending) return undefined;
+    const controller = new AbortController();
+
+    setIsStreaming(true);
+    isStreamingRef.current = true;
+    pushProcessEvent({
+      level: 'info',
+      title: 'Restoring saved request',
+      message: 'This request continued after the browser connection closed. Checking its saved result…',
+      code: 'AGENT_RUN_RESTORE_STARTED',
+    });
+
+    void waitForAgentRunTerminal(pending.agentRunId, { signal: controller.signal })
+      .then(async (run) => {
+        if (controller.signal.aborted) return;
+        if (run?.status !== 'succeeded') {
+          throw normalizeError({
+            code: `AGENT_RUN_${String(run?.status || 'FAILED').toUpperCase().replace(/-/g, '_')}`,
+            message: agentRunFailureMessage(run),
+            agentRun: run,
+          });
+        }
+        await selectConversation(pending.conversationId);
+        if (controller.signal.aborted) return;
+        pushProcessEvent({
+          level: 'success',
+          title: 'Saved response restored',
+          message: 'The finished response was restored from the conversation record.',
+          code: 'AGENT_RUN_RESTORED',
+        });
+      })
+      .catch((errorValue) => {
+        if (controller.signal.aborted || errorValue?.name === 'AbortError') return;
+        setError(normalizeError(errorValue));
+      })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        setIsStreaming(false);
+        isStreamingRef.current = false;
+      });
+
+    return () => controller.abort();
+  }, [isStreamingRef, pushProcessEvent, selectConversation, setError, setIsStreaming]);
 
   useEffect(() => {
     providerRef.current = provider;

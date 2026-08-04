@@ -1,6 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { sendRoomMessage } from '../api/roomApi.js';
 import { readRoomAgentRuntimeSelections } from '../lib/roomAgentRuntime.js';
+import {
+  agentRunFailureMessage,
+  isAgentRunRecoverableStreamError,
+  waitForAgentRunTerminal,
+} from '../api/agentRunsApi.js';
 
 /**
  * Orchestrates sending a message to a chat room and wiring the SSE stream
@@ -19,6 +24,7 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
   const autoContinueTimerRef = useRef(null);
   const autoContinueCountRef = useRef(0);
   const sendMessageRef = useRef(null);
+  const requestTokenRef = useRef(0);
 
   // Keep a ref to roomState so SSE callbacks always see the latest methods
   // without forcing sendMessage to be recreated on every render.
@@ -29,6 +35,7 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
 
   useEffect(() => {
     return () => {
+      requestTokenRef.current += 1;
       abortRef.current?.();
       abortRef.current = null;
       streamingRef.current = false;
@@ -44,7 +51,8 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
     const interrupt = roomState.lastInterrupt;
     if (!interrupt || !streamingRef.current) return;
 
-    abortRef.current?.();
+    abortRef.current?.({ cancel: true });
+    requestTokenRef.current += 1;
     abortRef.current = null;
     streamingRef.current = false;
     streamingAgentsRef.current = new Set();
@@ -111,7 +119,7 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
     }
 
     if (streamingRef.current) {
-      abortRef.current?.();
+      abortRef.current?.({ cancel: true });
       abortRef.current = null;
       streamingRef.current = false;
       streamingAgentsRef.current = new Set();
@@ -141,6 +149,7 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
     setStreaming(true);
     setStreamingAgents(new Set());
     roomStateRef.current.clearError();
+    const requestToken = ++requestTokenRef.current;
 
     const { abort } = sendRoomMessage(roomId, {
       message: !systemInitiated ? (trimmed || undefined) : undefined,
@@ -240,7 +249,27 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
         // Do NOT clear streaming or call setError — other agents are still running.
       },
 
-      onError(err) {
+      async onError(err) {
+        if (requestTokenRef.current !== requestToken) return;
+        if (err?.agentRunId && isAgentRunRecoverableStreamError(err)) {
+          try {
+            const run = await waitForAgentRunTerminal(err.agentRunId);
+            if (requestTokenRef.current !== requestToken) return;
+            roomStateRef.current.refreshRoom();
+            if (run?.status === 'succeeded') {
+              streamingRef.current = false;
+              streamingAgentsRef.current = new Set();
+              setStreaming(false);
+              setStreamingAgents(new Set());
+              abortRef.current = null;
+              return;
+            }
+            err = { ...err, message: agentRunFailureMessage(run), agentRun: run };
+          } catch (recoveryError) {
+            if (requestTokenRef.current !== requestToken) return;
+            err = recoveryError;
+          }
+        }
         streamingRef.current = false;
         streamingAgentsRef.current = new Set();
         setStreaming(false);
@@ -261,8 +290,9 @@ export default function useChatRoomRequestFlow(roomId, roomState) {
   // ---- Abort -----------------------------------------------------------------
 
   const abort = useCallback(() => {
+    requestTokenRef.current += 1;
     if (abortRef.current) {
-      abortRef.current();
+      abortRef.current({ cancel: true });
       abortRef.current = null;
     }
     streamingRef.current = false;

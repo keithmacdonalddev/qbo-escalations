@@ -6,6 +6,20 @@
 **Scope:** Claude Code and Codex instructions, settings, hooks, skills, custom agents, memory, research documents, runtime provider harnesses, product-agent prompts, model policy, evidence capture, and action safety
 **Purpose:** Provide a reusable review framework for this project and other agentic projects
 
+## Agent authority completion — 2026-08-03
+
+The later authority hardening is now integrated rather than left as a broad worktree experiment:
+
+- Shared Gmail, Calendar, memory, web, and automation handlers are selected from an immutable server capability registry for each run. Prompt text and caller allowlists cannot grant a tool that the server did not assign to that agent and use case.
+- Consequential Workspace actions use exact, expiring, single-use approvals bound to the connected account and action payload. Execution budgets, untrusted-result boundaries, and evidence records are server enforced.
+- Chat and room work has a saved `AgentRun` record with a lease, attempts, cancellation, output validation, and evidence references. A browser connection dropping does not cancel the work; an explicit Stop calls the run cancellation endpoint and immediately reaches the active provider cleanup. The client remembers the run and restores the saved conversation result after reconnect or refresh.
+- `AgentRun` is not advertised as a restart-resumable job queue. If the server loses the executor, an expired lease or never-acquired queued run is reconciled to `stale` and the user is told to retry. The app does not replay an external model call after restart and risk duplicate work.
+- Ordinary automatic fallback is authorized only by a current server-trusted deterministic evaluation bound to the exact agent, use case, provider, model, prompt, and broader behavior hash. Manual harness rows remain diagnostic and cannot enable fallback.
+- Ordinary product provider captures now omit raw request/response bodies and reasoning text. They retain bounded final-result handoff data, hashes, timing, usage, provenance, and reasoning summary metrics. Full bodies and reasoning require an allowlisted diagnostic or evaluation purpose.
+- Externalized provider payloads now have bounded cleanup: expired package sidecars and old orphan directories are removed by the payload janitor on later provider activity. Recorder failures still remove their exact package directory immediately.
+
+The remaining release evidence is rendered browser verification of the reconnect/Stop experience on an already-running current build. Source, build, and focused tests do not substitute for that visual check.
+
 ## Workspace implementation closure — 2026-07-23
 
 The user retained Workspace and designated the Workspace Agent as the application's primary operations agent. That product decision activated the conditional recommendations in this review.
@@ -387,18 +401,18 @@ Recommendation:
 - Version schemas with prompts and store the schema version in evidence packages.
 - Re-run the deterministic image-agent harness after any schema change; accuracy and speed must not regress.
 
-### P1-8: Evidence capture needs a stricter privacy and reasoning policy
+### Closed 2026-08-03: Evidence capture has a purpose-bound privacy and reasoning policy
 
-Provider packages are captured by default, including request and response bodies. This is useful for proving what happened, but it can also retain QBO case details, personal email/calendar content, image text, model summaries, and tool results.
+Provider packages still record a safe manifest by default, but ordinary product calls no longer retain unrestricted request/response bodies or reasoning text. They retain hashes, timing, usage, errors, provenance, a bounded final-result handoff, and reasoning summary metrics. Full payloads and reasoning require an explicit allowlisted diagnostic or evaluation purpose. The on-disk payload janitor now reconciles expired and orphaned sidecar directories.
 
-Recommendation:
+Ongoing requirements:
 
 - Classify captured fields by sensitivity and purpose.
 - Default to metadata plus redacted payloads; require an explicit diagnostic mode for full bodies.
 - Add per-domain retention, access control, export, and deletion rules.
 - Never present model chain-of-thought as factual evidence. Store concise model-provided summaries, claims, cited evidence, tool inputs/outputs, decisions, and validation results.
 - Record which redaction policy version was applied.
-- Extend TTL cleanup to externalized on-disk provider payloads, which the environment example currently notes are not removed with the Mongo document.
+- Keep the payload janitor and its retention metadata covered whenever storage layout or TTL policy changes.
 
 ### P2-1: Codex customization is split across duplicate skill locations
 

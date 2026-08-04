@@ -14,6 +14,7 @@ const {
 } = require('./agent-run-service');
 
 const DEFAULT_DISPATCH_LEASE_MS = 15_000;
+const activeExecutions = new Map();
 
 function safeText(value, max = 1000) {
   return typeof value === 'string' ? value.slice(0, max) : '';
@@ -97,6 +98,7 @@ async function createDurableAgentExecution({
     leaseGeneration: leased.run.leaseGeneration,
     agentId: leased.run.agentId,
     stopped: false,
+    cancelled: false,
     clientAttached: true,
     cleanup: null,
     heartbeatTimer: null,
@@ -113,6 +115,8 @@ async function createDurableAgentExecution({
     }])),
   };
 
+  let activeCancelHandler = null;
+
   const enqueue = (operation) => {
     state.queue = state.queue.then(operation);
     return state.queue;
@@ -122,10 +126,14 @@ async function createDurableAgentExecution({
     state.stopped = true;
     if (state.heartbeatTimer) clearInterval(state.heartbeatTimer);
     state.heartbeatTimer = null;
+    if (activeExecutions.get(String(state.runId)) === activeCancelHandler) {
+      activeExecutions.delete(String(state.runId));
+    }
   };
 
   const acknowledgeCancellation = async () => {
     if (state.stopped) return null;
+    state.cancelled = true;
     try { state.cleanup?.(); } catch { /* best-effort provider cancellation */ }
     const result = await acknowledgeAgentRunCancellation({
       runId: state.runId,
@@ -277,7 +285,16 @@ async function createDurableAgentExecution({
     return run;
   };
 
-  return {
+  const requestCancellation = async ({ requestedBy = '', reason = '' } = {}) => {
+    const result = await cancelAgentRun({ runId: state.runId, requestedBy, reason });
+    if (result.cancelRequested) {
+      return (await enqueue(acknowledgeCancellation)) || result.run;
+    }
+    stopHeartbeat();
+    return result.run;
+  };
+
+  const execution = {
     run: publicRun(leased.run),
     reused: created.reused,
     beginAttempt,
@@ -285,21 +302,31 @@ async function createDurableAgentExecution({
     completeSucceeded,
     completeFailed,
     heartbeat: (heartbeatNow) => enqueue(() => heartbeat(heartbeatNow)),
-    requestCancellation: async ({ requestedBy = '', reason = '' } = {}) => {
-      const result = await cancelAgentRun({ runId: state.runId, requestedBy, reason });
-      if (result.cancelRequested) await enqueue(acknowledgeCancellation);
-      else stopHeartbeat();
-      return result.run;
+    requestCancellation,
+    registerAbort: (cleanup) => {
+      state.cleanup = typeof cleanup === 'function' ? cleanup : null;
+      if (state.cancelled) {
+        try { state.cleanup?.(); } catch { /* cancellation already persisted */ }
+      }
     },
-    registerAbort: (cleanup) => { state.cleanup = typeof cleanup === 'function' ? cleanup : null; },
     detachClient: () => { state.clientAttached = false; },
     isClientAttached: () => state.clientAttached,
     stopHeartbeat,
   };
+  activeCancelHandler = requestCancellation;
+  activeExecutions.set(String(state.runId), activeCancelHandler);
+  return execution;
+}
+
+async function requestActiveAgentRunCancellation(runId, details = {}) {
+  const handler = activeExecutions.get(String(runId || ''));
+  if (!handler) return null;
+  return handler(details);
 }
 
 module.exports = {
   DEFAULT_DISPATCH_LEASE_MS,
   createDurableAgentExecution,
   publicRun,
+  requestActiveAgentRunCancellation,
 };

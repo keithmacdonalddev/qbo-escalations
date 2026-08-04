@@ -64,7 +64,7 @@ function assertProductFallbackBlocked(text) {
   assert.equal(fallback.blocked, true);
   assert.equal(fallback.eligible, false);
   assert.equal(fallback.reason, 'FALLBACK_NOT_EVALUATED');
-  assert.equal(fallback.decision?.reason, 'server_evaluation_authority_not_implemented');
+  assert.equal(fallback.decision?.reason, 'no_evaluation_evidence');
   assert.ok(error, 'expected the primary failure to terminate the request');
   assert.equal(parseEvent(text, 'done'), null, 'an unevaluated backup must never complete the product request');
 }
@@ -108,6 +108,7 @@ test('chat-analyst-failover suite', async (t) => {
     originalCodexChat = codex.chat;
 
     await connect();
+    await AgentIdentity.syncIndexes();
     app = createApp();
     agent = request(app);
   });
@@ -183,7 +184,7 @@ test('chat-analyst-failover suite', async (t) => {
   );
 
   await t.test(
-    'single-mode analyst request selects the profile backup but blocks it without server evaluation authority',
+    'single-mode analyst request selects the profile backup but blocks it without trusted evaluation evidence',
     async () => {
       // The agent profile carries a CUSTOM backup. Per the runtime schema, a
       // custom (non-global-alternate) backup can only be persisted via
@@ -248,7 +249,7 @@ test('chat-analyst-failover suite', async (t) => {
   );
 
   await t.test(
-    'single-mode analyst resolves the global alternate but blocks it without evaluation authority',
+    'single-mode analyst resolves the global alternate but blocks it without trusted evaluation evidence',
     async () => {
       // No analyst runtime seeded -> getAgentIdentity('chat').runtime is null.
       const calls = stubPrimaryFailsBackupSucceeds('global alternate answer');

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { getConversationEvidence, sendChatMessage } from '../../api/chatApi.js';
+import { getConversation, getConversationEvidence, sendChatMessage } from '../../api/chatApi.js';
+import {
+  agentRunFailureMessage,
+  isAgentRunRecoverableStreamError,
+  waitForAgentRunTerminal,
+} from '../../api/agentRunsApi.js';
 import { apiFetch, readApiResponse } from '../../api/http.js';
 import { consumeSSEStream } from '../../api/sse.js';
 import { showImageParserStageToast } from '../../lib/imageParserStageToasts.js';
@@ -811,8 +816,42 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     });
   }, []);
 
-  const handleError = useCallback((err) => {
-    const normalized = normalizeError(err);
+  const handleError = useCallback(async (err, token) => {
+    let normalized = normalizeError(err);
+    const recoverable = isAgentRunRecoverableStreamError(normalized);
+    if (recoverable && normalized.agentRunId && conversationIdRef.current) {
+      try {
+        const run = await waitForAgentRunTerminal(normalized.agentRunId);
+        if (tokenRef.current !== token) return;
+        if (run?.status !== 'succeeded') {
+          normalized = normalizeError({
+            ...normalized,
+            code: `AGENT_RUN_${String(run?.status || 'FAILED').toUpperCase().replace(/-/g, '_')}`,
+            message: agentRunFailureMessage(run),
+            agentRun: run,
+          });
+        } else {
+          const conversation = await getConversation(conversationIdRef.current);
+          if (tokenRef.current !== token) return;
+          const latestAssistant = [...(conversation?.messages || [])]
+            .reverse()
+            .find((message) => message?.role === 'assistant' && typeof message.content === 'string');
+          if (latestAssistant) {
+            setRequestError(null);
+            streamingTextRef.current = '';
+            handleDone({
+              conversationId: conversation._id || conversationIdRef.current,
+              fullResponse: latestAssistant.content,
+              caseIntake: conversation.caseIntake || null,
+            });
+            return;
+          }
+        }
+      } catch (recoveryError) {
+        if (tokenRef.current !== token || recoveryError?.name === 'AbortError') return;
+        normalized = normalizeError(recoveryError, normalized.message);
+      }
+    }
     const visibleText = streamingTextRef.current;
     const completedButUnsaved = normalized.code === 'ONDONE_SAVE_FAILED' && Boolean(visibleText.trim());
     setRequestError(normalized);
@@ -832,7 +871,7 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
     // session resumes honestly with whatever triage actually produced.
     chatLegSettledRef.current = true;
     persistTriageResult();
-  }, [markFailureInProgress, persistTriageResult]);
+  }, [handleDone, markFailureInProgress, persistTriageResult]);
 
   const handleFallback = useCallback((data = {}) => {
     const reason = data.reason || data.code || 'PROVIDER_ERROR';
@@ -858,7 +897,7 @@ export function useStageOrchestrator({ resumeConversationId = null } = {}) {
       onChunk: (data) => { if (tokenRef.current === token) handleChunk(data); },
       onThinking: () => {},
       onDone: (data) => { if (tokenRef.current === token) handleDone(data); },
-      onError: (err) => { if (tokenRef.current === token) handleError(err); },
+      onError: (err) => { if (tokenRef.current === token) void handleError(err, token); },
       onProviderError: () => {},
       onFallback: (data) => { if (tokenRef.current === token) handleFallback(data); },
       onLocalStage: () => {},

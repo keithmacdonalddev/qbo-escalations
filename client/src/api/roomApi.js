@@ -1,6 +1,7 @@
 import { apiFetch, apiFetchJson } from './http.js';
 import { consumeSSEStream } from './sse.js';
 import { normalizeError } from '../utils/normalizeError.js';
+import { cancelAgentRun } from './agentRunsApi.js';
 const BASE = '/api/rooms';
 const STREAM_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -86,6 +87,7 @@ export async function listAvailableAgents() {
 export function sendRoomMessage(roomId, { message, parsedImageContext, systemInitiated, systemMessage, agentRuntime } = {}, { onRoomStart, onAgentStart, onChunk, onThinking, onActions, onStatus, onAgentDone, onRoomDone, onAgentError, onError }) {
   const controller = new AbortController();
   const url = `${BASE}/${roomId}/send`;
+  let agentRunId = '';
 
   (async () => {
     try {
@@ -114,6 +116,7 @@ export function sendRoomMessage(roomId, { message, parsedImageContext, systemIni
 
       await consumeSSEStream(res, (eventType, data) => {
         if (eventType === 'room_start') {
+          agentRunId = data?.agentRunId || agentRunId;
           onRoomStart?.(data);
         } else if (eventType === 'agent_start') {
           onAgentStart?.(data);
@@ -134,7 +137,7 @@ export function sendRoomMessage(roomId, { message, parsedImageContext, systemIni
           onAgentError?.(data);
         } else if (eventType === 'error') {
           streamSettled = true;
-          onError?.(normalizeError(data, data?.error || 'Request failed'));
+          onError?.(normalizeError({ ...data, agentRunId }, data?.error || 'Request failed'));
         }
       });
 
@@ -143,6 +146,7 @@ export function sendRoomMessage(roomId, { message, parsedImageContext, systemIni
           code: 'STREAM_INCOMPLETE',
           error: 'The response stream ended before completion.',
           detail: 'The connection closed without a final room_done/error event.',
+          agentRunId,
         }, 'The response stream ended before completion.'));
       }
     } catch (err) {
@@ -150,10 +154,23 @@ export function sendRoomMessage(roomId, { message, parsedImageContext, systemIni
         window.dispatchEvent(new CustomEvent('sse-stream-error', {
           detail: { url, error: err.message },
         }));
-        onError?.(normalizeError({ message: err.message }, err.message));
+        onError?.(normalizeError({
+          message: err.message,
+          code: err.code,
+          detail: err.detail,
+          status: err.status,
+          agentRunId,
+        }, err.message));
       }
     }
   })();
 
-  return { abort: () => controller.abort() };
+  return {
+    abort: ({ cancel = false } = {}) => {
+      controller.abort();
+      if (cancel && agentRunId) {
+        void cancelAgentRun(agentRunId, 'Stopped by the operator from an agent room.').catch(() => {});
+      }
+    },
+  };
 }

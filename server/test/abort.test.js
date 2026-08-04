@@ -129,6 +129,50 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function postJson(port, requestPath, body = {}) {
+  const payload = JSON.stringify(body);
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      hostname: '127.0.0.1',
+      port,
+      path: requestPath,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload),
+        Connection: 'close',
+      },
+    }, (res) => {
+      let data = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve({ status: res.statusCode, body: JSON.parse(data || '{}') });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+    req.on('error', reject);
+    req.end(payload);
+  });
+}
+
+async function cancelSseRun(port, sse, startEvent = null) {
+  const event = startEvent || parseSseEvents(sse.getRawChunks()).find((entry) => entry.event === 'start');
+  assert.ok(event, 'the stream must expose its saved agent-run id before cancellation');
+  const agentRunId = JSON.parse(event.data).agentRunId;
+  assert.ok(agentRunId, 'start event must include agentRunId');
+  const response = await postJson(port, `/api/agent-runs/${agentRunId}/cancel`, {
+    requestedBy: 'abort-test',
+    reason: 'Explicit stop requested by the test client.',
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.run.status, 'cancelled');
+  return response.body.run;
+}
+
 async function createTestConversation(title) {
   return Conversation.create({
     title: title || 'Abort test',
@@ -190,7 +234,7 @@ async function createTestConversation(title) {
   // Test 1
   // -------------------------------------------------------------------------
 
-  test('client disconnect during streaming calls orchestration cleanup', async () => {
+  test('explicit stop during streaming calls orchestration cleanup', async () => {
     let cleanupCalled = false;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -211,11 +255,39 @@ async function createTestConversation(title) {
 
     // Sequential output is buffered until validation succeeds, so the start
     // event is the safe signal that the request is live before disconnecting.
-    await sse.waitForEvent('start');
+    const startEvent = await sse.waitForEvent('start');
+    await cancelSseRun(port, sse, startEvent);
     sse.destroy();
     await delay(300);
 
-    assert.equal(cleanupCalled, true, 'orchestration cleanup must be called on client disconnect');
+    assert.equal(cleanupCalled, true, 'orchestration cleanup must be called on explicit stop');
+  });
+
+  test('network disconnect keeps the saved run alive and persists its response', async () => {
+    let cleanupCalled = false;
+    claude.chat = ({ onChunk, onDone }) => {
+      onChunk('saved ');
+      const handle = setTimeout(() => onDone('saved after disconnect'), 75);
+      return () => {
+        cleanupCalled = true;
+        clearTimeout(handle);
+      };
+    };
+
+    const conversation = await createTestConversation('Disconnect recovery contract');
+    const sse = sseRequest(port, {
+      conversationId: conversation._id.toString(),
+      message: 'keep working if the connection drops',
+    });
+
+    await sse.waitForEvent('start');
+    sse.destroy();
+    await delay(350);
+
+    const reloaded = await Conversation.findById(conversation._id).lean();
+    const assistant = [...(reloaded?.messages || [])].reverse().find((message) => message.role === 'assistant');
+    assert.equal(cleanupCalled, false, 'a network disconnect must not be treated as an operator stop');
+    assert.equal(assistant?.content, 'saved after disconnect');
   });
 
   // -------------------------------------------------------------------------
@@ -286,7 +358,7 @@ async function createTestConversation(title) {
     const errorEvent = await sse.waitForEvent('error');
     const fallbackEvent = parseSseEvents(sse.getRawChunks()).find((event) => event.event === 'fallback');
     assert.ok(errorEvent);
-    assert.equal(JSON.parse(fallbackEvent.data).decision.reason, 'server_evaluation_authority_not_implemented');
+    assert.equal(JSON.parse(fallbackEvent.data).decision.reason, 'no_evaluation_evidence');
     assert.equal(codexCalls, 0, 'blocked backup must not be dispatched');
     assert.equal(codexCleanupCalled, false);
     sse.destroy();
@@ -296,7 +368,7 @@ async function createTestConversation(title) {
   // Test 4
   // -------------------------------------------------------------------------
 
-  test('abort during parallel cancels all in-flight providers', async () => {
+  test('explicit stop during parallel cancels all in-flight providers', async () => {
     let claudeCleanupCalled = false;
     let codexCleanupCalled = false;
 
@@ -329,6 +401,7 @@ async function createTestConversation(title) {
     });
 
     await sse.waitForEvent('chunk');
+    await cancelSseRun(port, sse);
     sse.destroy();
     await delay(300);
 
@@ -403,7 +476,8 @@ async function createTestConversation(title) {
       message: 'test double destroy',
     });
 
-    await sse.waitForEvent('start');
+    const startEvent = await sse.waitForEvent('start');
+    await cancelSseRun(port, sse, startEvent);
     sse.destroy();
     sse.destroy();
     await delay(300);
@@ -415,7 +489,7 @@ async function createTestConversation(title) {
   // Test 7
   // -------------------------------------------------------------------------
 
-  test('abort before provider emits any data still triggers cleanup', async () => {
+  test('explicit stop before provider emits any data still triggers cleanup', async () => {
     let cleanupCalled = false;
 
     claude.chat = ({ onDone }) => {
@@ -433,7 +507,8 @@ async function createTestConversation(title) {
       message: 'test abort before any chunks',
     });
 
-    await sse.waitForEvent('start');
+    const startEvent = await sse.waitForEvent('start');
+    await cancelSseRun(port, sse, startEvent);
     sse.destroy();
     await delay(300);
 
@@ -458,7 +533,8 @@ async function createTestConversation(title) {
       message: 'my important question',
     });
 
-    await sse.waitForEvent('start');
+    const startEvent = await sse.waitForEvent('start');
+    await cancelSseRun(port, sse, startEvent);
     sse.destroy();
     await delay(300);
 
@@ -475,7 +551,7 @@ async function createTestConversation(title) {
   // Test 9
   // -------------------------------------------------------------------------
 
-  test('abort during 3-way parallel cancels all in-flight providers', async () => {
+  test('explicit stop during 3-way parallel cancels all in-flight providers', async () => {
     let claudeCleanupCount = 0;
     let codexCleanupCount = 0;
 
@@ -508,6 +584,7 @@ async function createTestConversation(title) {
     });
 
     await sse.waitForEvent('chunk');
+    await cancelSseRun(port, sse);
     sse.destroy();
     await delay(300);
 
@@ -519,7 +596,7 @@ async function createTestConversation(title) {
   // Test 10
   // -------------------------------------------------------------------------
 
-  test('abort when one parallel provider already settled only cleans up in-flight', async () => {
+  test('explicit stop when one parallel provider already settled only cleans up in-flight', async () => {
     let claudeCleanupCalled = false;
     let codexCleanupCalled = false;
 
@@ -552,6 +629,7 @@ async function createTestConversation(title) {
 
     await sse.waitForEvent('chunk');
     await delay(50);
+    await cancelSseRun(port, sse);
     sse.destroy();
     await delay(300);
 
@@ -563,7 +641,7 @@ async function createTestConversation(title) {
   // Test 11
   // -------------------------------------------------------------------------
 
-  test('sequential SSE withholds unvalidated chunks before abort', async () => {
+  test('sequential SSE withholds unvalidated chunks before explicit stop', async () => {
     claude.chat = ({ onChunk, onDone }) => {
       onChunk('hello ');
       onChunk('world');
@@ -578,8 +656,9 @@ async function createTestConversation(title) {
       message: 'test sse events before abort',
     });
 
-    await sse.waitForEvent('start');
+    const startEvent = await sse.waitForEvent('start');
     await delay(50);
+    await cancelSseRun(port, sse, startEvent);
     sse.destroy();
     await delay(100);
 
@@ -595,7 +674,7 @@ async function createTestConversation(title) {
   // Test 12
   // -------------------------------------------------------------------------
 
-  test('abort when provider cleanup throws does not crash server', async () => {
+  test('explicit stop when provider cleanup throws does not crash server', async () => {
     claude.chat = ({ onChunk, onDone }) => {
       onChunk('partial');
       const handle = setTimeout(() => onDone('full'), 30_000);
@@ -612,7 +691,8 @@ async function createTestConversation(title) {
       message: 'test cleanup explosion',
     });
 
-    await sse.waitForEvent('start');
+    const startEvent = await sse.waitForEvent('start');
+    await cancelSseRun(port, sse, startEvent);
     sse.destroy();
     await delay(300);
 
@@ -641,7 +721,7 @@ async function createTestConversation(title) {
   // Test 13
   // -------------------------------------------------------------------------
 
-  test('abort during streaming does not prevent future requests', async () => {
+  test('explicit stop during streaming does not prevent future requests', async () => {
     let firstCleanupCalled = false;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -660,7 +740,8 @@ async function createTestConversation(title) {
       message: 'first request',
     });
 
-    await sse1.waitForEvent('start');
+    const startEvent = await sse1.waitForEvent('start');
+    await cancelSseRun(port, sse1, startEvent);
     sse1.destroy();
     await delay(300);
 
@@ -686,7 +767,7 @@ async function createTestConversation(title) {
   // Test 14
   // -------------------------------------------------------------------------
 
-  test('provider late onDone after abort is a no-op', async () => {
+  test('provider late onDone after explicit stop is a no-op', async () => {
     let cleanupCalled = false;
     let onDoneRef = null;
 
@@ -705,7 +786,8 @@ async function createTestConversation(title) {
       message: 'test late onDone after abort',
     });
 
-    await sse.waitForEvent('start');
+    const startEvent = await sse.waitForEvent('start');
+    await cancelSseRun(port, sse, startEvent);
     sse.destroy();
     await delay(300);
 
@@ -720,7 +802,7 @@ async function createTestConversation(title) {
   // Test 15
   // -------------------------------------------------------------------------
 
-  test('rapid sequential abort requests are isolated', async () => {
+  test('rapid sequential stop requests are isolated', async () => {
     let cleanupCallCount = 0;
 
     claude.chat = ({ onChunk, onDone }) => {
@@ -740,7 +822,8 @@ async function createTestConversation(title) {
         message: 'rapid abort ' + i,
       });
 
-      await sse.waitForEvent('start');
+      const startEvent = await sse.waitForEvent('start');
+      await cancelSseRun(port, sse, startEvent);
       sse.destroy();
       await delay(200);
     }

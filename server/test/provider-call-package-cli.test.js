@@ -438,7 +438,8 @@ test('codex chat force-captures a manifest plus typed result handoff without raw
   assert.equal(saved.cli.stdout.jsonlEvents, null);
   assert.equal(saved.resultHandoff.text, 'COID/MID: 123');
   assert.equal(saved.resultHandoff.format, 'assistant-text');
-  assert.equal(saved.reasoningEvidence[0].text, 'Thinking trace');
+  assert.equal(saved.reasoningEvidence.length, 0);
+  assert.equal(saved.reasoningEvidenceSummary.entryCount, 1);
   assert.equal(saved.cli.process.exitCode, 0);
   assert.equal(saved.cli.process.closed, true);
   assert.equal(saved.outcome, 'success');

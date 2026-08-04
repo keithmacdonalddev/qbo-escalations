@@ -8,7 +8,7 @@
       "cwd": ".",
       "timeoutMs": 120000,
       "why": "Protects visible client behavior without live services.",
-      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "qbo-orchestration", "conversation-persistence", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting", "workspace-primary-operations-agent", "provider-controls", "request-diagnostics"]
+      "capabilities": ["qbo-evidence-intake", "image-parse-validation", "unsaved-result-protection", "saved-session-resume", "evidence-completeness", "qbo-orchestration", "conversation-persistence", "escalation-lifecycle", "qbo-case-realtime-continuity", "global-live-work-attention", "ticket-snitch-user-reporting", "workspace-primary-operations-agent", "agent-execution-safety", "provider-controls", "request-diagnostics"]
     },
     "server-suite": {
       "label": "Server behavior tests",
