@@ -1,0 +1,1300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Research-grade analysis of Apple's design systems, philosophy, and device-specific principles through August 5, 2026.">
+  <title>One language, many contexts - Apple design systems research</title>
+  <style>
+:root {
+  color-scheme: light dark;
+  --paper: #f6f8fb;
+  --surface: rgba(255,255,255,.78);
+  --surface-solid: #ffffff;
+  --ink: #121c2c;
+  --ink-2: #4d5c72;
+  --ink-3: #718096;
+  --line: rgba(18,28,44,.12);
+  --line-strong: rgba(18,28,44,.22);
+  --blue: #0b67d8;
+  --blue-soft: #e7f1ff;
+  --green: #087c63;
+  --green-soft: #e7f7f2;
+  --amber: #9c6700;
+  --amber-soft: #fff5d9;
+  --red: #b94343;
+  --shadow: 0 18px 50px rgba(31,48,74,.10);
+  --radius: 18px;
+  --content: 760px;
+  --rail: 272px;
+}
+html[data-theme="dark"] {
+  --paper: #0d121b;
+  --surface: rgba(23,31,45,.80);
+  --surface-solid: #171f2d;
+  --ink: #eef3fa;
+  --ink-2: #b7c1d0;
+  --ink-3: #8794a8;
+  --line: rgba(238,243,250,.12);
+  --line-strong: rgba(238,243,250,.23);
+  --blue: #70adff;
+  --blue-soft: #162f50;
+  --green: #5dd1ad;
+  --green-soft: #12372f;
+  --amber: #efbd58;
+  --amber-soft: #3e3116;
+  --red: #ff8585;
+  --shadow: 0 20px 60px rgba(0,0,0,.28);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 8% 2%, color-mix(in srgb, var(--blue) 12%, transparent), transparent 28rem),
+    radial-gradient(circle at 92% 12%, color-mix(in srgb, var(--green) 9%, transparent), transparent 26rem),
+    var(--paper);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 17px;
+  line-height: 1.68;
+  text-rendering: optimizeLegibility;
+}
+a { color: var(--blue); text-underline-offset: .18em; }
+a:hover { text-decoration-thickness: 2px; }
+a:focus-visible, button:focus-visible, summary:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--blue) 70%, white);
+  outline-offset: 3px;
+  border-radius: 5px;
+}
+.skip-link {
+  position: fixed; left: 16px; top: -60px; z-index: 100;
+  padding: 10px 14px; border-radius: 9px; background: var(--ink); color: var(--paper);
+}
+.skip-link:focus { top: 16px; }
+.progress { position: fixed; inset: 0 0 auto; height: 3px; z-index: 60; background: transparent; }
+.progress > span { display: block; width: 0; height: 100%; background: linear-gradient(90deg,var(--blue),var(--green)); }
+.topbar {
+  position: fixed; z-index: 50; top: 18px; right: 20px; display: flex; gap: 8px;
+}
+.icon-button {
+  width: 44px; height: 44px; border: 1px solid var(--line); border-radius: 12px;
+  color: var(--ink); background: var(--surface); backdrop-filter: blur(18px) saturate(1.25);
+  box-shadow: 0 8px 24px rgba(0,0,0,.08); cursor: pointer; font: inherit;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+.icon-button:hover { transform: translateY(-2px); border-color: var(--line-strong); }
+.icon-button:active { transform: translateY(0) scale(.97); }
+.hero {
+  min-height: 76vh; padding: 90px 24px 64px; display: grid; place-items: center;
+  overflow: hidden; position: relative;
+}
+.hero-inner { width: min(1120px, 100%); display: grid; grid-template-columns: minmax(0,1.15fr) minmax(300px,.85fr); gap: 56px; align-items: center; }
+.eyebrow { color: var(--blue); font-size: .76rem; font-weight: 760; letter-spacing: .12em; text-transform: uppercase; }
+.hero h1 { max-width: 780px; margin: 12px 0 18px; font-size: clamp(2.7rem, 7vw, 6.4rem); line-height: .94; letter-spacing: -.065em; }
+.hero .dek { max-width: 680px; color: var(--ink-2); font-size: clamp(1.05rem, 2vw, 1.3rem); line-height: 1.52; }
+.hero-meta { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 7px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); font-size: .78rem; }
+.hero-visual { min-height: 420px; display: grid; place-items: center; position: relative; }
+.orbit { width: min(390px, 88vw); aspect-ratio: 1; border: 1px solid var(--line); border-radius: 50%; position: relative; box-shadow: inset 0 0 90px color-mix(in srgb,var(--blue) 7%,transparent); }
+.orbit::before, .orbit::after { content: ""; position: absolute; inset: 17%; border: 1px solid var(--line-strong); border-radius: 50%; }
+.orbit::after { inset: 34%; background: linear-gradient(145deg,var(--blue-soft),var(--green-soft)); box-shadow: var(--shadow); }
+.orbit-label { position: absolute; z-index: 2; width: 130px; text-align: center; font-weight: 760; line-height: 1.15; top: 50%; left: 50%; transform: translate(-50%,-50%); }
+.orbit-node { position: absolute; z-index: 3; padding: 7px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-solid); box-shadow: 0 8px 18px rgba(20,32,51,.08); font-size: .72rem; font-weight: 700; }
+.n1{top:-2%;left:41%}.n2{top:14%;right:-5%}.n3{top:49%;right:-11%}.n4{bottom:8%;right:2%}.n5{bottom:-3%;left:35%}.n6{bottom:13%;left:-4%}.n7{top:46%;left:-10%}.n8{top:12%;left:0}
+.shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto 120px; display: grid; grid-template-columns: var(--rail) minmax(0,var(--content)); gap: 70px; justify-content: center; align-items: start; }
+.rail { position: sticky; top: 32px; max-height: calc(100vh - 64px); overflow: auto; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); backdrop-filter: blur(20px) saturate(1.2); box-shadow: var(--shadow); }
+.rail-title { margin: 0 0 10px; font-size: .72rem; letter-spacing: .1em; color: var(--ink-3); text-transform: uppercase; }
+.rail ul { list-style: none; padding: 0; margin: 0; }
+.rail ul ul { padding-left: 10px; }
+.rail li { margin: 2px 0; }
+.rail a { display: block; padding: 6px 8px; border-radius: 8px; color: var(--ink-2); text-decoration: none; font-size: .78rem; line-height: 1.28; }
+.rail a:hover, .rail a.active { color: var(--ink); background: var(--blue-soft); }
+.mobile-toc { display:none; margin: -30px 16px 32px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-solid); }
+.mobile-toc summary { padding: 13px 15px; font-weight: 720; cursor: pointer; }
+.mobile-toc nav { padding: 0 14px 14px; max-height: 50vh; overflow: auto; }
+.mobile-toc ul { margin: 0; padding-left: 20px; }
+main { min-width: 0; }
+.paper { padding: 0 0 80px; }
+.paper > h1, .paper > h1 + h2, .paper > h1 + h2 + p { display: none; }
+.paper h2 { margin: 5.4rem 0 1.2rem; padding-top: 1rem; font-size: clamp(1.8rem,4vw,2.45rem); line-height: 1.08; letter-spacing: -.035em; }
+.paper h3 { margin: 3rem 0 .8rem; font-size: 1.35rem; line-height: 1.2; letter-spacing: -.018em; }
+.paper h4 { margin: 2rem 0 .55rem; font-size: 1.08rem; }
+.paper p { margin: 0 0 1.18rem; color: var(--ink-2); }
+.paper strong { color: var(--ink); }
+.paper blockquote { margin: 2rem 0; padding: 20px 22px; border-left: 4px solid var(--blue); border-radius: 0 14px 14px 0; background: var(--blue-soft); color: var(--ink); }
+.paper blockquote p { color: var(--ink); margin: 0; }
+.paper hr { margin: 3.5rem 0; border: 0; height: 1px; background: var(--line); }
+.paper li { margin: .4rem 0; color: var(--ink-2); }
+.table-wrap { margin: 1.8rem calc((min(94vw, 1040px) - min(94vw, var(--content)))/-2); overflow-x: auto; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-solid); box-shadow: 0 10px 30px rgba(20,32,51,.055); }
+.paper table { width: 100%; border-collapse: collapse; min-width: 660px; font-size: .82rem; line-height: 1.45; }
+.paper th { text-align: left; color: var(--ink); background: var(--blue-soft); }
+.paper th, .paper td { padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.paper tr:last-child td { border-bottom: 0; }
+.paper code { font-family: ui-monospace, "Cascadia Code", monospace; font-size: .88em; background: var(--blue-soft); padding: .1em .28em; border-radius: 4px; }
+.visual { margin: 2.5rem 0 3.6rem; border: 1px solid var(--line); border-radius: 22px; background: linear-gradient(145deg,var(--surface-solid),var(--surface)); box-shadow: var(--shadow); overflow: hidden; }
+.visual-head { padding: 18px 20px 0; }
+.visual-kicker { color: var(--green); font-size: .68rem; letter-spacing: .11em; font-weight: 800; text-transform: uppercase; }
+.visual h3 { margin: 5px 0 4px; }
+.visual p { margin: 0; }
+.evidence-strip { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--line); }
+.evidence-strip div { padding:18px; background:var(--surface-solid); }
+.evidence-strip strong { display:block; font-size:1.45rem; color:var(--ink); }
+.evidence-strip span { color:var(--ink-3); font-size:.75rem; }
+.principle-grid { padding: 18px; display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; }
+.principle { min-height: 128px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.principle b { display:block; margin-bottom:6px; }
+.principle span { color:var(--ink-2); font-size:.78rem; line-height:1.4; }
+.system-stack { padding: 20px; display:grid; gap:8px; }
+.layer { display:grid; grid-template-columns:120px 1fr; gap:14px; align-items:center; padding:13px 15px; border-radius:12px; border:1px solid var(--line); }
+.layer:nth-child(1){background:var(--green-soft)}.layer:nth-child(2){margin-inline:16px;background:color-mix(in srgb,var(--green-soft) 55%,var(--blue-soft))}.layer:nth-child(3){margin-inline:32px;background:var(--blue-soft)}.layer:nth-child(4){margin-inline:48px}.layer:nth-child(5){margin-inline:64px;background:var(--surface-solid)}
+.layer b { font-size:.8rem; }.layer span{color:var(--ink-2);font-size:.76rem;line-height:1.35}
+.device-band { padding: 20px; display:grid; grid-template-columns:repeat(7,1fr); gap:8px; align-items:end; }
+.device { display:grid; place-items:center; gap:8px; text-align:center; color:var(--ink-2); font-size:.7rem; }
+.device-shape { width:100%; max-width:76px; min-height:72px; border:2px solid var(--ink-3); border-radius:13px; display:grid; place-items:center; background:linear-gradient(145deg,var(--surface-solid),var(--blue-soft)); font-size:.6rem; font-weight:800; color:var(--ink); }
+.device:nth-child(3) .device-shape{min-height:58px;border-radius:8px}.device:nth-child(4) .device-shape{max-width:58px;min-height:68px;border-radius:18px}.device:nth-child(5) .device-shape{max-width:92px;min-height:54px;border-radius:9px}.device:nth-child(6) .device-shape{max-width:90px;min-height:54px;border-radius:25px}.device:nth-child(7) .device-shape{max-width:62px;min-height:62px;border-radius:50%}
+.tensions { padding:18px; display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.tension { padding:14px; border:1px solid var(--line); border-radius:14px; }
+.tension-top { display:flex; justify-content:space-between; gap:12px; font-weight:760; font-size:.78rem; }
+.tension-line { height:6px; margin:11px 0; border-radius:999px; background:linear-gradient(90deg,var(--blue),var(--amber)); position:relative; }
+.tension-line::after { content:""; position:absolute; width:12px; height:12px; border:3px solid var(--surface-solid); border-radius:50%; background:var(--ink); top:50%; left:var(--mark,50%); transform:translate(-50%,-50%); box-shadow:0 0 0 1px var(--line); }
+.tension small { color:var(--ink-3); }
+.closing-model { padding: 26px; display:grid; grid-template-columns: 210px 1fr; gap:26px; align-items:center; }
+.mini-orbit { aspect-ratio:1;border:1px solid var(--line);border-radius:50%;display:grid;place-items:center;box-shadow:inset 0 0 0 28px var(--blue-soft), inset 0 0 0 56px var(--green-soft);font-weight:800;text-align:center;line-height:1.2; }
+.closing-model ol { margin:0; padding-left:22px; color:var(--ink-2); }
+.source-note { margin:5rem 0 0; padding:18px; border:1px solid var(--line); border-radius:14px; color:var(--ink-3); font-size:.78rem; }
+footer { padding: 36px 20px 60px; border-top: 1px solid var(--line); text-align: center; color: var(--ink-3); font-size: .76rem; }
+@media (max-width: 980px) {
+  .hero-inner { grid-template-columns: 1fr; }
+  .hero-visual { min-height: 350px; }
+  .shell { display:block; width:min(760px,calc(100% - 28px)); }
+  .rail { display:none; }
+  .mobile-toc { display:block; }
+  .table-wrap { margin-inline:0; }
+  .principle-grid { grid-template-columns:repeat(2,1fr); }
+  .device-band { grid-template-columns:repeat(4,1fr); }
+}
+@media (max-width: 620px) {
+  body { font-size:16px; }
+  .hero { min-height:auto; padding-top:96px; }
+  .hero h1 { font-size:clamp(2.65rem,15vw,4rem); }
+  .hero-visual { min-height:300px; }
+  .orbit { width:270px; }
+  .orbit-node { font-size:.62rem; padding:5px 7px; }
+  .evidence-strip { grid-template-columns:repeat(2,1fr); }
+  .principle-grid, .tensions { grid-template-columns:1fr; }
+  .system-stack { padding:14px; }
+  .layer { grid-template-columns:1fr; gap:4px; margin-inline:0 !important; }
+  .device-band { grid-template-columns:repeat(3,1fr); }
+  .closing-model { grid-template-columns:1fr; }
+  .mini-orbit { width:190px; margin:auto; }
+  .paper h2 { margin-top:4.2rem; }
+}
+@media print {
+  .topbar,.progress,.rail,.mobile-toc,.hero-visual { display:none !important; }
+  body { background:white; color:#111; }
+  .hero { min-height:auto; padding:30px 0; }
+  .hero-inner,.shell { display:block; width:100%; }
+  .visual,.table-wrap { box-shadow:none; break-inside:avoid; }
+  .paper h2 { break-after:avoid; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior:auto; }
+  *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
+}
+</style>
+</head>
+<body>
+  <a class="skip-link" href="#research-paper">Skip to the paper</a>
+  <div class="progress" aria-hidden="true"><span></span></div>
+  <div class="topbar"><button class="icon-button" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">◐</button></div>
+  <header class="hero">
+    <div class="hero-inner">
+      <div>
+        <div class="eyebrow">Cross-platform research paper - 2026</div>
+        <h1>One language,<br>many contexts.</h1>
+        <p class="dek">Apple's design system is not a single look. It is a coordinated method for translating purpose, agency, responsibility, and craft across the hand, desk, wrist, room, road, and spatial field.</p>
+        <div class="hero-meta"><span class="chip">56 references</span><span class="chip">10 device families + CarPlay</span><span class="chip">Historical + current</span><span class="chip">Critical analysis</span></div>
+      </div>
+      <div class="hero-visual" aria-label="Eight principles arranged around human context">
+        <div class="orbit"><div class="orbit-label">Human<br>context</div><span class="orbit-node n1">Purpose</span><span class="orbit-node n2">Agency</span><span class="orbit-node n3">Responsibility</span><span class="orbit-node n4">Familiarity</span><span class="orbit-node n5">Flexibility</span><span class="orbit-node n6">Simplicity</span><span class="orbit-node n7">Craft</span><span class="orbit-node n8">Delight</span></div>
+      </div>
+    </div>
+  </header>
+  <details class="mobile-toc"><summary>Contents</summary><nav aria-label="Mobile table of contents"><div class="toc">
+<ul>
+<li><a href="#one-language-many-contexts">One language, many contexts</a><ul>
+<li><a href="#apples-design-systems-philosophies-and-principles-across-its-device-ecosystem">Apple's design systems, philosophies, and principles across its device ecosystem</a></li>
+<li><a href="#abstract">Abstract</a></li>
+<li><a href="#1-introduction">1. Introduction</a></li>
+<li><a href="#2-scope-and-method">2. Scope and method</a><ul>
+<li><a href="#21-scope">2.1 Scope</a></li>
+<li><a href="#22-evidence-selection">2.2 Evidence selection</a></li>
+<li><a href="#23-source-treatment">2.3 Source treatment</a></li>
+<li><a href="#24-analytical-frame">2.4 Analytical frame</a></li>
+</ul>
+</li>
+<li><a href="#3-historical-lineage-continuity-through-reinvention">3. Historical lineage: continuity through reinvention</a><ul>
+<li><a href="#31-the-macintosh-foundation">3.1 The Macintosh foundation</a></li>
+<li><a href="#32-from-physical-metaphor-to-digital-material">3.2 From physical metaphor to digital material</a></li>
+<li><a href="#33-system-typography-and-symbolic-scale">3.3 System typography and symbolic scale</a></li>
+<li><a href="#34-spatial-computing-as-a-new-source-platform">3.4 Spatial computing as a new source platform</a></li>
+<li><a href="#35-liquid-glass-and-the-2026-principles">3.5 Liquid Glass and the 2026 principles</a></li>
+<li><a href="#36-timeline-of-the-design-logic">3.6 Timeline of the design logic</a></li>
+</ul>
+</li>
+<li><a href="#4-apples-stated-philosophy-in-2026">4. Apple's stated philosophy in 2026</a><ul>
+<li><a href="#41-purpose-make-something-meaningful">4.1 Purpose: make something meaningful</a></li>
+<li><a href="#42-agency-let-people-act-in-their-own-way">4.2 Agency: let people act in their own way</a></li>
+<li><a href="#43-responsibility-act-in-peoples-best-interest">4.3 Responsibility: act in people's best interest</a></li>
+<li><a href="#44-familiarity-build-on-what-people-know">4.4 Familiarity: build on what people know</a></li>
+<li><a href="#45-flexibility-adapt-to-people-inputs-and-contexts">4.5 Flexibility: adapt to people, inputs, and contexts</a></li>
+<li><a href="#46-simplicity-be-clear-and-direct">4.6 Simplicity: be clear and direct</a></li>
+<li><a href="#47-craft-care-about-every-detail">4.7 Craft: care about every detail</a></li>
+<li><a href="#48-delight-make-it-human">4.8 Delight: make it human</a></li>
+</ul>
+</li>
+<li><a href="#5-the-current-design-system">5. The current design system</a><ul>
+<li><a href="#51-three-interface-principles-hierarchy-harmony-consistency">5.1 Three interface principles: hierarchy, harmony, consistency</a></li>
+<li><a href="#52-typography-as-adaptive-infrastructure">5.2 Typography as adaptive infrastructure</a></li>
+<li><a href="#53-sf-symbols-and-icon-grammar">5.3 SF Symbols and icon grammar</a></li>
+<li><a href="#54-semantic-color-and-appearance">5.4 Semantic color and appearance</a></li>
+<li><a href="#55-materials-and-liquid-glass">5.5 Materials and Liquid Glass</a></li>
+<li><a href="#56-geometry-and-concentricity">5.6 Geometry and concentricity</a></li>
+<li><a href="#57-layout-safe-areas-and-continuity-under-change">5.7 Layout, safe areas, and continuity under change</a></li>
+<li><a href="#58-components-and-native-behavior">5.8 Components and native behavior</a></li>
+<li><a href="#59-motion-haptics-and-audio-as-one-feedback-system">5.9 Motion, haptics, and audio as one feedback system</a></li>
+</ul>
+</li>
+<li><a href="#6-platform-adaptations">6. Platform adaptations</a><ul>
+<li><a href="#61-cross-platform-context-matrix">6.1 Cross-platform context matrix</a></li>
+<li><a href="#62-iphone-focused-mobility">6.2 iPhone: focused mobility</a></li>
+<li><a href="#63-ipad-adaptive-hybridity">6.3 iPad: adaptive hybridity</a></li>
+<li><a href="#64-mac-density-precision-and-user-configured-work">6.4 Mac: density, precision, and user-configured work</a></li>
+<li><a href="#65-apple-watch-glanceability-and-timely-action">6.5 Apple Watch: glanceability and timely action</a></li>
+<li><a href="#66-apple-tv-focus-at-a-distance">6.6 Apple TV: focus at a distance</a></li>
+<li><a href="#67-vision-pro-spatial-hierarchy-and-bodily-comfort">6.7 Vision Pro: spatial hierarchy and bodily comfort</a></li>
+<li><a href="#68-carplay-responsibility-through-constraint">6.8 CarPlay: responsibility through constraint</a></li>
+<li><a href="#69-airpods-an-interface-with-almost-no-screen">6.9 AirPods: an interface with almost no screen</a></li>
+<li><a href="#610-homepod-ambient-form-and-voice-first-interaction">6.10 HomePod: ambient form and voice-first interaction</a></li>
+<li><a href="#611-airtag-object-recovery-as-a-distributed-interface">6.11 AirTag: object recovery as a distributed interface</a></li>
+<li><a href="#612-input-accessories-tools-that-preserve-intent">6.12 Input accessories: tools that preserve intent</a></li>
+</ul>
+</li>
+<li><a href="#7-hardware-and-software-as-one-interface">7. Hardware and software as one interface</a><ul>
+<li><a href="#71-form-follows-interaction-and-interaction-follows-form">7.1 Form follows interaction, and interaction follows form</a></li>
+<li><a href="#72-material-reduction-and-structural-clarity">7.2 Material reduction and structural clarity</a></li>
+<li><a href="#73-custom-silicon-as-a-design-material">7.3 Custom silicon as a design material</a></li>
+<li><a href="#74-feedback-closes-the-loop">7.4 Feedback closes the loop</a></li>
+<li><a href="#75-continuity-turns-products-into-a-device-ecology">7.5 Continuity turns products into a device ecology</a></li>
+</ul>
+</li>
+<li><a href="#8-accessibility-privacy-and-environmental-responsibility">8. Accessibility, privacy, and environmental responsibility</a><ul>
+<li><a href="#81-accessibility-is-a-system-property">8.1 Accessibility is a system property</a></li>
+<li><a href="#82-privacy-is-interaction-design-plus-architecture">8.2 Privacy is interaction design plus architecture</a></li>
+<li><a href="#83-environmental-design-and-longevity">8.3 Environmental design and longevity</a></li>
+</ul>
+</li>
+<li><a href="#9-critical-assessment">9. Critical assessment</a><ul>
+<li><a href="#91-strengths">9.1 Strengths</a><ul>
+<li><a href="#coherence-at-multiple-levels">Coherence at multiple levels</a></li>
+<li><a href="#context-specific-interaction">Context-specific interaction</a></li>
+<li><a href="#system-backed-adaptivity">System-backed adaptivity</a></li>
+<li><a href="#high-feedback-quality">High feedback quality</a></li>
+<li><a href="#long-horizon-platform-governance">Long-horizon platform governance</a></li>
+</ul>
+</li>
+<li><a href="#92-tensions-and-failure-modes">9.2 Tensions and failure modes</a><ul>
+<li><a href="#deference-versus-discoverability">Deference versus discoverability</a></li>
+<li><a href="#universal-language-versus-platform-fitness">Universal language versus platform fitness</a></li>
+<li><a href="#delight-versus-legibility">Delight versus legibility</a></li>
+<li><a href="#familiarity-versus-innovation">Familiarity versus innovation</a></li>
+<li><a href="#integration-versus-openness">Integration versus openness</a></li>
+<li><a href="#thin-sealed-craft-versus-repairability">Thin, sealed craft versus repairability</a></li>
+<li><a href="#spatial-naturalness-versus-human-physiology">Spatial naturalness versus human physiology</a></li>
+</ul>
+</li>
+<li><a href="#93-why-apples-system-sometimes-appears-inconsistent">9.3 Why Apple's system sometimes appears inconsistent</a></li>
+</ul>
+</li>
+<li><a href="#10-synthesis-a-five-layer-model-of-apple-design">10. Synthesis: a five-layer model of Apple design</a><ul>
+<li><a href="#layer-1-human-intent">Layer 1 - Human intent</a></li>
+<li><a href="#layer-2-physical-and-social-context">Layer 2 - Physical and social context</a></li>
+<li><a href="#layer-3-interaction-grammar">Layer 3 - Interaction grammar</a></li>
+<li><a href="#layer-4-system-expression">Layer 4 - System expression</a></li>
+<li><a href="#layer-5-integrated-delivery">Layer 5 - Integrated delivery</a></li>
+<li><a href="#101-a-practical-evaluation-rubric">10.1 A practical evaluation rubric</a></li>
+</ul>
+</li>
+<li><a href="#11-conclusion">11. Conclusion</a></li>
+<li><a href="#appendix-a-principle-to-system-evidence-map">Appendix A. Principle-to-system evidence map</a></li>
+<li><a href="#appendix-b-product-family-coverage">Appendix B. Product-family coverage</a></li>
+<li><a href="#appendix-c-key-terms-in-plain-language">Appendix C. Key terms in plain language</a></li>
+<li><a href="#references">References</a></li>
+<li><a href="#research-limitations-and-update-note">Research limitations and update note</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</nav></details>
+  <div class="shell">
+    <aside class="rail" aria-label="Table of contents"><p class="rail-title">Contents</p><div class="toc">
+<ul>
+<li><a href="#one-language-many-contexts">One language, many contexts</a><ul>
+<li><a href="#apples-design-systems-philosophies-and-principles-across-its-device-ecosystem">Apple's design systems, philosophies, and principles across its device ecosystem</a></li>
+<li><a href="#abstract">Abstract</a></li>
+<li><a href="#1-introduction">1. Introduction</a></li>
+<li><a href="#2-scope-and-method">2. Scope and method</a><ul>
+<li><a href="#21-scope">2.1 Scope</a></li>
+<li><a href="#22-evidence-selection">2.2 Evidence selection</a></li>
+<li><a href="#23-source-treatment">2.3 Source treatment</a></li>
+<li><a href="#24-analytical-frame">2.4 Analytical frame</a></li>
+</ul>
+</li>
+<li><a href="#3-historical-lineage-continuity-through-reinvention">3. Historical lineage: continuity through reinvention</a><ul>
+<li><a href="#31-the-macintosh-foundation">3.1 The Macintosh foundation</a></li>
+<li><a href="#32-from-physical-metaphor-to-digital-material">3.2 From physical metaphor to digital material</a></li>
+<li><a href="#33-system-typography-and-symbolic-scale">3.3 System typography and symbolic scale</a></li>
+<li><a href="#34-spatial-computing-as-a-new-source-platform">3.4 Spatial computing as a new source platform</a></li>
+<li><a href="#35-liquid-glass-and-the-2026-principles">3.5 Liquid Glass and the 2026 principles</a></li>
+<li><a href="#36-timeline-of-the-design-logic">3.6 Timeline of the design logic</a></li>
+</ul>
+</li>
+<li><a href="#4-apples-stated-philosophy-in-2026">4. Apple's stated philosophy in 2026</a><ul>
+<li><a href="#41-purpose-make-something-meaningful">4.1 Purpose: make something meaningful</a></li>
+<li><a href="#42-agency-let-people-act-in-their-own-way">4.2 Agency: let people act in their own way</a></li>
+<li><a href="#43-responsibility-act-in-peoples-best-interest">4.3 Responsibility: act in people's best interest</a></li>
+<li><a href="#44-familiarity-build-on-what-people-know">4.4 Familiarity: build on what people know</a></li>
+<li><a href="#45-flexibility-adapt-to-people-inputs-and-contexts">4.5 Flexibility: adapt to people, inputs, and contexts</a></li>
+<li><a href="#46-simplicity-be-clear-and-direct">4.6 Simplicity: be clear and direct</a></li>
+<li><a href="#47-craft-care-about-every-detail">4.7 Craft: care about every detail</a></li>
+<li><a href="#48-delight-make-it-human">4.8 Delight: make it human</a></li>
+</ul>
+</li>
+<li><a href="#5-the-current-design-system">5. The current design system</a><ul>
+<li><a href="#51-three-interface-principles-hierarchy-harmony-consistency">5.1 Three interface principles: hierarchy, harmony, consistency</a></li>
+<li><a href="#52-typography-as-adaptive-infrastructure">5.2 Typography as adaptive infrastructure</a></li>
+<li><a href="#53-sf-symbols-and-icon-grammar">5.3 SF Symbols and icon grammar</a></li>
+<li><a href="#54-semantic-color-and-appearance">5.4 Semantic color and appearance</a></li>
+<li><a href="#55-materials-and-liquid-glass">5.5 Materials and Liquid Glass</a></li>
+<li><a href="#56-geometry-and-concentricity">5.6 Geometry and concentricity</a></li>
+<li><a href="#57-layout-safe-areas-and-continuity-under-change">5.7 Layout, safe areas, and continuity under change</a></li>
+<li><a href="#58-components-and-native-behavior">5.8 Components and native behavior</a></li>
+<li><a href="#59-motion-haptics-and-audio-as-one-feedback-system">5.9 Motion, haptics, and audio as one feedback system</a></li>
+</ul>
+</li>
+<li><a href="#6-platform-adaptations">6. Platform adaptations</a><ul>
+<li><a href="#61-cross-platform-context-matrix">6.1 Cross-platform context matrix</a></li>
+<li><a href="#62-iphone-focused-mobility">6.2 iPhone: focused mobility</a></li>
+<li><a href="#63-ipad-adaptive-hybridity">6.3 iPad: adaptive hybridity</a></li>
+<li><a href="#64-mac-density-precision-and-user-configured-work">6.4 Mac: density, precision, and user-configured work</a></li>
+<li><a href="#65-apple-watch-glanceability-and-timely-action">6.5 Apple Watch: glanceability and timely action</a></li>
+<li><a href="#66-apple-tv-focus-at-a-distance">6.6 Apple TV: focus at a distance</a></li>
+<li><a href="#67-vision-pro-spatial-hierarchy-and-bodily-comfort">6.7 Vision Pro: spatial hierarchy and bodily comfort</a></li>
+<li><a href="#68-carplay-responsibility-through-constraint">6.8 CarPlay: responsibility through constraint</a></li>
+<li><a href="#69-airpods-an-interface-with-almost-no-screen">6.9 AirPods: an interface with almost no screen</a></li>
+<li><a href="#610-homepod-ambient-form-and-voice-first-interaction">6.10 HomePod: ambient form and voice-first interaction</a></li>
+<li><a href="#611-airtag-object-recovery-as-a-distributed-interface">6.11 AirTag: object recovery as a distributed interface</a></li>
+<li><a href="#612-input-accessories-tools-that-preserve-intent">6.12 Input accessories: tools that preserve intent</a></li>
+</ul>
+</li>
+<li><a href="#7-hardware-and-software-as-one-interface">7. Hardware and software as one interface</a><ul>
+<li><a href="#71-form-follows-interaction-and-interaction-follows-form">7.1 Form follows interaction, and interaction follows form</a></li>
+<li><a href="#72-material-reduction-and-structural-clarity">7.2 Material reduction and structural clarity</a></li>
+<li><a href="#73-custom-silicon-as-a-design-material">7.3 Custom silicon as a design material</a></li>
+<li><a href="#74-feedback-closes-the-loop">7.4 Feedback closes the loop</a></li>
+<li><a href="#75-continuity-turns-products-into-a-device-ecology">7.5 Continuity turns products into a device ecology</a></li>
+</ul>
+</li>
+<li><a href="#8-accessibility-privacy-and-environmental-responsibility">8. Accessibility, privacy, and environmental responsibility</a><ul>
+<li><a href="#81-accessibility-is-a-system-property">8.1 Accessibility is a system property</a></li>
+<li><a href="#82-privacy-is-interaction-design-plus-architecture">8.2 Privacy is interaction design plus architecture</a></li>
+<li><a href="#83-environmental-design-and-longevity">8.3 Environmental design and longevity</a></li>
+</ul>
+</li>
+<li><a href="#9-critical-assessment">9. Critical assessment</a><ul>
+<li><a href="#91-strengths">9.1 Strengths</a><ul>
+<li><a href="#coherence-at-multiple-levels">Coherence at multiple levels</a></li>
+<li><a href="#context-specific-interaction">Context-specific interaction</a></li>
+<li><a href="#system-backed-adaptivity">System-backed adaptivity</a></li>
+<li><a href="#high-feedback-quality">High feedback quality</a></li>
+<li><a href="#long-horizon-platform-governance">Long-horizon platform governance</a></li>
+</ul>
+</li>
+<li><a href="#92-tensions-and-failure-modes">9.2 Tensions and failure modes</a><ul>
+<li><a href="#deference-versus-discoverability">Deference versus discoverability</a></li>
+<li><a href="#universal-language-versus-platform-fitness">Universal language versus platform fitness</a></li>
+<li><a href="#delight-versus-legibility">Delight versus legibility</a></li>
+<li><a href="#familiarity-versus-innovation">Familiarity versus innovation</a></li>
+<li><a href="#integration-versus-openness">Integration versus openness</a></li>
+<li><a href="#thin-sealed-craft-versus-repairability">Thin, sealed craft versus repairability</a></li>
+<li><a href="#spatial-naturalness-versus-human-physiology">Spatial naturalness versus human physiology</a></li>
+</ul>
+</li>
+<li><a href="#93-why-apples-system-sometimes-appears-inconsistent">9.3 Why Apple's system sometimes appears inconsistent</a></li>
+</ul>
+</li>
+<li><a href="#10-synthesis-a-five-layer-model-of-apple-design">10. Synthesis: a five-layer model of Apple design</a><ul>
+<li><a href="#layer-1-human-intent">Layer 1 - Human intent</a></li>
+<li><a href="#layer-2-physical-and-social-context">Layer 2 - Physical and social context</a></li>
+<li><a href="#layer-3-interaction-grammar">Layer 3 - Interaction grammar</a></li>
+<li><a href="#layer-4-system-expression">Layer 4 - System expression</a></li>
+<li><a href="#layer-5-integrated-delivery">Layer 5 - Integrated delivery</a></li>
+<li><a href="#101-a-practical-evaluation-rubric">10.1 A practical evaluation rubric</a></li>
+</ul>
+</li>
+<li><a href="#11-conclusion">11. Conclusion</a></li>
+<li><a href="#appendix-a-principle-to-system-evidence-map">Appendix A. Principle-to-system evidence map</a></li>
+<li><a href="#appendix-b-product-family-coverage">Appendix B. Product-family coverage</a></li>
+<li><a href="#appendix-c-key-terms-in-plain-language">Appendix C. Key terms in plain language</a></li>
+<li><a href="#references">References</a></li>
+<li><a href="#research-limitations-and-update-note">Research limitations and update note</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</aside>
+    <main id="research-paper" class="paper" tabindex="-1"><h1 id="one-language-many-contexts">One language, many contexts</h1>
+<h2 id="apples-design-systems-philosophies-and-principles-across-its-device-ecosystem">Apple's design systems, philosophies, and principles across its device ecosystem</h2>
+<p><strong>A cross-platform research paper</strong><br/>
+<strong>Evidence current through:</strong> August 5, 2026<br/>
+<strong>Coverage:</strong> Mac, iPhone, iPad, Apple Watch, Apple Vision Pro, AirPods, AirTag, Apple TV, HomePod, Apple Pencil and input accessories, iOS, iPadOS, macOS, watchOS, visionOS, tvOS, and CarPlay<br/>
+<strong>Citation style:</strong> Numbered references with live source links</p>
+<blockquote>
+<p><strong>Central finding:</strong> Apple's design is best understood as a layered system for preserving human context. The company pursues a recognizable family resemblance across products, but changes interaction density, control placement, input, feedback, and even the meaning of depth according to the body, environment, and task. The operative rule is unified, not uniform.</p>
+</blockquote>
+<section aria-label="Evidence profile" class="visual">
+<div class="visual-head"><span class="visual-kicker">Evidence profile</span><h3>Broad source base, explicit confidence limits</h3></div>
+<div class="evidence-strip">
+<div><strong>56</strong><span>numbered references</span></div>
+<div><strong>10 + 1</strong><span>device families plus CarPlay</span></div>
+<div><strong>6 + 1</strong><span>operating systems plus CarPlay</span></div>
+<div><strong>4 tiers</strong><span>current, historical, product, external</span></div>
+</div>
+</section>
+
+<hr/>
+<h2 id="abstract">Abstract</h2>
+<p>This paper examines Apple's contemporary design system, its historical lineage, and its adaptation across the company's device ecosystem. It asks three questions: What principles does Apple explicitly claim? How are those principles encoded in reusable visual, interaction, and engineering systems? Where do the systems change in response to a device's physical context?</p>
+<p>The study uses a structured qualitative synthesis documented in 56 numbered references. The evidence base prioritizes Apple's current Human Interface Guidelines, design resources, developer sessions, product documentation, and historical interface manuals. It triangulates those sources with standards and independent human-computer interaction research on direct manipulation, touch targets, visual signifiers, accessibility, spatial comfort, and repairability. Marketing claims are treated as claims, not independent proof.</p>
+<p>The analysis finds three nested layers in Apple's published guidance. The broad philosophical layer is expressed in eight principles reintroduced in 2026: purpose, agency, responsibility, familiarity, flexibility, simplicity, craft, and delight. The current interface layer emphasizes hierarchy, harmony, and consistency. The delivery layer consists of adaptive layout, system typography, symbols, semantic color, materials, motion, multimodal feedback, standard components, privacy architecture, and platform-specific input models. Liquid Glass, introduced in 2025 and refined through the 2026 guidelines, is a visible expression of this system rather than the system itself.</p>
+<p>Across products, Apple applies the same aims differently. iPhone prioritizes one-handed, short, mobile interactions; iPad combines touch, Pencil, pointer, and windows; Mac preserves density, precision, menus, and deep workflows; Watch compresses information into glanceable, timely actions; TV enlarges targets and externalizes focus for viewing at a distance; Vision Pro makes comfort, spatial hierarchy, gaze, and indirect gesture primary; CarPlay constrains interaction to protect attention; AirPods and HomePod make audio, voice, and low-visibility feedback central. Physical product examples, including the MacBook unibody, Force Touch trackpad, Digital Crown, Camera Control, Apple Pencil Pro, Siri Remote, and Vision Pro modular fit system, show a recurring effort to make hardware form, software behavior, and feedback operate as one interface.</p>
+<p>The system's strengths are coherence, adaptive reuse, multimodal feedback, accessibility infrastructure, and high craft. Its recurring tensions are equally important: visual deference can weaken discoverability; cross-platform harmony can drift toward surface-level sameness; expressive materials can compete with legibility; integrated ecosystems can reduce interoperability; compact sealed construction can conflict with repairability; and "natural" spatial input still faces measurable ergonomic limits. Apple's best work occurs when visual expression remains subordinate to purpose, agency, and context.</p>
+<p><strong>Keywords:</strong> Apple, design system, Human Interface Guidelines, industrial design, interaction design, Liquid Glass, accessibility, privacy, device ecology, human-computer interaction</p>
+<hr/>
+<h2 id="1-introduction">1. Introduction</h2>
+<p>Apple is often discussed as if it has a single aesthetic: minimal hardware, rounded rectangles, sparse interfaces, and polished animation. That description is visually recognizable but analytically weak. It treats the outcome as the method. It also misses large differences among a Mac workstation, a watch worn during motion, a television viewed from across a room, a voice-controlled speaker, and a spatial computer worn on the face.</p>
+<p>Apple itself uses the term <em>human interface</em>, not merely <em>user interface</em>. That choice dates to the early Macintosh tradition and frames the design problem as the relationship between people and devices, including software, hardware, input, feedback, environment, and consequences. The current Human Interface Guidelines (HIG) describe a cross-platform system, while each platform guide begins with device characteristics: display, ergonomics, input, typical duration, and system capabilities.[3] In other words, Apple starts platform design from the conditions in which a person acts.</p>
+<p>This paper therefore treats Apple's design as a system of constraints and adaptations rather than a catalog of visual motifs. It examines:</p>
+<ol>
+<li><strong>Philosophy:</strong> the values and decision principles Apple says should guide design.</li>
+<li><strong>System:</strong> the reusable visual, interaction, content, accessibility, and engineering structures that implement those values.</li>
+<li><strong>Product adaptation:</strong> the way those structures change across devices and environments.</li>
+<li><strong>Critical performance:</strong> the places where Apple's stated principles reinforce one another, and the places where they conflict.</li>
+</ol>
+<p>The question is not whether every Apple product looks the same. The more useful question is whether each product feels related while remaining appropriate to its own physical and social situation.</p>
+<hr/>
+<h2 id="2-scope-and-method">2. Scope and method</h2>
+<h3 id="21-scope">2.1 Scope</h3>
+<p>The product scope follows Apple's current retail and platform taxonomy. As of the cutoff date, Apple's store identifies Mac, iPhone, iPad, Apple Watch, Apple Vision Pro, AirPods, AirTag, Apple TV 4K, HomePod, and accessories as active device families.[29] Apple's software architecture spans iOS, iPadOS, macOS, watchOS, visionOS, and tvOS, with CarPlay as a safety-constrained extension of iPhone into vehicles.[17] The paper also considers Apple Pencil, keyboards, trackpads, and the Siri Remote because they are not merely add-ons; they are parts of the interaction system.</p>
+<p>Apple's June 2026 operating-system and Apple Intelligence announcement is used to establish the current platform generation at the cutoff date, not as independent evidence of design quality.[52]</p>
+<p>The phrase "throughout all device products" does not mean that every model receives a teardown or visual description. It means every active product family is represented in the cross-device analysis, and every major interaction context is examined: handheld, tablet, desktop, wrist, living room, spatial, automotive, personal audio, ambient home, and peripheral input.</p>
+<h3 id="22-evidence-selection">2.2 Evidence selection</h3>
+<p>Sources were selected in four tiers:</p>
+<ul>
+<li><strong>Tier 1 - Current primary design guidance:</strong> Apple's 2025-2026 HIG, Apple Design Resources, WWDC design sessions, platform guidance, and accessibility/privacy documentation.</li>
+<li><strong>Tier 2 - Historical primary evidence:</strong> the 1992 <em>Macintosh Human Interface Guidelines</em>, Apple's iOS 7 transition guide, and earlier developer design sessions.</li>
+<li><strong>Tier 3 - Product evidence:</strong> Apple product announcements and technical pages that explain physical construction, controls, feedback, fit, and environmental decisions.</li>
+<li><strong>Tier 4 - External evaluation:</strong> ISO and W3C standards, peer-reviewed human-computer interaction research, and independent repairability assessments.</li>
+</ul>
+<p>The research is qualitative. It compares repeated principles, maps them to documented design mechanisms, and tests the resulting interpretation against device-specific guidance and external evidence. It does not claim access to Apple's internal design process, usability studies, unreleased specifications, or confidential prototypes.</p>
+<h3 id="23-source-treatment">2.3 Source treatment</h3>
+<p>Apple's documents are authoritative evidence for what Apple prescribes and how Apple explains its products. They are not neutral evidence that every implementation succeeds. Product launch language is especially promotional, so this paper uses it to identify intended relationships between hardware and software, then checks those intentions against guidelines, standards, research, or independent analysis where possible.</p>
+<p>The cutoff date matters. Apple reintroduced a formal eight-principle design framework at WWDC26, while the universal Liquid Glass language originated at WWDC25 and continues to shape the current system.[1][2][5] Apple Design Resources already lists iOS 27 and iPadOS 27 kits and SF Symbols 8 beta, while some platform kits remain at prior generations.[4] The design system is therefore a moving target; this paper is a dated snapshot, not a timeless specification.</p>
+<h3 id="24-analytical-frame">2.4 Analytical frame</h3>
+<p>Each major finding is tested through the following chain:</p>
+<p><strong>Human goal -&gt; context of use -&gt; platform responsibility -&gt; design mechanism -&gt; feedback and recovery -&gt; evidence of success or tension</strong></p>
+<p>This prevents a material, animation, icon, or hardware finish from being treated as the goal. The goal is what a person can understand, do, trust, and recover from. The design system is the coordinated means.</p>
+<p>This frame is consistent with ISO 9241-210's human-centred design model, which treats understanding people, tasks, and context of use as part of the design process rather than as a final usability check.[51]</p>
+<hr/>
+<h2 id="3-historical-lineage-continuity-through-reinvention">3. Historical lineage: continuity through reinvention</h2>
+<p>Apple's visual styles have changed sharply, but several interaction commitments recur. The history is not a straight march from ornament to minimalism. It is a sequence of attempts to balance familiarity, directness, expression, and technical possibility.</p>
+<p>Apple's own 2017 developer education was already presenting essential design principles as durable decision guidance, evidence that the company treated philosophy as a governing layer rather than a yearly visual style.[10] Apple's recurring emphasis on reduction, usefulness, understandable form, and long life also parallels Dieter Rams's published criteria for good design; this is a useful comparison, not proof of direct lineage.[44]</p>
+<h3 id="31-the-macintosh-foundation">3.1 The Macintosh foundation</h3>
+<p>The 1992 <em>Macintosh Human Interface Guidelines</em> formalized direct manipulation, visible objects, user control, consistency, feedback, forgiveness, perceived stability, aesthetic integrity, and reduced modality.[8] The Macintosh desktop made abstract computer operations feel like actions on visible things. Files, folders, trash, windows, menus, and a pointer formed a coherent model.</p>
+<p>This lineage aligns with Ben Shneiderman's description of direct manipulation: continuous representation of meaningful objects, physical actions in place of complex syntax, and rapid reversible operations whose effects are immediately visible.[45] Apple's important contribution was not inventing every underlying idea, but packaging interaction principles, graphical conventions, hardware, and developer rules into a mass-market system.</p>
+<p>Several current Apple behaviors descend directly from this foundation:</p>
+<ul>
+<li>Dragging content still implies movement of a persistent object.</li>
+<li>Standard controls communicate availability and state.</li>
+<li>Undo, cancellation, back navigation, and non-destructive previews preserve agency.</li>
+<li>Menus and toolbars provide stable command locations on Mac.</li>
+<li>Animation connects an action to its result rather than merely decorating a transition.</li>
+<li>Platform components give third-party apps a learned interaction grammar.</li>
+</ul>
+<h3 id="32-from-physical-metaphor-to-digital-material">3.2 From physical metaphor to digital material</h3>
+<p>Early Mac OS and later Aqua used strong physical cues: bevels, highlights, shadows, dimensional controls, and animated transitions. Early iPhone software extended this approach with leather, paper, switches, shelves, and other realistic metaphors. These cues lowered the learning burden for a new touch platform, but the metaphors could also become visually heavy or constrain new behavior.</p>
+<p>iOS 7 marked a deliberate change. Apple's transition guide summarized the new approach as deference, clarity, and depth: interface should support content, text and icons should remain legible, and layers plus motion should communicate relationships.[9] Physical texture receded, but simulated physical behavior did not disappear. It moved from surface decoration into motion, blur, parallax, and spatial layering.</p>
+<p>This distinction matters. Apple's path was not simply "skeuomorphic, then flat." It shifted from representing familiar material surfaces to constructing a consistent digital physics. External research on flat interfaces supports the reason for caution: when visual signifiers are removed too aggressively, people can become less certain about what is interactive and how to act.[47] Apple's later systems reintroduced depth, material, button shape, hover, haptics, and dynamic feedback without returning to literal leather and felt.</p>
+<h3 id="33-system-typography-and-symbolic-scale">3.3 System typography and symbolic scale</h3>
+<p>The San Francisco type family and SF Symbols moved consistency from manually matched assets into a coordinated variable system. San Francisco changes optical details and tracking by size, while SF Symbols aligns icon weight and scale with text.[19][20][54] The system can therefore adapt across a tiny Watch complication, an iPhone toolbar, a Mac inspector, and a television interface without every team redrawing the visual language independently.</p>
+<p>This is a pivotal change in design-system maturity. Consistency is no longer only a static style guide. It is encoded in fonts, vector symbols, semantic colors, layout APIs, component behavior, accessibility settings, and platform frameworks.</p>
+<h3 id="34-spatial-computing-as-a-new-source-platform">3.4 Spatial computing as a new source platform</h3>
+<p>Vision Pro and visionOS introduced windows, volumes, depth, passthrough, gaze targeting, hand gestures, and variable immersion as first-class interface conditions.[16][38] VisionOS did not discard decades of Apple interaction conventions. Windows, familiar controls, menus, and indirect selection carried forward, but they were placed in an environment where visual comfort, field of view, depth, and bodily rest matter more than screen edges.</p>
+<p>The influence then moved in the opposite direction. Apple explicitly identifies visionOS depth and dimensionality as an input to the Liquid Glass language introduced across iPhone, iPad, Mac, Watch, and TV.[6][7] The newest cross-platform visual system was therefore not exported from iPhone alone. It emerged from a spatial platform and was adapted back to conventional displays.</p>
+<h3 id="35-liquid-glass-and-the-2026-principles">3.5 Liquid Glass and the 2026 principles</h3>
+<p>Liquid Glass is Apple's first explicitly universal software material across its major operating systems. It separates navigation and controls from content using adaptive transparency, refraction, shadow, tint, motion, and concentric geometry.[5][6][22] Its intent is continuity across platforms while preserving platform-specific density and input.</p>
+<p>In 2026 Apple placed this expressive layer beneath a broader ethical and functional framework. The reintroduced principles - purpose, agency, responsibility, familiarity, flexibility, simplicity, craft, and delight - make clear that appearance is not the top of the hierarchy.[1][2] Liquid Glass can serve those principles, but it cannot substitute for them.</p>
+<h3 id="36-timeline-of-the-design-logic">3.6 Timeline of the design logic</h3>
+<div aria-label="Scrollable table" class="table-wrap" role="region"><table>
+<thead>
+<tr>
+<th>Period</th>
+<th>Dominant expression</th>
+<th>Persistent problem being solved</th>
+<th>Enduring contribution</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1984-1990s Macintosh</td>
+<td>Desktop metaphor, direct manipulation, visible controls</td>
+<td>Make graphical computing understandable and recoverable</td>
+<td>User control, feedback, consistency, object permanence</td>
+</tr>
+<tr>
+<td>2001-2012 Aqua and early iOS</td>
+<td>Rich physical cues, gloss, texture, animated physics</td>
+<td>Make unfamiliar digital actions feel recognizable</td>
+<td>Strong signifiers, emotional character, tactile expectation</td>
+</tr>
+<tr>
+<td>2013 iOS 7</td>
+<td>Deference, clarity, depth</td>
+<td>Reduce ornament while preserving hierarchy</td>
+<td>Content priority, semantic layering, motion as explanation</td>
+</tr>
+<tr>
+<td>2015-2022 system expansion</td>
+<td>San Francisco, SF Symbols, SwiftUI, semantic colors</td>
+<td>Scale coherence across devices, languages, sizes, and modes</td>
+<td>Code-backed design primitives and adaptive components</td>
+</tr>
+<tr>
+<td>2023 visionOS</td>
+<td>Windows in space, gaze and pinch, variable immersion</td>
+<td>Make spatial computing approachable and comfortable</td>
+<td>Spatial hierarchy, minimum necessary immersion, indirect gesture</td>
+</tr>
+<tr>
+<td>2025 Liquid Glass</td>
+<td>Adaptive digital material and concentric geometry</td>
+<td>Harmonize platforms without hiding content</td>
+<td>Universal navigation layer, dynamic material, hardware-software geometry</td>
+</tr>
+<tr>
+<td>2026 principle reset</td>
+<td>Eight human-centered principles</td>
+<td>Re-anchor expression in purpose, agency, and responsibility</td>
+<td>Explicit ethical and decision framework across platforms</td>
+</tr>
+</tbody>
+</table></div>
+<hr/>
+<h2 id="4-apples-stated-philosophy-in-2026">4. Apple's stated philosophy in 2026</h2>
+<section aria-label="Apple's eight 2026 design principles" class="visual">
+<div class="visual-head"><span class="visual-kicker">Decision framework</span><h3>Eight principles govern the visible system</h3><p>Expression is downstream from human intent.</p></div>
+<div class="principle-grid">
+<div class="principle"><b>Purpose</b><span>Make something meaningful and focus on what people value.</span></div>
+<div class="principle"><b>Agency</b><span>Support freedom, informed action, and recovery.</span></div>
+<div class="principle"><b>Responsibility</b><span>Protect safety, privacy, and trust.</span></div>
+<div class="principle"><b>Familiarity</b><span>Build on learned physical and digital patterns.</span></div>
+<div class="principle"><b>Flexibility</b><span>Adapt to people, platforms, inputs, and contexts.</span></div>
+<div class="principle"><b>Simplicity</b><span>Be clear and direct without hiding necessary meaning.</span></div>
+<div class="principle"><b>Craft</b><span>Care for every visual, tactile, verbal, and technical detail.</span></div>
+<div class="principle"><b>Delight</b><span>Create an appropriate human feeling through the whole experience.</span></div>
+</div>
+</section>
+
+<p>Apple's eight current principles are not a checklist that guarantees quality. Apple describes them as tools for weighing competing priorities.[1] Their value lies in the tensions between them.</p>
+<h3 id="41-purpose-make-something-meaningful">4.1 Purpose: make something meaningful</h3>
+<p>Purpose asks what the product is for, what people value most, and which features deserve focus. It rejects feature count as a measure of design quality. The practical system consequences are strong hierarchy, task-first launch, limited primary actions, and platform features that reduce setup or repeated data entry.</p>
+<p>Across products, purpose changes the interface before style is considered:</p>
+<ul>
+<li>A Watch experience should provide timely information or a short action, not reproduce an iPhone app.</li>
+<li>A CarPlay app should help a driver complete a narrow task with minimal attention.</li>
+<li>A Mac app can expose deep command structures because extended productive work is the purpose.</li>
+<li>A Vision Pro experience should use the least immersion needed for the moment rather than treating full immersion as the goal.[14][16][17]</li>
+</ul>
+<p>Purpose is therefore Apple's first defense against indiscriminate cross-platform reuse.</p>
+<h3 id="42-agency-let-people-act-in-their-own-way">4.2 Agency: let people act in their own way</h3>
+<p>Agency means freedom to explore, visibility of state, and recovery from mistakes. It continues the Macintosh commitment to user control and reversibility. The current guidance recommends avoiding rigid flows, preserving context, supporting personalization, and making recovery inexpensive.[1]</p>
+<p>Agency is expressed differently by platform. Mac supports resizable windows, menu commands, keyboard shortcuts, toolbar customization, and multiple concurrent apps.[13] iPad supports touch, keyboard, pointer, Pencil, multitasking, and resizable windows.[12] Accessibility alternatives let people replace a default input with voice, switch, keyboard, eye tracking, or other methods.[24]</p>
+<p>The ecosystem also complicates agency. Seamless defaults can reduce friction, yet proprietary integration can make alternative devices or services less equivalent. This is a recurring boundary in Apple's philosophy: agency is often strongest inside the Apple system.</p>
+<h3 id="43-responsibility-act-in-peoples-best-interest">4.3 Responsibility: act in people's best interest</h3>
+<p>Responsibility makes safety, privacy, transparency, and harm prevention design concerns rather than policy footnotes. Apple's HIG asks developers to collect only needed data, explain permission requests, process on-device where possible, and respect refusal.[25] Apple's own privacy architecture emphasizes data minimization, on-device processing, random identifiers, and task-specific cloud disclosure.[26]</p>
+<p>The most concrete expression appears in constrained contexts. CarPlay uses system-rendered templates so layout, input, and driver attention remain controlled.[17] VisionOS guidance prioritizes field of view, low motion intensity, indirect gestures, minimum immersion, and environmental safety.[16] Health data requires contextual permission and clear benefit.[25]</p>
+<p>Responsibility also demands honest evaluation of tradeoffs. Privacy protections can support trust while integration can limit interoperability. Security-based parts pairing can deter stolen-component markets while also making independent repair harder. The principle is real; its implementation can still be contested.</p>
+<h3 id="44-familiarity-build-on-what-people-know">4.4 Familiarity: build on what people know</h3>
+<p>Familiarity includes physical and digital conventions, consistent component behavior, and clear feedback. Apple reuses learned models across devices, but does not assume that one platform's exact layout is familiar everywhere.</p>
+<p>Examples include:</p>
+<ul>
+<li>The Digital Crown translates a familiar rotary control into scrolling and selection without covering the Watch display.</li>
+<li>Apple Pencil uses squeeze, rotation, and tactile confirmation that relate to hand-tool behavior.[34]</li>
+<li>The Siri Remote clickpad combines directional buttons, touch swipes, and a circular jog gesture associated with media scrubbing.[35]</li>
+<li>VisionOS preserves windows and buttons while changing targeting to gaze plus pinch.[16]</li>
+</ul>
+<p>Familiarity is strongest when the mapping between action and outcome is visible. It becomes weak when gestures, icon-only controls, or transient states have insufficient signifiers.</p>
+<p>When a new interaction cannot explain itself through form and feedback, onboarding should teach the smallest necessary behavior in context and then get out of the way.[56]</p>
+<h3 id="45-flexibility-adapt-to-people-inputs-and-contexts">4.5 Flexibility: adapt to people, inputs, and contexts</h3>
+<p>Flexibility joins accessibility, responsive layout, multiple inputs, localization, personalization, and platform adaptation. Apple explicitly says each supported platform deserves equal care.[1] That statement rules out a lowest-common-denominator interface.</p>
+<p>System mechanisms include Dynamic Type, semantic color, right-to-left layout, variable symbols, safe areas, size classes, resizable windows, alternate input support, reduced motion, increased contrast, and reduced transparency.[18][19][20][24] Continuity mechanisms preserve task state as people move among devices.[27][28]</p>
+<p>Flexibility is one of the clearest reasons Apple's design system cannot be reduced to visual tokens. The same content may need different hierarchy, density, placement, and feedback when it moves from a phone to a watch or spatial window.</p>
+<h3 id="46-simplicity-be-clear-and-direct">4.6 Simplicity: be clear and direct</h3>
+<p>Apple's current guidance makes an important distinction: simplicity is not minimalism.[1] Removing visible material can increase cognitive work if controls become hard to find or modes become hard to understand. Simplicity means that necessary things are close, secondary things recede appropriately, structure is logical, and language is concise.</p>
+<p>This distinction explains several system choices:</p>
+<ul>
+<li>iPhone limits simultaneous controls but keeps secondary actions discoverable.[11]</li>
+<li>Mac exposes more content and commands because hiding them would complicate professional work.[13]</li>
+<li>Watch minimizes hierarchy because every additional screen increases interaction time on a raised wrist.[14]</li>
+<li>CarPlay limits app categories and templates because customization can create distraction.[17]</li>
+</ul>
+<p>Minimal surface area is not automatically simple. The measure is the work a person must do to understand and complete the task.</p>
+<h3 id="47-craft-care-about-every-detail">4.7 Craft: care about every detail</h3>
+<p>Craft includes visual precision, motion, language, sound, haptics, reliability, performance, materials, and continued maintenance. Apple's systematized craft is visible in optical type sizing, symbol weight matching, concentric geometry, adaptive materials, component states, and device-specific controls.[5][19][20][22]</p>
+<p>The principle also extends beyond launch. Apple tells designers to prototype, test in real contexts, iterate, and keep interfaces current.[1] In industrial design, unibody construction, custom silicon, force sensors, capacitive surfaces, haptic actuators, and precision-milled parts show an organization willing to change manufacturing in order to change the experience.[30][31][32]</p>
+<p>Craft can become self-defeating when thinness, visual purity, or material novelty outranks serviceability, comfort, or clarity. The critical question is always: detail in service of what?</p>
+<h3 id="48-delight-make-it-human">4.8 Delight: make it human</h3>
+<p>Apple defines delight as an emotional outcome of the whole experience, not decoration applied at the end.[1][2] This is a disciplined definition. A responsive haptic confirmation, a fluid state transition, an AirPods pairing animation, or a Watch activity celebration can feel delightful because it confirms understanding, reduces uncertainty, or marks meaningful progress.</p>
+<p>The principle becomes risky when visual spectacle interrupts purpose. Apple's own Liquid Glass guidance warns against overuse, glass-on-glass stacking, indiscriminate tint, and placing the material in the content layer.[6][22] The system acknowledges that delight must remain subordinate to hierarchy and legibility.</p>
+<hr/>
+<h2 id="5-the-current-design-system">5. The current design system</h2>
+<section aria-label="Five layers of Apple's design system" class="visual">
+<div class="visual-head"><span class="visual-kicker">System anatomy</span><h3>One direction of justification</h3><p>Each lower layer must support the human purpose above it.</p></div>
+<div class="system-stack">
+<div class="layer"><b>1. Human intent</b><span>Purpose, agency, responsibility, familiarity, flexibility, simplicity, craft, delight</span></div>
+<div class="layer"><b>2. Context</b><span>Body, distance, posture, attention, motion, duration, safety, shared or private use</span></div>
+<div class="layer"><b>3. Interaction</b><span>Touch, pointer, keyboard, Crown, Pencil, remote focus, gaze, voice, haptics, recovery</span></div>
+<div class="layer"><b>4. Expression</b><span>Hierarchy, typography, symbols, semantic color, material, geometry, layout, motion</span></div>
+<div class="layer"><b>5. Delivery</b><span>Hardware, sensors, silicon, frameworks, privacy, accessibility, continuity, repair</span></div>
+</div>
+</section>
+
+<h3 id="51-three-interface-principles-hierarchy-harmony-consistency">5.1 Three interface principles: hierarchy, harmony, consistency</h3>
+<p>The current HIG landing page condenses interface design into three operational principles.[3]</p>
+<p><strong>Hierarchy</strong> separates content, navigation, controls, and transient state so people know what matters and what can be acted upon. Liquid Glass is assigned mainly to the navigation and control layer, while standard materials remain in the content layer.[22]</p>
+<p><strong>Harmony</strong> aligns interface geometry with hardware and software. Concentric radii, aligned margins, and shapes that nest within device or window curves create a shared rhythm.[5] Harmony is not only visual. Haptics, audio, motion, and physical input should agree about what happened.</p>
+<p><strong>Consistency</strong> adopts platform conventions and adapts them continuously across sizes and displays. A consistent app is recognizable as it resizes or moves, but it still honors the target platform's expected input and density.[3][18]</p>
+<p>These principles connect the eight philosophical values to concrete interface decisions.</p>
+<h3 id="52-typography-as-adaptive-infrastructure">5.2 Typography as adaptive infrastructure</h3>
+<p>Apple's typography system includes SF Pro for iOS, iPadOS, macOS, and tvOS; SF Compact for Watch; SF Mono for code and aligned technical content; language-specific families; and New York as a serif companion.[4][19] These are variable fonts with optical sizing, multiple weights and widths, dynamic tracking, and text styles.</p>
+<p>The system does four jobs:</p>
+<ol>
+<li><strong>Legibility:</strong> letterforms and spacing change by size and context.</li>
+<li><strong>Hierarchy:</strong> standard text styles express semantic roles.</li>
+<li><strong>Accessibility:</strong> Dynamic Type lets content respond to user-selected sizes on supported platforms.</li>
+<li><strong>Cross-product voice:</strong> related letterforms provide family resemblance without identical scale or density.</li>
+</ol>
+<p>Typography shows Apple's system strategy at its best. The design artifact, implementation API, accessibility behavior, and localization support are coordinated.</p>
+<h3 id="53-sf-symbols-and-icon-grammar">5.3 SF Symbols and icon grammar</h3>
+<p>SF Symbols provides more than 7,000 symbols in current resources, with nine weights, three scales, variable rendering, multilayer animation, right-to-left adaptation, and localized forms for more than 20 scripts.[4] Symbols align automatically with San Francisco text.[20]</p>
+<p>This reduces visual drift and makes meaning portable across toolbars, menus, buttons, widgets, and status surfaces. Apple still warns that icons need recognizable concepts, consistent visual weight, localization, and alternative text.[21] A symbol library cannot solve ambiguous labeling by itself.</p>
+<p>App icons occupy a separate role. They express identity and recognition across Home Screen, search, settings, notifications, and sharing. Icon Composer produces a layered identity for iPhone, iPad, Mac, and Watch with appearance modes, while platform silhouettes and presentations still vary.[4][53] The principle is shared identity with platform-specific framing.</p>
+<h3 id="54-semantic-color-and-appearance">5.4 Semantic color and appearance</h3>
+<p>Apple's system colors are defined by purpose rather than fixed appearance. Label, secondary label, separator, accent, fill, destructive, and other roles adapt to light, dark, contrast, and material contexts.[23] This semantic model supports both consistency and flexibility.</p>
+<p>Good Apple-platform color use therefore has three properties:</p>
+<ul>
+<li>It reinforces hierarchy rather than decorating every element.</li>
+<li>It adapts through system roles instead of assuming a fixed background.</li>
+<li>It never carries essential meaning alone.</li>
+</ul>
+<p>The last property is both Apple guidance and an accessibility requirement.[23][24][50]</p>
+<h3 id="55-materials-and-liquid-glass">5.5 Materials and Liquid Glass</h3>
+<p>A material is a rendering behavior that establishes depth, separation, and context. Apple's current system distinguishes Liquid Glass from standard materials.[22]</p>
+<p>Liquid Glass is intended for top-level controls and navigation. It adapts tint, shadow, refraction, luminosity, and apparent thickness to background content and size. Scroll-edge effects maintain separation when content passes beneath. Regular Glass prioritizes legibility; Clear Glass exposes more media but needs controlled backgrounds and often dimming.[6][22]</p>
+<p>The most important rules are restraint rules:</p>
+<ul>
+<li>Keep Glass out of ordinary content surfaces.</li>
+<li>Do not stack Glass on Glass.</li>
+<li>Do not mix Clear and Regular variants arbitrarily.</li>
+<li>Use tint mainly for primary actions or emphasis.</li>
+<li>Let native components provide the behavior when possible.</li>
+<li>Honor Reduce Transparency, Increase Contrast, and Reduce Motion.</li>
+</ul>
+<p>Liquid Glass is therefore not a license to make every panel translucent. It is a functional layer whose success depends on hierarchy.</p>
+<h3 id="56-geometry-and-concentricity">5.6 Geometry and concentricity</h3>
+<p>Concentricity aligns the curves of nested shapes by using a shared center and radii derived from padding. Apple's current system uses fixed rounded rectangles, capsules, and calculated concentric shapes.[5] The geometry relates controls and windows to modern device corners, but Apple changes its use by density. Capsules suit large touch targets and prominent actions; compact Mac controls often retain smaller rounded rectangles.[5]</p>
+<p>This is a precise example of unified, not uniform. The same geometric theory produces different components based on input accuracy and information density.</p>
+<h3 id="57-layout-safe-areas-and-continuity-under-change">5.7 Layout, safe areas, and continuity under change</h3>
+<p>Apple's layout system must account for screen size, orientation, window resizing, external displays, Dynamic Type, localization, camera housings, Dynamic Island, and platform controls.[18] Safe areas and layout guides encode physical and system boundaries.</p>
+<p>The goal is recognizable continuity under transformation. Controls and content should keep predictable relationships as a window changes size or a task moves to another device. That does not require pixel-identical placement. It requires preserving the mental model: what the content is, what state it is in, and where the next action belongs.</p>
+<h3 id="58-components-and-native-behavior">5.8 Components and native behavior</h3>
+<p>SwiftUI, UIKit, and AppKit supply standard components whose appearance, input, focus, accessibility, motion, and material behavior update with the platform. This is a central governance mechanism. It lets Apple change the system at the framework level while third-party apps inherit much of the new behavior when they use native structures.[5][7]</p>
+<p>Native components are valuable because they carry more than appearance:</p>
+<ul>
+<li>Keyboard and pointer behavior</li>
+<li>Focus order and accessibility roles</li>
+<li>Touch target and hover behavior</li>
+<li>State transitions and system motion</li>
+<li>Localization and dynamic text</li>
+<li>Material adaptation</li>
+<li>Platform-specific presentation conventions</li>
+</ul>
+<p>Custom design remains possible, but it inherits responsibility for all of those behaviors.</p>
+<h3 id="59-motion-haptics-and-audio-as-one-feedback-system">5.9 Motion, haptics, and audio as one feedback system</h3>
+<p>Apple uses motion to preserve spatial relationships, show causality, and communicate state. The HIG recommends brief, precise feedback and alternatives such as audio or haptics so information does not depend on animation alone.[55] Liquid Glass treats optical response and motion as one material behavior.[6]</p>
+<p>Hardware makes feedback more embodied:</p>
+<ul>
+<li>Force Touch can simulate a uniform click across a stationary trackpad surface.[31]</li>
+<li>Apple Pencil Pro confirms squeeze and double-tap with a localized pulse.[34]</li>
+<li>Apple Watch's Taptic Engine distinguishes alerts and actions on the wrist.[33]</li>
+<li>iPhone combines visual, audio, and haptic feedback for controls and system events.</li>
+<li>AirPods use tones, stem pressure, and device animations to confirm invisible wireless state.[36]</li>
+</ul>
+<p>The principle is multisensory agreement: sight, sound, and touch should tell the same story.</p>
+<hr/>
+<h2 id="6-platform-adaptations">6. Platform adaptations</h2>
+<section aria-label="Device contexts" class="visual">
+<div class="visual-head"><span class="visual-kicker">Unified, not uniform</span><h3>The body and environment change the answer</h3></div>
+<div class="device-band">
+<div class="device"><div class="device-shape">iPhone</div><span>thumb + touch</span></div>
+<div class="device"><div class="device-shape">iPad</div><span>touch + Pencil</span></div>
+<div class="device"><div class="device-shape">Mac</div><span>pointer + keys</span></div>
+<div class="device"><div class="device-shape">Watch</div><span>glance + Crown</span></div>
+<div class="device"><div class="device-shape">TV</div><span>distance + focus</span></div>
+<div class="device"><div class="device-shape">Vision</div><span>gaze + pinch</span></div>
+<div class="device"><div class="device-shape">AirPods</div><span>sound + sensing</span></div>
+<div class="device"><div class="device-shape">HomePod</div><span>room + voice</span></div>
+<div class="device"><div class="device-shape">AirTag</div><span>find + recover</span></div>
+<div class="device"><div class="device-shape">CarPlay</div><span>drive + constrain</span></div>
+<div class="device"><div class="device-shape">Input</div><span>precision + feedback</span></div>
+</div>
+</section>
+
+<h3 id="61-cross-platform-context-matrix">6.1 Cross-platform context matrix</h3>
+<div aria-label="Scrollable table" class="table-wrap" role="region"><table>
+<thead>
+<tr>
+<th>Product context</th>
+<th>Typical distance and duration</th>
+<th>Primary inputs</th>
+<th>Information strategy</th>
+<th>Dominant design responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>iPhone</td>
+<td>Handheld, 1-2 feet, seconds to an hour</td>
+<td>Touch, voice, device sensors, hardware controls</td>
+<td>Focused task, reachable primary actions, progressive detail</td>
+<td>Mobility and one-handed clarity</td>
+</tr>
+<tr>
+<td>iPad</td>
+<td>Handheld or supported, within 3 feet, short to multi-hour</td>
+<td>Touch, Pencil, keyboard, pointer, voice</td>
+<td>Adaptive canvas, multitasking, mixed density</td>
+<td>Flexibility across posture and input</td>
+</tr>
+<tr>
+<td>Mac</td>
+<td>Desk-based, 1-3 feet, minutes to hours</td>
+<td>Keyboard, pointer, trackpad, voice, controllers</td>
+<td>Dense, resizable, multiwindow, command-rich</td>
+<td>Precision and deep productivity</td>
+</tr>
+<tr>
+<td>Apple Watch</td>
+<td>Wrist, under 1 foot, seconds</td>
+<td>Touch, Digital Crown, gestures, voice, Action button, sensors</td>
+<td>Glanceable state, one or two actions, shallow hierarchy</td>
+<td>Timeliness with minimal attention</td>
+</tr>
+<tr>
+<td>Apple TV</td>
+<td>Often 8 feet or more, long viewing sessions</td>
+<td>Remote, focus, voice, controller</td>
+<td>Large targets, cinematic content, explicit focus</td>
+<td>Distance legibility and shared use</td>
+</tr>
+<tr>
+<td>Vision Pro</td>
+<td>Head-worn, spatial, variable session</td>
+<td>Gaze, pinch, direct hand, voice, keyboard, controller</td>
+<td>Windows, volumes, depth, minimum necessary immersion</td>
+<td>Comfort, safety, spatial clarity</td>
+</tr>
+<tr>
+<td>CarPlay</td>
+<td>Driver's seat, divided attention</td>
+<td>System templates, touch or vehicle controls, voice</td>
+<td>Essential information only, minimal interaction</td>
+<td>Road safety and distraction control</td>
+</tr>
+<tr>
+<td>AirPods</td>
+<td>Worn, often no visible screen</td>
+<td>Stem/force controls, head gestures, voice, automatic sensing</td>
+<td>Audio-first, state conveyed through sound and companion UI</td>
+<td>Invisible-state clarity and low friction</td>
+</tr>
+<tr>
+<td>HomePod</td>
+<td>Across a room, shared space</td>
+<td>Voice, touch surface, proximity from other devices</td>
+<td>Short responses, ambient light, companion setup</td>
+<td>Far-field understanding and household context</td>
+</tr>
+<tr>
+<td>AirTag</td>
+<td>Pocket/object, rarely directly handled</td>
+<td>Proximity, sound, Find My interface</td>
+<td>Almost no local UI; location and privacy live on companion devices</td>
+<td>Reliable recovery without attention</td>
+</tr>
+<tr>
+<td>Pencil, trackpad, remote</td>
+<td>In-hand precision tools</td>
+<td>Pressure, motion, rotation, click, touch, haptics</td>
+<td>Immediate local feedback tied to manipulation</td>
+<td>Reduce separation between intent and result</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="62-iphone-focused-mobility">6.2 iPhone: focused mobility</h3>
+<p>Apple describes iPhone as a medium-size handheld used anywhere, often for brief checks and frequent app switching.[11] The design response is concentrated hierarchy. Primary content should dominate; controls should be limited; secondary actions should remain discoverable with little effort. Important touch actions belong in comfortable reach, often near the middle or lower area of the display.</p>
+<p>This platform combines direct touch with increasingly specialized hardware input. Camera Control integrates a tactile switch, force sensing, and capacitive touch so launching, capturing, and adjusting can happen without covering the preview.[32] The Action button makes a physical control reassignable, trading single-purpose familiarity for personal agency.</p>
+<p>The iPhone tension is discoverability. Edge gestures, long presses, hidden menus, symbol-only controls, and context-sensitive hardware actions can preserve visual calm while increasing learning cost. Apple's design succeeds when feedback and familiar system conventions make those actions predictable.</p>
+<h3 id="63-ipad-adaptive-hybridity">6.3 iPad: adaptive hybridity</h3>
+<p>iPad sits between mobile directness and desktop depth. It can be held, placed on a surface, used with Pencil, attached to a keyboard, controlled with a pointer, and run with multiple resizable apps.[12] Its design system must respond to posture, viewing distance, input, orientation, and window size.</p>
+<p>The best iPad experience is not an enlarged iPhone interface or a reduced Mac interface. Touch targets remain generous, Pencil actions need precision and low latency, pointer interaction benefits from hover and focus, and multitasking requires persistent structure. Apple encourages large-display use that reduces unnecessary full-screen transitions and modality.[12]</p>
+<p>Apple Pencil Pro is a strong expression of the platform's philosophy. Squeeze reveals tools near the work, barrel roll maps physical rotation to shaped brushes, and haptics confirm state.[34] The software follows the hand tool rather than forcing repeated travel to a distant toolbar.</p>
+<h3 id="64-mac-density-precision-and-user-configured-work">6.4 Mac: density, precision, and user-configured work</h3>
+<p>Mac is designed for stationary, extended, multi-app work with a large display, keyboard, and high-precision pointer.[13] Apple's guidance explicitly supports more content at fewer nested levels, resizable and movable windows, comprehensive menu commands, keyboard shortcuts, toolbar customization, and pixel-precise editing.</p>
+<p>This is why cross-platform harmony must not erase Mac density. Large capsules, oversized touch spacing, and hidden command structures can make a Mac app less efficient. The 2025 design system retained smaller rounded controls for dense inspector contexts while using more expressive shapes for larger or prominent actions.[5]</p>
+<p>The MacBook unibody and Force Touch trackpad show hardware-software integration at different levels. Unibody construction reduced a multipart enclosure to a precision-milled structural shell, supporting thinness, rigidity, and finish.[30] Force Touch replaced location-dependent mechanical clicking with force sensors and haptic simulation, enabling consistent feedback across the surface and pressure-sensitive actions.[31]</p>
+<h3 id="65-apple-watch-glanceability-and-timely-action">6.5 Apple Watch: glanceability and timely action</h3>
+<p>Watch interactions are usually measured in seconds. People often use complications, notifications, and Siri more than the app itself.[14] Apple therefore prioritizes critical information, shallow navigation, one or two gestures, Always On behavior, and direct paths from a complication to relevant detail.</p>
+<p>The Digital Crown is a device-specific solution to a physical problem: scrolling on a tiny display with a finger hides the content. The Crown provides precise vertical control beside the display. Double tap extends this logic by letting a person trigger the primary action with the watch hand, using sensor fusion and on-device processing.[33]</p>
+<p>Watch design also demonstrates that background color and full-screen imagery can carry context when text space is scarce. But color cannot be the only signal, and motion or sensor-dependent actions need alternatives.[14][24]</p>
+<h3 id="66-apple-tv-focus-at-a-distance">6.6 Apple TV: focus at a distance</h3>
+<p>TV is viewed from many feet away, often by multiple people, for long media or game sessions.[15] The design system enlarges typography and targets, emphasizes edge-to-edge media, and uses a focus engine because there is no persistent pointer or direct touch location.</p>
+<p>Focus must be visible before selection. Items can lift, scale, change depth, or adopt Liquid Glass so the viewer knows what the remote will activate.[15][22] The Siri Remote's clickpad combines five-way accuracy, swipe speed, and a circular scrub gesture.[35]</p>
+<p>The platform's main risks are ambiguous focus movement, crowded layouts that do not allow focused items to expand, and interfaces designed at desktop distance. Apple explicitly recommends device testing because a monitor does not reproduce living-room scale or attention.[15]</p>
+<h3 id="67-vision-pro-spatial-hierarchy-and-bodily-comfort">6.7 Vision Pro: spatial hierarchy and bodily comfort</h3>
+<p>VisionOS expands the canvas but narrows the tolerance for careless design. Windows can be placed at different distances; objects can have real depth; immersion can range from shared surroundings to a Full Space. The primary interaction combines gaze targeting with a small indirect pinch, allowing hands to rest.[16]</p>
+<p>Apple's core spatial rules are conservative:</p>
+<ul>
+<li>Use familiar windows for ordinary tasks.</li>
+<li>Choose the minimum immersion that serves the moment.</li>
+<li>Keep important content within a comfortable field of view.</li>
+<li>Avoid requiring head turning, reaching, or repetitive large gestures.</li>
+<li>Use depth to clarify hierarchy, not on every object.</li>
+<li>Avoid motion without a stable frame of reference.</li>
+<li>Preserve awareness of people and surroundings when possible.[16]</li>
+</ul>
+<p>Vision Pro's physical design follows the same integrated logic. Formed laminated glass flows into an aluminum frame; cameras and sensors support passthrough and input; a Digital Crown adjusts immersion; modular seals and bands adapt fit.[38] Yet comfort remains a real constraint. Research on head-mounted displays identifies vergence-accommodation conflict as a persistent visual challenge,[48] and a 2025 Vision Pro input study found participants preferred physical tap typing over gaze-plus-pinch typing in its tested task.[49] "Natural" input is contextual, not universal.</p>
+<h3 id="68-carplay-responsibility-through-constraint">6.8 CarPlay: responsibility through constraint</h3>
+<p>CarPlay is the clearest example of safety governing design freedom. Apps use system-defined templates for approved categories, and iOS renders the interface across vehicle resolutions and input hardware.[17] The system limits interaction complexity so the driver can complete tasks quickly and return attention to the road.</p>
+<p>Useful information must be scannable; primary controls belong in prominent positions; errors should interrupt only when necessary; setup that requires iPhone should occur before motion. This is a design system acting as a safety boundary, not merely a visual library.</p>
+<h3 id="69-airpods-an-interface-with-almost-no-screen">6.9 AirPods: an interface with almost no screen</h3>
+<p>AirPods move interface state into audio, touch pressure, automatic sensing, and companion-device visuals. Original AirPods emphasized automatic setup and device switching with no conventional switches.[36] Later models use force-sensitive stems and head or voice interactions, while iPhone, iPad, Mac, Watch, and TV display configuration and state.</p>
+<p>The strength is low friction. The risk is invisible mode. Noise control, conversation awareness, connection target, battery status, and gesture mappings can be difficult to infer without a screen. Clear tones, spoken feedback, discoverable settings, and consistent stem behavior are therefore essential parts of the design.</p>
+<h3 id="610-homepod-ambient-form-and-voice-first-interaction">6.10 HomePod: ambient form and voice-first interaction</h3>
+<p>HomePod's seamless mesh, compact form, edge-lit touch surface, room sensing, and far-field microphones are designed to recede into a room while remaining responsive.[37] Voice is primary, touch is a fallback, light shows listening state, and an iPhone handles richer setup and management.</p>
+<p>The physical and software layers are inseparable: computational audio adjusts to placement; Siri mediates requests; privacy architecture controls when audio leaves the device.[37] The core design challenge is social and invisible state: who is being addressed, whether the device heard correctly, whose account is active, and what will happen next.</p>
+<h3 id="611-airtag-object-recovery-as-a-distributed-interface">6.11 AirTag: object recovery as a distributed interface</h3>
+<p>AirTag has almost no local interface. Its interaction model is distributed across the object, Find My network, iPhone precision finding, sound, privacy alerts, and account state. This is an extreme form of Apple's ecosystem design: the physical product is simple because other devices carry the display, computation, identity, and recovery workflow.</p>
+<p>The case also demonstrates responsibility. A location product must balance recovery against unwanted tracking. Safety alerts and account-bound state are not secondary settings; they are part of the product's core interface contract.</p>
+<h3 id="612-input-accessories-tools-that-preserve-intent">6.12 Input accessories: tools that preserve intent</h3>
+<p>Apple Pencil, trackpads, keyboards, Camera Control, the Digital Crown, and the Siri Remote share a pattern: input is shaped for the task and paired with immediate feedback. Touch is not treated as the answer to every device.</p>
+<p>Human-computer interaction research supports this differentiation. Direct manipulation works when actions operate on visible objects and results appear immediately.[45] Touch target research shows finger input behaves differently from pointer input, especially for small targets.[46] Apple's platform-specific target sizes, focus systems, remote navigation, and precision controls reflect those different motor conditions.</p>
+<hr/>
+<h2 id="7-hardware-and-software-as-one-interface">7. Hardware and software as one interface</h2>
+<h3 id="71-form-follows-interaction-and-interaction-follows-form">7.1 Form follows interaction, and interaction follows form</h3>
+<p>Apple repeatedly redesigns software around physical geometry and physical products around interaction. Rounded display corners produce safe areas and concentric controls. A tiny Watch screen produces a side-mounted Crown. A trackpad with force sensors produces a configurable simulated click. Vision Pro cameras make gaze and hand input possible; its Crown gives physical control over immersion.[5][31][33][38]</p>
+<p>This loop is a competitive advantage because the company controls enclosure, silicon, sensors, operating system, frameworks, and default apps. It can coordinate latency, animation, haptics, power, and visual response. The same control can also narrow compatibility with external hardware and services.</p>
+<h3 id="72-material-reduction-and-structural-clarity">7.2 Material reduction and structural clarity</h3>
+<p>The 2008 MacBook unibody is a canonical example. Replacing many enclosure pieces with one milled aluminum part improved rigidity, thinness, fit, and visual continuity.[30] Similar logic appears in seamless glass surfaces, woven speaker meshes, ceramic covers, and precisely nested modules.</p>
+<p>Material simplicity is not the same as manufacturing simplicity. A visually quiet product may require complex machining, adhesives, custom fasteners, or integrated modules. The external appearance conceals operational complexity so the person can focus on use. That concealment becomes problematic when it also conceals maintenance limits.</p>
+<h3 id="73-custom-silicon-as-a-design-material">7.3 Custom silicon as a design material</h3>
+<p>Apple silicon is not visible, but it expands the interface design space. Low-latency sensor fusion enables Watch gestures; on-device processing supports privacy-preserving personalization; graphics hardware renders adaptive materials; Vision Pro's sensor pipeline supports passthrough and gaze; computational audio adapts HomePod and AirPods.[26][33][37][38]</p>
+<p>Performance, thermal behavior, battery life, and privacy therefore become design-system variables. An animation that misses input latency, a voice feature that requires an unexpected network round trip, or spatial content that lags is not merely an engineering defect. It breaks the human interface.</p>
+<h3 id="74-feedback-closes-the-loop">7.4 Feedback closes the loop</h3>
+<p>Apple's most coherent interactions have four stages:</p>
+<ol>
+<li>A control signals that action is possible.</li>
+<li>Input maps naturally to the intended change.</li>
+<li>Visual, tactile, or audio feedback confirms recognition.</li>
+<li>The result is visible, reversible, or recoverable.</li>
+</ol>
+<p>Camera Control clicks and slides; Pencil squeeze reveals a nearby palette and pulses; a focused TV item lifts before selection; a Watch action taps the wrist; a Liquid Glass control flexes and changes light.[6][32][34][35] The multisensory response reduces uncertainty.</p>
+<h3 id="75-continuity-turns-products-into-a-device-ecology">7.5 Continuity turns products into a device ecology</h3>
+<p>Handoff lets a task begin on one device and resume on another. Universal Clipboard, Sidecar, Universal Control, AirDrop, AirPlay, shared accounts, and synchronized state create a larger interaction system.[27][28] Each device contributes its strongest capability: phone mobility, tablet touch and Pencil, Mac precision and display space, Watch proximity, TV scale, AirPods privacy, or Vision spatial canvas.</p>
+<p>The design achievement is continuity of intent, not just data synchronization. A person's place, selection, account, media state, or document should survive the transition. The ecosystem feels like one system when handoff cost is lower than restarting the task.</p>
+<hr/>
+<h2 id="8-accessibility-privacy-and-environmental-responsibility">8. Accessibility, privacy, and environmental responsibility</h2>
+<h3 id="81-accessibility-is-a-system-property">8.1 Accessibility is a system property</h3>
+<p>Apple defines an accessible interface as intuitive, perceivable through more than one channel, and adaptable to how a person uses the device.[24] The design system supports this through VoiceOver, Dynamic Type, Switch Control, Voice Control, AssistiveTouch, captions, audio descriptions, reduced motion, reduced transparency, increased contrast, Bold Text, hardware keyboard support, eye tracking, and platform-specific alternatives.</p>
+<p>The strongest aspect is inheritance. Native controls carry roles, focus behavior, text scaling, and platform settings automatically. Liquid Glass responds to reduced transparency, increased contrast, and reduced motion when implemented through system materials.[6][22]</p>
+<p>Accessibility still requires design judgment. A technically labeled icon can remain conceptually unclear. Dynamic Type can expose a layout that assumed fixed height. A gaze target can be inaccessible to someone whose eye behavior differs from the calibration model. A haptic-only distinction can exclude a person who cannot perceive it. W3C's WCAG 2.2 reinforces the underlying requirements for alternatives, contrast, target size, and motion control.[50]</p>
+<h3 id="82-privacy-is-interaction-design-plus-architecture">8.2 Privacy is interaction design plus architecture</h3>
+<p>Permission prompts, privacy labels, sharing choices, indicators, account controls, and explanations are visible parts of privacy. Data minimization, on-device processing, encryption, random identifiers, and isolated computation are invisible parts.[25][26] Both layers affect trust.</p>
+<p>Apple's 2026 responsibility principle connects them: people should understand what the product does and why, and the implementation should limit harm even when the interface is not visible.[1] Good privacy design asks only at the moment of need, explains the benefit, offers a real choice, and continues to work gracefully after refusal when possible.</p>
+<h3 id="83-environmental-design-and-longevity">8.3 Environmental design and longevity</h3>
+<p>Apple's environmental program reports recycled materials, packaging reduction, energy efficiency, product environmental reports, recovery systems, and a 2030 carbon-neutrality target.[39] Product design affects emissions through material selection, manufacturing, shipping volume, durability, power, repair, software support, reuse, and recycling.</p>
+<p>Longevity creates a real design tension. Sealed integrated construction can improve water resistance, thinness, rigidity, safety, and material efficiency while making disassembly or component replacement harder. Apple now provides Self Service Repair for experienced users and has expanded support for used genuine parts on selected products.[40][41]</p>
+<p>Independent teardown evidence shows uneven progress. IFixit found meaningful repairability advances in the thin iPhone Air, including more accessible internal organization,[42] while criticizing the M4 MacBook Air for retaining repair barriers that newer iPhone designs had begun to address.[43] The correct conclusion is not that Apple products are either repairable or unrepairable. Repairability varies by family and generation, and remains a design tradeoff that must be measured rather than inferred from surface simplicity.</p>
+<hr/>
+<h2 id="9-critical-assessment">9. Critical assessment</h2>
+<section aria-label="Design tensions" class="visual">
+<div class="visual-head"><span class="visual-kicker">Critical reading</span><h3>Apple's principles are competing constraints</h3><p>The marker shows where design judgment, not a fixed rule, is required.</p></div>
+<div class="tensions">
+<div class="tension"><div class="tension-top"><span>Deference</span><span>Discoverability</span></div><div class="tension-line" style="--mark:58%"></div><small>Quiet content still needs visible ways to act.</small></div>
+<div class="tension"><div class="tension-top"><span>Harmony</span><span>Platform fitness</span></div><div class="tension-line" style="--mark:66%"></div><small>Family resemblance cannot erase device ergonomics.</small></div>
+<div class="tension"><div class="tension-top"><span>Delight</span><span>Legibility</span></div><div class="tension-line" style="--mark:67%"></div><small>Expressive material must remain subordinate to reading.</small></div>
+<div class="tension"><div class="tension-top"><span>Integration</span><span>Openness</span></div><div class="tension-line" style="--mark:47%"></div><small>Seamless defaults can narrow equivalent alternatives.</small></div>
+<div class="tension"><div class="tension-top"><span>Thinness</span><span>Repairability</span></div><div class="tension-line" style="--mark:55%"></div><small>Lifecycle quality must be measured per product generation.</small></div>
+<div class="tension"><div class="tension-top"><span>Natural input</span><span>Physical comfort</span></div><div class="tension-line" style="--mark:62%"></div><small>Gaze and gesture remain task- and body-dependent.</small></div>
+</div>
+</section>
+
+<h3 id="91-strengths">9.1 Strengths</h3>
+<h4 id="coherence-at-multiple-levels">Coherence at multiple levels</h4>
+<p>Apple coordinates product form, operating system, components, typography, symbols, motion, haptics, sound, privacy, and developer guidance. This reduces accidental mismatch. A control can look, move, sound, and respond like part of the same system.</p>
+<h4 id="context-specific-interaction">Context-specific interaction</h4>
+<p>The platform guides begin with human and device conditions, not a shared component inventory. Touch, pointer, Crown, remote focus, gaze, voice, Pencil, and haptics are assigned according to environment and task.[11]-[17]</p>
+<h4 id="system-backed-adaptivity">System-backed adaptivity</h4>
+<p>Semantic colors, variable fonts, dynamic materials, native components, safe areas, and accessibility settings allow interfaces to change without losing identity.[18]-[24]</p>
+<h4 id="high-feedback-quality">High feedback quality</h4>
+<p>Apple treats feedback as a multisensory loop. Immediate response makes digital state feel stable and understandable, reinforcing the direct-manipulation lineage.[31]-[36][45]</p>
+<h4 id="long-horizon-platform-governance">Long-horizon platform governance</h4>
+<p>The HIG, design kits, system frameworks, icon tools, and annual developer education form a living governance system. Apple's 2026 principle reset shows that the company can revise the decision framework without discarding the platform's accumulated interaction knowledge.[1][2][4]</p>
+<h3 id="92-tensions-and-failure-modes">9.2 Tensions and failure modes</h3>
+<h4 id="deference-versus-discoverability">Deference versus discoverability</h4>
+<p>Removing visible controls gives content more room, but hidden gestures, unlabeled icons, and context-sensitive states can increase uncertainty. Research comparing flat and more signified interfaces suggests that visual reduction can raise cognitive load when interactivity is not clear.[47] Apple's answer is not a return to literal realism; it is sufficient shape, hover, focus, feedback, labeling, and progressive disclosure.</p>
+<h4 id="universal-language-versus-platform-fitness">Universal language versus platform fitness</h4>
+<p>Shared materials and geometry can create familiarity, but a touch-first scale can waste Mac space, and desktop density can make a TV or Watch unusable. Apple's own guidance preserves smaller Mac controls, larger TV targets, and Watch-specific hierarchy.[5][14][15] Any universal visual language must be subordinate to platform ergonomics.</p>
+<h4 id="delight-versus-legibility">Delight versus legibility</h4>
+<p>Liquid Glass can create hierarchy and vitality, but transparency over changing content creates a moving contrast problem. Apple responds with adaptive luminosity, shadows, scroll-edge effects, dimming, contrast modes, and strict rules for Clear Glass.[6][22] Those safeguards reveal the core risk: the more expressive the material, the more engineering and testing are required to keep it legible.</p>
+<h4 id="familiarity-versus-innovation">Familiarity versus innovation</h4>
+<p>Familiar metaphors reduce learning, while new hardware can enable better mappings. Camera Control, gaze-plus-pinch, and double tap all require learning despite being designed to feel natural.[32][33][38] Innovation works when it offers visible feedback, a clear benefit, and an alternative path.</p>
+<h4 id="integration-versus-openness">Integration versus openness</h4>
+<p>Continuity, automatic pairing, shared state, and on-device intelligence are strongest when Apple controls both ends. The same integration can reduce equivalent support for non-Apple devices, independent repair, or alternate distribution. This is not merely a business issue; it affects agency, flexibility, and product longevity.</p>
+<h4 id="thin-sealed-craft-versus-repairability">Thin, sealed craft versus repairability</h4>
+<p>Precision integration can improve durability and reduce volume, yet adhesives, serialized parts, inaccessible modules, and soldered storage can raise service cost or shorten practical life. Current evidence shows improvement in some iPhones and continued barriers in some MacBooks.[42][43] Environmental design must evaluate the full lifecycle, not only recycled material percentage or enclosure elegance.</p>
+<h4 id="spatial-naturalness-versus-human-physiology">Spatial naturalness versus human physiology</h4>
+<p>Gaze and small hand gestures can feel immediate, but eye tracking, text entry, headset weight, depth, and motion remain constrained by physiology. Apple appropriately emphasizes comfort and minimum immersion,[16] while external research shows continuing limits in visual accommodation and task-specific input preference.[48][49] Spatial design should be evaluated over meaningful duration, not only a short demonstration.</p>
+<h3 id="93-why-apples-system-sometimes-appears-inconsistent">9.3 Why Apple's system sometimes appears inconsistent</h3>
+<p>Some differences are intentional platform adaptations; others are legacy debt or product compromise. A useful evaluation asks:</p>
+<ul>
+<li>Does the difference follow from input, viewing distance, task duration, safety, or information density?</li>
+<li>Does it preserve the person's context and learned behavior?</li>
+<li>Is it implemented consistently within the platform?</li>
+<li>Is there a clear accessibility and recovery path?</li>
+<li>Does the difference serve purpose, or merely brand expression?</li>
+</ul>
+<p>A difference with a human reason is adaptation. A difference without one is drift.</p>
+<hr/>
+<h2 id="10-synthesis-a-five-layer-model-of-apple-design">10. Synthesis: a five-layer model of Apple design</h2>
+<section aria-label="Research synthesis" class="visual">
+<div class="closing-model">
+<div class="mini-orbit">Design the<br/>relationship</div>
+<ol>
+<li>Begin with human intent.</li>
+<li>Study the body, environment, and consequence.</li>
+<li>Choose the interaction that fits.</li>
+<li>Make state, feedback, and recovery clear.</li>
+<li>Let expression reinforce the structure.</li>
+</ol>
+</div>
+</section>
+
+<p>Apple's system can be summarized as five nested layers.</p>
+<h3 id="layer-1-human-intent">Layer 1 - Human intent</h3>
+<p>Purpose, agency, responsibility, familiarity, flexibility, simplicity, craft, and delight define what a good outcome means.[1]</p>
+<h3 id="layer-2-physical-and-social-context">Layer 2 - Physical and social context</h3>
+<p>Viewing distance, posture, motion, duration, attention, privacy, shared use, and safety determine the platform responsibility.[11]-[17]</p>
+<h3 id="layer-3-interaction-grammar">Layer 3 - Interaction grammar</h3>
+<p>Touch, pointer, keyboard, voice, Crown, Pencil, remote focus, gaze, gesture, haptics, audio, and recovery patterns translate intent into action.</p>
+<h3 id="layer-4-system-expression">Layer 4 - System expression</h3>
+<p>Hierarchy, harmony, consistency, typography, symbols, semantic color, materials, geometry, layout, motion, components, and writing make the grammar perceivable.[3]-[6][18]-[23]</p>
+<h3 id="layer-5-integrated-delivery">Layer 5 - Integrated delivery</h3>
+<p>Hardware, sensors, silicon, frameworks, privacy architecture, accessibility services, continuity, manufacturing, repair, and lifecycle support determine whether the experience is reliable in practice.</p>
+<p>The layers are directional. A new visual material should be justified by interaction and context; interaction should be justified by human intent. Reversing that order produces style-led design.</p>
+<h3 id="101-a-practical-evaluation-rubric">10.1 A practical evaluation rubric</h3>
+<p>The following questions translate the research into a reusable review tool:</p>
+<ol>
+<li>What meaningful job is the product helping a person do?</li>
+<li>What can be removed without hiding information or control the person needs?</li>
+<li>What does the physical context change about reach, attention, distance, precision, or comfort?</li>
+<li>Is the primary action visible and appropriately placed for the input method?</li>
+<li>Does every control signal what it can do before activation?</li>
+<li>Do motion, sound, haptics, and visual state agree?</li>
+<li>Can a person undo, cancel, escape, or recover without losing work?</li>
+<li>Does the interface adapt to text size, contrast, motion preference, language, and alternative input?</li>
+<li>Is private data requested only at the point of need and processed with the smallest practical exposure?</li>
+<li>Does cross-device continuity preserve the person's place rather than simply duplicating data?</li>
+<li>Does physical construction balance durability, comfort, serviceability, and environmental cost?</li>
+<li>Is delight the result of care and clarity, or an effect competing with the task?</li>
+</ol>
+<hr/>
+<h2 id="11-conclusion">11. Conclusion</h2>
+<p>Apple's design philosophy is neither "make it minimal" nor "make it look Apple." Its current published framework is broader: make something purposeful, preserve agency, act responsibly, build on familiarity, adapt flexibly, simplify without emptying meaning, craft every layer, and create delight as the cumulative emotional result.[1][2]</p>
+<p>The design system implements that philosophy through a coordinated stack: hierarchy, harmony, consistency, adaptive typography, symbols, semantic color, material, geometry, layout, components, motion, haptics, audio, privacy, accessibility, and platform frameworks. Liquid Glass is the current visible expression of this stack, but its own restraint rules prove that the material is not the philosophy.[5][6][22]</p>
+<p>Across devices, Apple is most coherent when it preserves the same mental model while changing the physical interaction. The phone concentrates; the tablet adapts; the Mac exposes depth; the Watch compresses; the TV externalizes focus; Vision Pro spatializes; CarPlay constrains; AirPods and HomePod move state into sound and ambient feedback. The products feel related because the underlying questions are stable, not because every answer is identical.</p>
+<p>The strongest general lesson is therefore simple: design the relationship, not the surface. Start with what matters to the person, understand the body and environment, choose the interaction that fits, make state and recovery clear, and let visual expression reinforce that structure. Apple's successes demonstrate the power of that order. Its weaknesses show what happens when coherence, spectacle, thinness, or ecosystem control outruns the human purpose it was meant to serve.</p>
+<hr/>
+<h2 id="appendix-a-principle-to-system-evidence-map">Appendix A. Principle-to-system evidence map</h2>
+<div aria-label="Scrollable table" class="table-wrap" role="region"><table>
+<thead>
+<tr>
+<th>Principle</th>
+<th>System mechanisms</th>
+<th>Representative products</th>
+<th>Primary risk</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Purpose</td>
+<td>Hierarchy, task-first flows, limited primary actions</td>
+<td>Watch, CarPlay, iPhone</td>
+<td>Feature or visual excess</td>
+</tr>
+<tr>
+<td>Agency</td>
+<td>Undo, window control, personalization, alternate inputs</td>
+<td>Mac, iPad, accessibility services</td>
+<td>Ecosystem lock-in or rigid modes</td>
+</tr>
+<tr>
+<td>Responsibility</td>
+<td>Privacy prompts, data minimization, safety templates, comfort rules</td>
+<td>CarPlay, Vision Pro, Health, AirTag</td>
+<td>Policy language without usable control</td>
+</tr>
+<tr>
+<td>Familiarity</td>
+<td>Standard components, learned icons, direct manipulation, feedback</td>
+<td>All platforms</td>
+<td>Metaphor blocking better new behavior</td>
+</tr>
+<tr>
+<td>Flexibility</td>
+<td>Dynamic Type, semantic color, responsive layout, multimodal input</td>
+<td>iPad, Mac, cross-device apps</td>
+<td>Lowest-common-denominator design</td>
+</tr>
+<tr>
+<td>Simplicity</td>
+<td>Progressive disclosure, shallow hierarchy, concise writing</td>
+<td>iPhone, Watch, HomePod</td>
+<td>Hidden actions and weak signifiers</td>
+</tr>
+<tr>
+<td>Craft</td>
+<td>Optical type, symbol alignment, haptics, material precision</td>
+<td>MacBook, Pencil, Watch, Vision Pro</td>
+<td>Thinness or spectacle outranking use</td>
+</tr>
+<tr>
+<td>Delight</td>
+<td>Responsive motion, tactile confirmation, expressive moments</td>
+<td>AirPods, Watch, Liquid Glass</td>
+<td>Decoration competing with task and legibility</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="appendix-b-product-family-coverage">Appendix B. Product-family coverage</h2>
+<div aria-label="Scrollable table" class="table-wrap" role="region"><table>
+<thead>
+<tr>
+<th>Family</th>
+<th>Hardware/form emphasis</th>
+<th>Interface emphasis</th>
+<th>Ecosystem role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mac</td>
+<td>Structural enclosure, keyboard, precision trackpad, displays</td>
+<td>Windows, menus, shortcuts, dense workflows</td>
+<td>Deep creation and coordination hub</td>
+</tr>
+<tr>
+<td>iPhone</td>
+<td>Handheld durability, cameras, sensors, specialized buttons</td>
+<td>Touch-first focused tasks</td>
+<td>Mobile identity, capture, communication, and control hub</td>
+</tr>
+<tr>
+<td>iPad</td>
+<td>Thin touch canvas, Pencil and keyboard attachment</td>
+<td>Adaptive windows and mixed input</td>
+<td>Portable creation and flexible work</td>
+</tr>
+<tr>
+<td>Apple Watch</td>
+<td>Wrist fit, Crown, haptics, health sensors</td>
+<td>Glances, complications, timely actions</td>
+<td>Proximity, health, notification, and authentication</td>
+</tr>
+<tr>
+<td>Vision Pro</td>
+<td>Wearable fit, displays, cameras, modular bands and seals</td>
+<td>Gaze, pinch, windows, volumes, immersion</td>
+<td>Spatial work, media, simulation, and Mac extension</td>
+</tr>
+<tr>
+<td>AirPods</td>
+<td>Ear fit, stems, microphones, charging cases</td>
+<td>Audio feedback, automatic state, companion settings</td>
+<td>Private audio and low-friction continuity</td>
+</tr>
+<tr>
+<td>AirTag</td>
+<td>Minimal sealed object and speaker</td>
+<td>Find My, precision finding, safety alerts</td>
+<td>Recovery and location extension</td>
+</tr>
+<tr>
+<td>Apple TV</td>
+<td>Compact set-top device and precision remote</td>
+<td>Large focus-based cinematic UI</td>
+<td>Shared-room media and home integration</td>
+</tr>
+<tr>
+<td>HomePod</td>
+<td>Acoustically transparent mesh, touch surface, microphones</td>
+<td>Voice-first ambient interaction</td>
+<td>Shared audio and home control</td>
+</tr>
+<tr>
+<td>Accessories</td>
+<td>Pencil, keyboards, trackpads, remotes, cases</td>
+<td>Specialized input and local feedback</td>
+<td>Extend the best input for each task</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="appendix-c-key-terms-in-plain-language">Appendix C. Key terms in plain language</h2>
+<p><strong>Affordance:</strong> What an object or control allows a person to do. A button affords pressing.<br/>
+<strong>Signifier:</strong> A visible, audible, or tactile clue that shows how to act, such as a label, border, hover response, or click.<br/>
+<strong>Direct manipulation:</strong> Acting on visible objects and seeing the result immediately, such as dragging a file.<br/>
+<strong>Design system:</strong> Reusable rules, components, assets, behaviors, and tools that keep a product family coherent.<br/>
+<strong>Semantic color:</strong> A color role named by purpose, such as destructive or secondary label, so the system can change its exact appearance safely.<br/>
+<strong>Material:</strong> A rendering behavior that separates layers and communicates depth; it is not only a color or blur.<br/>
+<strong>Modality:</strong> A temporary mode that blocks or changes ordinary interaction until it is completed or dismissed.<br/>
+<strong>Progressive disclosure:</strong> Showing essential choices first and revealing additional controls when they become relevant.<br/>
+<strong>Concentricity:</strong> Nested shapes whose curves share a geometric center and align through consistent padding.<br/>
+<strong>Haptic feedback:</strong> Information communicated through touch, such as a precise vibration or simulated click.<br/>
+<strong>Vergence-accommodation conflict:</strong> A visual mismatch in headsets between where the eyes converge and where they physically focus, which can contribute to discomfort.<br/>
+<strong>Repairability:</strong> How safely, affordably, and practically a product can be diagnosed, opened, repaired, reconfigured, and returned to use.</p>
+<hr/>
+<h2 id="references">References</h2>
+<ol>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/design-principles">Design principles</a>. Human Interface Guidelines. Updated June 8, 2026.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/videos/play/wwdc2026/250/">Principles of great design</a>. WWDC26.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/">Human Interface Guidelines</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/resources/">Apple Design Resources</a>.</li>
+<li>Apple. (2025). <a href="https://developer.apple.com/videos/play/wwdc2025/356/">Get to know the new design system</a>. WWDC25.</li>
+<li>Apple. (2025). <a href="https://developer.apple.com/videos/play/wwdc2025/219/">Meet Liquid Glass</a>. WWDC25.</li>
+<li>Apple. (2025). <a href="https://www.apple.com/newsroom/2025/06/apple-introduces-a-delightful-and-elegant-new-software-design/">Apple introduces a delightful and elegant new software design</a>. Apple Newsroom.</li>
+<li>Apple Computer, Inc. (1992). <a href="https://vintageapple.org/inside_r/pdf/Human_Interface_Guidelines_1992.pdf">Macintosh Human Interface Guidelines</a>. Addison-Wesley.</li>
+<li>Apple. (2013). <a href="https://developer.apple.com/library/archive/documentation/UserExperience/Conceptual/TransitionGuide/">iOS 7 UI Transition Guide: Before You Start</a>. Documentation Archive.</li>
+<li>Apple. (2017). <a href="https://developer.apple.com/videos/play/wwdc2017/802/">Essential Design Principles</a>. WWDC17.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/designing-for-ios">Designing for iOS</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/designing-for-ipados">Designing for iPadOS</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/designing-for-macos/">Designing for macOS</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/designing-for-watchos">Designing for watchOS</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/designing-for-tvos/">Designing for tvOS</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/designing-for-visionos">Designing for visionOS</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/carplay/">CarPlay</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/layout">Layout</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/typography">Typography</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/sf-symbols">SF Symbols</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/icons">Icons</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/materials">Materials</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/color">Color</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/accessibility">Accessibility</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/privacy">Privacy</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://www.apple.com/privacy/features/">Privacy features</a>.</li>
+<li>Apple. (2026). <a href="https://support.apple.com/en-us/102426">Use Handoff to continue tasks on your other Apple devices</a>. Apple Support.</li>
+<li>Apple. (2026). <a href="https://www.apple.com/macos/continuity/">Continuity</a>.</li>
+<li>Apple. (2026). <a href="https://www.apple.com/store">Apple Store Online</a>.</li>
+<li>Apple. (2008). <a href="https://www.apple.com/newsroom/2008/10/14New-MacBook-Family-Redefines-Notebook-Design/">New MacBook Family Redefines Notebook Design</a>. Apple Newsroom.</li>
+<li>Apple. (2015). <a href="https://www.apple.com/newsroom/2015/03/09Apple-Unveils-All-New-MacBook/">Apple Unveils All-New MacBook</a>. Apple Newsroom.</li>
+<li>Apple. (2024). <a href="https://www.apple.com/newsroom/2024/09/apple-introduces-iphone-16-and-iphone-16-plus/">Apple introduces iPhone 16 and iPhone 16 Plus</a>. Apple Newsroom.</li>
+<li>Apple. (2023). <a href="https://www.apple.com/newsroom/2023/09/apple-introduces-the-advanced-new-apple-watch-series-9/">Apple introduces the advanced new Apple Watch Series 9</a>. Apple Newsroom.</li>
+<li>Apple. (2026). <a href="https://www.apple.com/apple-pencil/">Apple Pencil</a>.</li>
+<li>Apple. (2021). <a href="https://www.apple.com/newsroom/2021/04/apple-unveils-the-next-generation-of-apple-tv-4k/">Apple unveils the next generation of Apple TV 4K</a>. Apple Newsroom.</li>
+<li>Apple. (2016). <a href="https://www.apple.com/newsroom/2016/09/apple-reinvents-the-wireless-headphones-with-airpods.html">Apple reinvents the wireless headphone with AirPods</a>. Apple Newsroom.</li>
+<li>Apple. (2017). <a href="https://www.apple.com/newsroom/2017/06/homepod-reinvents-music-in-the-home/">HomePod reinvents music in the home</a>. Apple Newsroom.</li>
+<li>Apple. (2023). <a href="https://www.apple.com/newsroom/2023/06/introducing-apple-vision-pro/">Introducing Apple Vision Pro</a>. Apple Newsroom.</li>
+<li>Apple. (2026). <a href="https://www.apple.com/environment/">Environment</a>.</li>
+<li>Apple. (2026). <a href="https://support.apple.com/self-service-repair">Self Service Repair</a>. Apple Support.</li>
+<li>Apple. (2024). <a href="https://www.apple.com/newsroom/2024/04/apple-to-expand-repair-options-with-support-for-used-genuine-parts/">Apple to expand repair options with support for used genuine parts</a>. Apple Newsroom.</li>
+<li>iFixit. (2025). <a href="https://www.ifixit.com/News/113171/iphone-air-teardown">Apple's Thinnest iPhone Still Stands Up to Repairs</a>.</li>
+<li>iFixit. (2025). <a href="https://www.ifixit.com/News/108697/m4-macbook-air-teardown-apple-when-will-macbooks-finally-get-repair-upgrades">M4 MacBook Air Teardown: Apple, When Will MacBooks Finally Get Repair Upgrades?</a>.</li>
+<li>Vitsoe. (2026). <a href="https://www.vitsoe.com/eu/about/good-design">The power of good design: Dieter Rams's ten principles</a>.</li>
+<li>Shneiderman, B. (1983). <a href="https://www.cs.umd.edu/~ben/papers/Shneiderman1983Direct.pdf">Direct Manipulation: A Step Beyond Programming Languages</a>. <em>Computer, 16</em>(8), 57-69. https://doi.org/10.1109/MC.1983.1654471</li>
+<li>Bi, X., Li, Y., and Zhai, S. (2013). <a href="https://research.google/pubs/ffitts-law-modeling-finger-touch-with-fitts-law/">FFitts Law: Modeling Finger Touch with Fitts' Law</a>. <em>Proceedings of CHI 2013</em>, 1363-1372.</li>
+<li>Burmistrov, I., Zlokazova, T., Izmalkova, A., and Leonova, A. (2015). <a href="https://publications.hse.ru/en/articles/801080270">Flat Design vs Traditional Design: Comparative Experimental Study</a>. <em>Human-Computer Interaction - INTERACT 2015</em>.</li>
+<li>Kramida, G. (2016). <a href="https://pubmed.ncbi.nlm.nih.gov/26336129/">Resolving the Vergence-Accommodation Conflict in Head-Mounted Displays</a>. <em>IEEE Transactions on Visualization and Computer Graphics, 22</em>(7), 1912-1931. https://doi.org/10.1109/TVCG.2015.2473855</li>
+<li>Arnold, H. L. W., Epperson, L. M., and Chaparro, B. S. (2025). <a href="https://journals.sagepub.com/doi/abs/10.1177/10711813251367736">Evaluating Text Input Methods on the Apple Vision Pro</a>. <em>Proceedings of the Human Factors and Ergonomics Society Annual Meeting</em>.</li>
+<li>World Wide Web Consortium. (2023). <a href="https://www.w3.org/TR/WCAG22/">Web Content Accessibility Guidelines 2.2</a>. W3C Recommendation.</li>
+<li>International Organization for Standardization. (2019, confirmed 2025). <a href="https://www.iso.org/standard/77520.html">ISO 9241-210:2019 - Human-centred design for interactive systems</a>.</li>
+<li>Apple. (2026). <a href="https://www.apple.com/newsroom/2026/06/apple-unveils-next-generation-of-apple-intelligence-siri-ai-and-more/">WWDC26: Apple unveils next generation of Apple Intelligence, Siri AI, and more</a>. Apple Newsroom.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/app-icons">App icons</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/fonts/">Fonts for Apple platforms</a>.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/motion">Motion</a>. Human Interface Guidelines.</li>
+<li>Apple. (2026). <a href="https://developer.apple.com/design/human-interface-guidelines/onboarding">Onboarding</a>. Human Interface Guidelines.</li>
+</ol>
+<hr/>
+<h2 id="research-limitations-and-update-note">Research limitations and update note</h2>
+<p>This paper analyzes public evidence. It cannot establish Apple's internal decision process, the representativeness of private usability testing, or the success of every shipped implementation. Platform documentation changes continuously, some 2026 resources describe prerelease operating systems or beta tools, and regional product availability differs. Independent repairability and spatial-computing studies cover specific models and tasks; their findings should not be generalized beyond those conditions.</p>
+<p>For future updates, recheck the current HIG change logs, Apple Design Resources version labels, shipping operating-system behavior, current accessibility settings, product environmental reports, and independent repair assessments. The paper's main analytical model is designed to survive visual-style changes, but its product examples and current-version claims are dated to August 5, 2026.</p><div class="source-note"><strong>Source note.</strong> Apple documentation establishes what Apple prescribes and claims. Standards, peer-reviewed studies, and independent repair analysis are used to test the interpretation. Evidence is current through August 5, 2026.</div></main>
+  </div>
+  <footer>Independent research synthesis for local project use. No Apple trademarks, logos, product imagery, or proprietary interface assets are reproduced.</footer>
+  <script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('[data-theme-toggle]');
+  const saved = localStorage.getItem('apple-design-paper-theme');
+  if (saved) root.dataset.theme = saved;
+  const sync = () => {
+    const dark = root.dataset.theme === 'dark' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+    button.setAttribute('aria-pressed', String(dark));
+    button.textContent = dark ? '☀' : '◐';
+    button.title = dark ? 'Use light theme' : 'Use dark theme';
+  };
+  button.addEventListener('click', () => {
+    const currentDark = root.dataset.theme === 'dark' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+    root.dataset.theme = currentDark ? 'light' : 'dark';
+    localStorage.setItem('apple-design-paper-theme', root.dataset.theme);
+    sync();
+  });
+  sync();
+  const bar = document.querySelector('.progress > span');
+  const update = () => {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    bar.style.width = `${max > 0 ? (scrollY / max) * 100 : 0}%`;
+  };
+  addEventListener('scroll', update, {passive:true}); update();
+  const links = [...document.querySelectorAll('.rail a[href^="#"]')];
+  const map = new Map(links.map(a => [a.getAttribute('href').slice(1), a]));
+  const observer = new IntersectionObserver(entries => {
+    const visible = entries.filter(e => e.isIntersecting).sort((a,b) => a.boundingClientRect.top-b.boundingClientRect.top)[0];
+    if (!visible) return;
+    links.forEach(a => a.classList.remove('active'));
+    map.get(visible.target.id)?.classList.add('active');
+  }, {rootMargin:'-12% 0px -75% 0px'});
+  document.querySelectorAll('.paper h2[id],.paper h3[id]').forEach(h => observer.observe(h));
+})();
+</script>
+</body>
+</html>
