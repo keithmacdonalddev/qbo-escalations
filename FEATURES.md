@@ -389,3 +389,10 @@ Model: Codex GPT-5.6 Sol
 Is duplicate?: no
 Complexity: high
 Special Feature: Portfolio Exposure Look-Through Graph - Map each holding, including funds and ETFs, through underlying issuers, sectors, currencies, geographic revenue, leverage, and shared risk drivers using dated source evidence, then surface overlapping exposure that ticker-level concentration misses. Agents would cite the exact relationship path and its uncertainty, helping the user distinguish genuine diversification from several wrappers carrying the same underlying risk without turning the feature into an automated trading recommendation.
+
+Date: 2026-08-14
+Time: 18:38 ADT
+Model: Codex GPT-5.6 Sol
+Is duplicate?: no
+Complexity: high
+Special Feature: Context-Sealed Multi-Domain Chat - Give each first-class work domain an equal entry point inside one stable Chat shell while binding every conversation, agent run, tool family, and evidence reference to one immutable domain. Switching from QBO escalations to Investments loads a separate context instead of relabelling or contaminating the active conversation, and each domain can link into its own deep workspace; this lets the platform expand beyond QBO without becoming a grid of disconnected mini-apps or risking private evidence leakage between specialist teams.

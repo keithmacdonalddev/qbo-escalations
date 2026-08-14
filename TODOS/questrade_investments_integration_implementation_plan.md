@@ -4,23 +4,24 @@
 
 **Created:** 2026-08-14
 
-**Revised:** 2026-08-14 after independent critical review and socket-hardening review; documentation revision only, with no Questrade implementation started
+**Revised:** 2026-08-14 after independent critical review, socket-hardening review, and the product-owner requirement that Investments have first-class Main Chat and development-startup representation; documentation revision only, with no Questrade implementation started
 
 **Primary decision:** Add Questrade as a separate, read-only Investments domain in the broader operational-intelligence platform. Do not add trade placement, order modification, order cancellation, or autonomous financial action.
 
 **Stage rule:** Every implementation stage ends in a working, testable increment in the user's development app. No later stage may begin until the user completes the stage's hands-on acceptance script and explicitly accepts that gate.
 
-**Review disposition:** The revision accepts the local-server, encryption, identity-lifecycle, snapshot-publication, browser-evidence, provider-card, stage-sizing, dependency, token-recovery, and deletion findings. It does not carry forward the proposed `getSymbol` scope ambiguity because Questrade's current official scope table explicitly assigns `GET symbols/:id` to `read_acc`; Activities remains the one documented account endpoint whose published scope mapping is unclear. The socket-hardening revision adds a minimal browser event channel, server-only Questrade streams, REST gap reconciliation, deduplication/generation fencing, TLS and destination controls, session maintenance, bounded backoff/circuit breaking, quote staleness, and snapshot-before-alert rules.
+**Review disposition:** The revision accepts the local-server, encryption, identity-lifecycle, snapshot-publication, browser-evidence, provider-card, stage-sizing, dependency, token-recovery, and deletion findings. It does not carry forward the proposed `getSymbol` scope ambiguity because Questrade's current official scope table explicitly assigns `GET symbols/:id` to `read_acc`; Activities remains the one documented account endpoint whose published scope mapping is unclear. The socket-hardening revision adds a minimal browser event channel, server-only Questrade streams, REST gap reconciliation, deduplication/generation fencing, TLS and destination controls, session maintenance, bounded backoff/circuit breaking, quote staleness, and snapshot-before-alert rules. The platform-surface revision keeps a full Investments workspace, adds a separately gated cross-domain Main Chat redesign, prevents QBO and portfolio context from leaking into each other, and makes the friendly development launcher report Investments capability without contacting Questrade or printing financial data during normal startup.
 
 ## 1. Practical outcome
 
-The user should be able to connect a personal Questrade margin account and answer five questions confidently:
+The user should be able to connect a personal Questrade margin account and answer six questions confidently:
 
 1. Is Questrade connected, and what read permissions actually work?
 2. What does the account currently contain?
 3. What changed through trades, dividends, interest, commissions, deposits, withdrawals, and orders?
 4. What concentration, currency, and margin risks can be calculated from the latest verified account snapshot?
 5. What do specialist agents conclude, which exact snapshot supports that conclusion, and what still needs human judgment?
+6. From the main Chat page, which work domain am I in, what investment evidence is currently available, and where do I go for deeper portfolio work?
 
 The first release deliberately stops before trade execution. The app may inspect, calculate, compare, explain, and propose. The user continues placing or changing orders in Questrade.
 
@@ -34,11 +35,12 @@ Help the user understand a real investment account and make better-informed deci
 
 1. Connect Questrade in **Settings > Connected Accounts**.
 2. Verify the connection, permissions, account identity, and last successful access.
-3. Open **Investments** to review balances, positions, activity, orders, and data freshness.
-4. Create a deterministic risk assessment from one immutable portfolio snapshot.
-5. Optionally ask specialist agents to analyze that already-verified evidence.
-6. Review the agent team's facts, calculations, assumptions, risks, and possible next actions.
-7. Take any actual brokerage action in Questrade, outside this app.
+3. See Investments beside QBO as a first-class domain on the main Chat page, with explicit domain selection and a concise trustworthy account summary.
+4. Open **Investments** to review balances, positions, activity, orders, and data freshness in depth.
+5. Create a deterministic risk assessment from one immutable portfolio snapshot.
+6. Optionally ask specialist agents to analyze that already-verified evidence from either the Investments workspace or the Investments context in Main Chat.
+7. Review the agent team's facts, calculations, assumptions, risks, and possible next actions.
+8. Take any actual brokerage action in Questrade, outside this app.
 
 ### Agent-team responsibility
 
@@ -70,6 +72,8 @@ Help the user understand a real investment account and make better-informed deci
 - It does not provide tax, legal, or fiduciary advice.
 - It does not expose this local single-user app safely to the public internet.
 - It does not treat Questrade as the only future brokerage; normalized investment records remain provider-neutral.
+- It does not turn Main Chat into a compressed copy of the Investments workspace. Chat supplies domain selection, concise context, safe actions, and agent conversation; detailed tables, history, calculations, and controls remain in Investments.
+- It does not remove or weaken the accepted QBO escalation workflow. That workflow becomes one explicit domain within the broader platform rather than the identity of the whole Chat surface.
 
 ## 3. Current starting point verified on 2026-08-14
 
@@ -88,11 +92,16 @@ These claims must be rechecked immediately before each implementation stage beca
 - `server/src/services/agent-tool-capabilities.js` provides server-owned maximum tool permissions for agents. Prompt text alone is not authority.
 - `server/src/services/provider-capture-policy.js` defaults normal provider calls to manifest capture, which omits raw request and response bodies.
 - `DESIGN.md` requires a compact operational UI and rendered desktop/mobile verification.
+- `client/src/components/chat-v5/ChatV5Container.jsx` currently mounts an explicitly named `QBO Escalation Workflow`, preserves a QBO-specific four-stage workbench, and owns substantial unsaved-work/recovery behavior that must remain intact when it is placed behind a domain choice.
+- `client/src/components/chat-v5/Widget4MainChat.jsx` currently identifies the analyst as `QBO Assistant`, and `PipelineSidebar.jsx` is built around QBO parser, prior-INV, triage, and analyst stages. These are evidence that Main Chat needs a platform shell around domain work, not superficial investment copy inserted into the existing escalation pipeline.
+- `scripts/dev-launcher.js` already has the concise tagged startup grammar shown by `npm run dev`, including early core readiness, late background checks, and core/operational/optional totals. Investments should extend this grammar rather than creating raw provider log noise.
 
 ### Current gaps
 
 - No Questrade service, route, model, test fixture, client screen, or agent tool exists.
 - No Investments route exists in `client/src/lib/appRoute.js`, `client/src/App.jsx`, or `client/src/components/Sidebar.jsx`.
+- Main Chat currently defaults directly into the QBO-specific workflow; it has no explicit domain selection, Investments summary, investment-agent entry point, or isolation boundary preventing one domain's evidence from being supplied to another.
+- User-facing product identity is inconsistent with the repo north star: the sidebar says `QBO Assist`, the startup banner says `QBO Operations Platform`, and the boot overlay still names a QBO Escalation Assistant. A product-neutral naming decision is required before the Main Chat/platform-shell gate; this plan uses `Operational Intelligence Platform` only as provisional acceptance copy, not a permanent brand decision.
 - The app has no general login layer protecting all APIs. CORS, which is the browser's cross-origin request control, is not authentication and currently does not validate the incoming `Host` name. Stage 1 must harden the entire local HTTP and WebSocket boundary before adding the first Questrade route. The first Questrade release must remain loopback-only unless a separate authentication project is approved.
 - Stored Gmail tokens are excluded from normal reads but are not an acceptable encryption precedent for brokerage tokens.
 - The current testing capability map has no investments capability or focused Investments verification profile.
@@ -172,6 +181,11 @@ If live Questrade behavior disagrees with the documentation:
 | Brokerage authority | Read-only | A margin account makes accidental writes materially dangerous; personal apps do not need trade access for the product outcome. |
 | Refresh behavior | Server-owned, single-flight token refresh | Prevents two requests from racing with the same refresh credential. |
 | Data architecture | Questrade-specific connection adapter plus provider-neutral investment records | Supports another brokerage later without pretending all broker APIs are identical. |
+| Main Chat role | Cross-domain operational front door with explicit, equally weighted QBO and Investments choices | Investments may be as important as QBO and must not appear as a small integration card inside a QBO-branded workflow. |
+| Deep investment work | Keep the dedicated `#/investments` workspace | Dense balances, positions, history, orders, risk, and stream controls need a purpose-built working surface rather than an overloaded chat transcript. |
+| Chat rollout | Stage 3C adds Investments summary/navigation/sync context; Stage 6 enables investment-agent conversation | The user can validate product hierarchy and data isolation before any portfolio data is sent to an AI provider. |
+| Chat domain isolation | Every conversation, message, agent run, tool request, and evidence reference carries one explicit domain; domain switching never silently reuses the other domain's context | QBO cases and private portfolio evidence must not leak into each other through a shared Chat shell. |
+| Startup representation | Extend the existing friendly launcher with a privacy-safe `INVEST` lane and product-neutral banner; normal startup performs no live Questrade or paid/deep check | Startup should show what is configured and active without delaying the core app, consuming API allowance, exposing financial data, or claiming broker reachability it did not test. |
 | Initial refresh cadence | Manual refresh only | Makes data provenance and rate use easy to test before background monitoring exists. |
 | Browser real-time updates | Reuse `/api/realtime` with an `investment-account` channel; each investment `data` payload contains only `accountKey`, an allowlisted event type, event time, and nullable snapshot ID | The existing shared transport already has reconnect/resync behavior, and the browser must refetch authoritative data after every event or replay gap. |
 | Questrade order/execution stream | Optional and off by default in Stage 4B | It improves freshness for brokerage actions made elsewhere without changing this app's read-only authority. |
@@ -189,9 +203,13 @@ If live Questrade behavior disagrees with the documentation:
 
 ## 6. User-interface contract
 
-### Primary task
+### Investments workspace primary task
 
 Understand the latest trustworthy account state, then inspect risk and changes without losing sight of when the data was observed.
+
+### Main Chat primary task
+
+Start or resume work in the correct domain, see the minimum evidence needed to trust that context, and continue with the appropriate expert-agent team without accidentally mixing QBO case evidence and private portfolio evidence.
 
 ### Stable layout frame
 
@@ -201,6 +219,16 @@ Understand the latest trustworthy account state, then inspect risk and changes w
 - Keep the overall workspace frame stable while switching Overview, Positions, Activity, Orders, and Risk views.
 - On mobile, view navigation becomes a horizontally scrollable row with a persistent selected state.
 - An agent panel may dock beside the workspace only after Stage 6. It must not resize the main frame unpredictably.
+
+For Main Chat:
+
+- Preserve the existing global application shell and a stable Chat working frame; domain changes replace the internal work surface, not the outer page size or global navigation.
+- Put one compact domain selector at the top of Chat with **QBO escalations** and **Investments** as equal controls. Do not render Investments as a secondary integration, a tiny badge, or a card below a dominant QBO workflow.
+- When there is no saved domain preference, open on a neutral choice state that asks what the user wants to work on. After an explicit choice, remember the last selected domain locally and restore it on reload; never infer the domain from message text alone.
+- Keep the accepted QBO escalation pipeline intact behind the QBO selection, including unsaved-work protection, recovery, stage evidence, and Stop behavior.
+- Use an Investments context surface—not the QBO parser/INV/triage pipeline—behind the Investments selection. Stage 3C supplies summary, freshness, synchronization, and deep-work navigation. Stage 6 adds investment-agent conversation only after consent and read-only tools exist.
+- Keep the domain selector and composer position stable while messages, status, disclosures, and evidence change. Scroll internal content rather than allowing the entire application shell to jump.
+- On mobile, the two domain controls remain equal, single-line, keyboard/touch accessible, and visible without horizontal page overflow.
 
 ### Initially visible
 
@@ -227,6 +255,21 @@ When synchronized:
 - healthy browser real-time transport stays visually quiet; reconnecting, stale, reconciliation, or polling-fallback status appears only when it changes what the user can trust or when work is active.
 - order/execution notification status appears near Orders only after Stage 4B, and Level 1 quote status appears near quote/monitoring controls only after Stage 7B. Neither creates another top-level navigation surface.
 
+On Main Chat when Investments is selected before Stage 6:
+
+- show masked account identity, last successful snapshot time, freshness/realtime state, and one compact summary row drawn from the same saved snapshot as the Investments workspace;
+- give **Sync portfolio** and **Open Investments** clear action priority without duplicating positions, activity, order, or risk tables;
+- preserve the last successful summary if synchronization fails and state that the attempted refresh failed;
+- show disconnected and never-synchronized states with the same truthful meanings as the Investments workspace;
+- do not show a fake chat composer or a disabled investment-agent card before Stage 6. A short, quiet statement may say that investment analysis will become available after its privacy-and-tools gate, but it must not dominate the task.
+
+On Main Chat after Stage 6:
+
+- show the active investment snapshot and provider/privacy scope immediately above the investment composer;
+- make it clear whether the answer uses portfolio facts, deterministic calculations, public research, or a combination;
+- offer **Open in Investments** for any response that benefits from the detailed workspace;
+- keep QBO workflow state out of the Investments surface and portfolio state out of the QBO surface.
+
 ### Progressive disclosure
 
 - Connection setup reveals the refresh-token field only after the user chooses personal-app connection.
@@ -235,10 +278,54 @@ When synchronized:
 - Agent provider/privacy consent appears only when the user first enables an investment agent or changes its provider.
 - The Level 1 IQ Platform interference warning appears immediately before each session Start, not as a permanent large card. Stream diagnostics remain behind a health disclosure unless action is required.
 - Destructive actions such as forgetting credentials or deleting history use a stable confirmation dialog and explicit consequences.
+- Main Chat reveals only the selected domain. It must not create a two-dashboard overview, a grid of duplicate metrics, or simultaneous QBO and Investments work surfaces.
 
 ### Required interaction states
 
 Every relevant control must have deliberate default, hover, focus-visible, active, selected, disabled, loading, success, warning, and error behavior. All nonessential motion must respect `prefers-reduced-motion`.
+
+### Development startup representation
+
+The screenshots supplied on 2026-08-14 are the visual contract: startup remains concise, color-coded, and divided into **Preflight**, **Starting services**, an early **Core app ready**, **Finishing background checks**, **Background activity**, and one final elapsed-time summary. Investments extends that contract as follows:
+
+1. Replace the QBO-only banner with the product-owner-approved platform name. Until that decision is made, plan and fixture assertions use `Operational Intelligence Platform — development` as provisional copy.
+2. Add one aligned `INVEST` source tag to `scripts/dev-launcher.js`; do not intermingle raw Questrade SDK/socket output with normal `API`, `LIVE`, `JOBS`, `DATA`, or `WORK` lines.
+3. Report only locally knowable state during normal startup. Allowed examples are:
+   - `Questrade not configured — optional`;
+   - `Questrade connection stored — live broker check deferred`;
+   - `Questrade credentials locked — reauthorization required`;
+   - `Portfolio snapshots ready — saved data available`;
+   - `Order notifications off`, `live`, `recovering`, or `circuit open` after Stage 4B;
+   - `Scheduled investment monitoring off`, `ready`, or `failed` after Stage 7A;
+   - `Level 1 quotes off — session-scoped` after Stage 7B.
+4. Never print a token, authorization header, full or masked account number, balance, position, symbol, quote, snapshot ID, Questrade API host, stream port/URL, raw provider payload, or private alert content in normal startup output.
+5. Normal `npm run dev`, `npm run dev:preview`, and `npm run dev:check` do not call Questrade, consume API allowance, keep a broker session alive, or start Level 1 streaming. A live broker/secure-stream contract probe remains an explicit user-owned stage test or opt-in deep check with clear cost/side-effect wording.
+6. Investments is optional for core app readiness. A missing Questrade configuration is informational; a configured but locked/degraded connection needs attention; an enabled background supervisor that cannot recover is degraded. None may delay the early `Core app ready` line unless an implementation defect compromises the shared server itself.
+7. The final summary continues to distinguish `core`, `operational`, `not configured`, `needs attention`, and `optional`. It must not count an intentionally disabled Investments capability as healthy or failed.
+8. Any stage that adds or changes an Investments service, scheduler, socket supervisor, shutdown responsibility, or readiness state must update the real service inventory, launcher, focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` together.
+9. After startup, print only meaningful Investments lifecycle transitions—enabled, reconciling, live, recovering, circuit-open, stopped, scheduler run outcome—not every socket frame, quote tick, order update, synchronization field, or polling attempt. Detailed safe evidence belongs in the app's observability surfaces.
+10. `--verbose` may add sanitized request IDs, durations, failure codes, generation changes, and retry times, but redaction rules do not weaken in verbose mode. Raw Questrade payloads, destinations, account data, and financial values remain forbidden.
+
+Illustrative privacy-safe output after all optional stages exist:
+
+```text
+🚀 Operational Intelligence Platform — development
+
+⚙️ Starting services
+INVEST ✅ Questrade connection stored — live broker check deferred
+INVEST ✅ Portfolio snapshots ready — saved data available
+
+✨ Core app ready in ...
+
+🔄 Background activity
+INVEST ℹ️ Order notifications off
+INVEST ✅ Scheduled investment monitoring ready
+INVEST ℹ️ Level 1 quotes off — session-scoped
+
+✨ Ready in ... — core ... · operational ... · optional ...
+```
+
+This is a semantics example, not a promise that every line appears in every stage. Each capability is added to startup only when its implementing stage lands and must describe the actual saved/runtime state.
 
 ## 7. Target architecture
 
@@ -251,19 +338,51 @@ flowchart LR
     QS --> C
     C --> N[Validated normalized records]
     N --> P[Investments workspace]
+    N --> H[Main Chat Investments context]
     N --> E[Safe investment realtime events]
     E -. small change signal only .-> P
+    E -. refetch signal only .-> H
     N --> R[Deterministic risk engine]
     R --> P
+    R --> H
     N --> T[Read-only investment tools]
     R --> T
     T --> A[Investment specialist agents]
     A --> P
+    A --> H
     P --> D[Human decision]
+    H --> D
     D -. actual order stays outside app .-> QT
 ```
 
 There is intentionally no app-to-Questrade order path.
+
+Main Chat and the dedicated Investments workspace read the same normalized records and safe event channel. Main Chat is not a second portfolio store, does not perform client-side financial calculations, and does not carry QBO escalation evidence into an investment conversation. The dedicated workspace remains the authoritative deep-work presentation; Chat is the cross-domain entry and conversation surface.
+
+### Main Chat domain-context sequence
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Chat as Main Chat shell
+    participant API as Local API
+    participant Agents as Investment agents
+
+    User->>Chat: Select Investments
+    Chat->>API: GET safe connection and latest saved summary
+    API-->>Chat: Masked identity, freshness, snapshot reference, summary
+    User->>Chat: Sync or open Investments
+    Chat->>API: Start sync or navigate to deep workspace
+    API-->>Chat: Small realtime change signal
+    Chat->>API: Refetch authoritative saved state
+    User->>Chat: Ask investment question (Stage 6+ only)
+    Chat->>API: Explicit investments domain, snapshot, consent scope, question
+    API->>Agents: Bounded read-only tools and approved fields
+    Agents-->>API: Evidence-bound response
+    API-->>Chat: Response with snapshot and calculation references
+```
+
+Switching the selector to QBO changes the active domain before any new send. The server rejects a run whose conversation domain, tool family, or evidence references disagree, rather than trusting the browser to keep them separate.
 
 ### Connection sequence
 
@@ -407,6 +526,7 @@ Every investment `data` payload uses the same four-field envelope: `accountKey`,
 - Sanitization tests must search serialized API responses, logs, sync evidence, and agent evidence for fixture secrets.
 - Questrade HTTP payloads are not model-provider packages and must not enter the provider payload store.
 - Questrade stream payloads follow the same rule. Persist only normalized order/execution records, bounded stream-health evidence, and separately approved quote observations; never archive raw frames.
+- Friendly startup reads only allowlisted local status fields. It never decrypts credentials for display, prints account/snapshot/financial/order/quote/alert/destination data, or invokes Questrade transport in normal start, preview, or check mode.
 
 #### Socket authority, recovery, and lifecycle
 
@@ -429,6 +549,8 @@ Every investment `data` payload uses the same four-field envelope: `accountKey`,
 - Investment data sharing with AI providers is disabled by default.
 - Enabling it names the provider, model, fields shared, storage policy, and whether the provider is local or remote.
 - Agent context excludes credentials, full account number, usernames, Questrade user IDs, order IDs unless specifically needed, and unrestricted activity descriptions.
+- Main Chat domain selection is not consent. Investment context can enter a provider request only in an immutable investment conversation whose server-validated snapshot, tool authority, provider/model, field scope, and Stage 6 consent all agree.
+- QBO conversations and runs receive no investment context merely because the user viewed Investments earlier in the same browser session.
 - Live financial data must never use diagnostic/evaluation rich capture. Evaluations use synthetic fixtures only.
 - Normal calls use manifest capture. The validated agent response may be retained as product evidence, but raw model request bodies and unrestricted response bodies remain omitted.
 
@@ -458,6 +580,8 @@ Every investment `data` payload uses the same four-field envelope: `accountKey`,
 | Quote stream stops updating | Quote becomes stale/unknown; it cannot support a new assessment or alert until verified | Inactivity, closed-market, and reconnect tests |
 | Streamed quote alone triggers a risk alert | Quote only creates a candidate; complete snapshot and deterministic assessment are required | Candidate debounce and evidence-reference tests |
 | Agent invents portfolio facts | Output validator requires snapshot references and separates facts from assumptions | Agent harness tests |
+| Main Chat leaks portfolio context into QBO work or QBO case evidence into Investments | Immutable conversation domain plus server-owned route, agent, tool, consent, and evidence-reference validation | Cross-domain route/message/run/tool tests and paired rendered conversations |
+| Startup output exposes financial/provider detail or performs a hidden broker probe | Allowlisted local-state projection only; forbidden-field scan; no Questrade transport in normal launcher/check paths | Launcher unit/integration tests with transport spies and secret/value canaries |
 | Trade path accidentally appears | Source inventory rejects write methods and forbidden tool names | Static contract test |
 | Development fixture enabled in production | App refuses startup or omits the fixture routes | Environment gate test |
 
@@ -667,6 +791,22 @@ Key fields:
 - status: open, acknowledged, resolved
 - dedupe key and resolution evidence
 
+### Main Chat domain contract (Stages 3C and 6)
+
+Purpose: make one visual Chat shell safe for multiple kinds of work without turning a domain selector into an evidence-mixing switch.
+
+Rules:
+
+- Extend the existing `Conversation` contract with an allowlisted `domain`: initially `qbo-escalations` or `investments`. Existing conversations are migrated or interpreted as `qbo-escalations` because the current production Chat workflow is QBO-specific.
+- A conversation's domain becomes immutable when its first domain-specific message or evidence reference is saved. Switching the visible Main Chat selector loads or creates the last conversation for the other domain; it never relabels the current conversation.
+- `#/chat?domain=investments` may open the Investments choice safely. `#/chat/:conversationId` derives its domain from the saved conversation; a query parameter cannot override it.
+- Before Stage 6, the Investments Chat context may read only the same safe connection/summary endpoints used by the workspace and may start a manual synchronization. It does not create AI messages or provider requests.
+- At Stage 6, an investment conversation stores safe internal references to the selected `accountKey`, snapshot ID/hash, optional assessment ID/version, and approved consent scope. It does not embed a full portfolio snapshot into the general conversation record.
+- Extend durable `AgentRun` evidence with an explicit domain and bounded investment references. The server verifies that conversation domain, surface/use case, agent identity, tool family, account, snapshot, and consent agree before executing.
+- QBO escalation runs cannot call `investments.*` tools. Investment runs cannot call QBO parser, triage, escalation, or knowledge-publication tools. A mismatch is a rejected request with durable safe evidence, not a prompt-level warning.
+- Session/history UI labels each conversation's domain and does not combine QBO and investment summaries into one row. Deleting investment-agent data never deletes QBO conversations; deletion reports any retained neutral conversation text separately and requires explicit scope.
+- Main Chat realtime events remain notifications. They may select no domain, create no message, and attach no financial value to a conversation.
+
 ## 10. Server boundaries and API contracts
 
 ### Planned server modules
@@ -693,10 +833,22 @@ Key fields:
 - `server/src/services/investment-history-service.js`
 - `server/src/services/investment-risk-engine.js`
 - `server/src/services/investment-realtime-events.js` and `server/src/services/realtime-channels/investment-account.js`
+- `server/src/services/chat-domain-policy.js` in Stage 3C for immutable conversation-domain and route/use-case validation
 - `server/src/routes/questrade.js`
 - `server/src/routes/investments.js`
+- existing `server/src/models/Conversation.js`, `server/src/models/AgentRun.js`, and Chat/agent execution routes extended only with the reviewed domain and bounded evidence-reference fields in Stages 3C/6
 
 Use CommonJS throughout the server.
+
+### Planned client and developer-experience modules
+
+- `client/src/components/investments/InvestmentsWorkspace.jsx` and domain-specific child views/styles/tests beginning in Stage 3B
+- `client/src/components/platform-chat/PlatformChatShell.jsx`, `InvestmentChatContext.jsx`, domain selector, styles, and tests in Stage 3C
+- existing `client/src/components/chat-v5/ChatV5Container.jsx` retained as the QBO domain work surface rather than rewritten as generic Chat
+- `client/src/lib/appRoute.js`, `client/src/App.jsx`, and `client/src/components/Sidebar.jsx` extended for Investments route, Chat domain deep link, and product-neutral shell identity
+- existing Sessions/history components extended with explicit domain labels and filters, without displaying portfolio values in general list rows
+- Stage 6 investment composer/evidence strip components colocated under `platform-chat/` or a reviewed shared Investments-agent package, while the detailed Investments agent panel remains domain-specific
+- `scripts/dev-launcher.js`, `scripts/dev-launcher.test.js`, and `docs/development-startup.md` updated at the exact stages named in Section 6's startup contract
 
 ### Connection endpoints
 
@@ -774,6 +926,8 @@ Token redemption and revocation are the only Questrade-hosted POST operations pe
 - `QUESTRADE_STREAM_STALE`
 - `QUESTRADE_STREAM_CIRCUIT_OPEN`
 - `QUESTRADE_STREAM_TLS_REQUIRED`
+- `INVESTMENT_CHAT_DOMAIN_MISMATCH`
+- `INVESTMENT_AGENTS_NOT_ENABLED`
 - `INVESTMENT_AI_CONSENT_REQUIRED`
 
 All failures use the project's `{ ok: false, code, error }` response shape. Messages explain what happened, what was preserved, and what the user should do next.
@@ -908,6 +1062,7 @@ Add the following capabilities to `testing/app-capabilities.json` as their stage
 
 - `questrade-connection-safety`
 - `investment-portfolio-snapshot`
+- `main-chat-domain-selection`
 - `investment-history`
 - `investment-realtime-notifications`
 - `investment-margin-risk`
@@ -925,6 +1080,8 @@ Expected final groups:
 
 - focused Questrade server tests;
 - focused Investments client tests;
+- Main Chat domain-selection/isolation tests plus existing QBO Chat regression suites;
+- focused friendly-launcher tests proving local-only, privacy-safe Investments status and clean optional shutdown semantics;
 - connected-services harness contracts;
 - deterministic browser-channel and upstream-stream supervisor suites using fake WebSocket servers, fake clocks, and no live Questrade traffic;
 - deterministic Investments service/snapshot stress slice that does not depend on a real browser;
@@ -953,6 +1110,9 @@ Expected final groups:
 - rate-limit and timeout mapping;
 - disconnect and revocation-pending behavior;
 - API serializers never expose secrets or raw account numbers;
+- immutable Chat conversation domain, route/use-case/tool/evidence matching, and pre-Stage-6 investment-message rejection;
+- QBO and Investments durable runs cannot cross-read the other domain's tools or evidence;
+- normal launcher paths never invoke Questrade transport and never serialize investment-private fields;
 - forbidden trade path inventory;
 - fixture mode cannot activate in production.
 
@@ -970,6 +1130,9 @@ Expected final groups:
 - deterministic risk formula disclosures;
 - stale and non-real-time warnings;
 - agent consent and snapshot-reference display;
+- neutral first-visit Main Chat, equal domain selector, remembered safe preference, deep-link behavior, and explicit Sessions domain labels;
+- QBO Chat resume/unsaved/active-run regression plus Investments summary/sync/workspace-link behavior;
+- domain switching, transcript isolation, evidence strip, consent renewal, explicit Stop, and exact investment deep links in Stage 6;
 - keyboard, focus-visible, accessible names, and reduced-motion behavior.
 
 ### Rendered acceptance and automated browser evidence
@@ -1027,6 +1190,7 @@ This table is updated immediately when a gate changes state so the plan never ap
 | 2 | Live connection, token refresh, repair, and revoke | `not-started` | Live connect/reload/reauthorize/revoke/reconnect script |
 | 3A | Snapshot engine and visible reconciliation workbench | `not-started` | Fixture/partial-failure reconciliation, live comparison, and local-data deletion in the dev app |
 | 3B | Investments workspace | `not-started` | Accepted desktop/mobile portfolio workspace using the Stage 3A snapshot contract |
+| 3C | Cross-domain Main Chat and platform identity | `not-started` | Equal QBO/Investments entry, summary/sync/deep-link behavior, domain isolation, QBO regression, and desktop/mobile acceptance |
 | 4A | Activities, orders, executions, and REST history import | `not-started` | Duplicate/resume fixtures plus live activity comparison |
 | 4B | Optional Questrade order/execution notifications | `not-started` | Drop/gap/reconnect/token fixtures plus secure live handshake and REST reconciliation |
 | 5 | Deterministic margin and risk calculations | `not-started` | Hand-calculated fixtures plus selected live arithmetic |
@@ -1095,12 +1259,14 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 14. Confirm Level 1 streaming is session-scoped, never auto-starts, stores no unrestricted tick history, and will show Questrade's warning that it can freeze market data in another IQ Platform used simultaneously.
 15. Confirm the app will disable live streaming rather than send a token through a plaintext or otherwise unverified WebSocket endpoint.
 16. Recheck current Questrade API and market-data pricing/entitlement before Stage 7B. Record whether the user's existing access produces real-time or delayed Level 1 data; any paid subscription change requires a separate user decision outside this app.
+17. Approve a product-neutral application and development-launcher name before Stage 1 implementation. `Operational Intelligence Platform` is provisional plan copy only; QBO remains the first domain label, not the whole-product brand.
 
 ### Gate 0 acceptance criteria
 
 - Personal application access is available.
 - The user accepts read-only scope, local retention, and no trading.
 - The user accepts the optional streaming defaults, REST-as-authority rule, and Level 1 IQ Platform warning boundary.
+- The user approves product-neutral banner/shell wording or explicitly accepts the provisional wording for the implementation gates.
 - Any required license agreement is reviewed by the user.
 - No live token is copied into a planning document, issue, commit, or chat.
 
@@ -1124,6 +1290,8 @@ The dev app can show and safely exercise all Questrade connection states using s
 10. Add secret-leak canaries and a forbidden-production-fixture test.
 11. Add `questrade-connection-safety` to the testing capability map.
 12. Introduce `verify:investments` with Stage 1 deterministic checks plus a separately reported automated-browser attempt.
+13. Add the `INVEST` launcher source tag, the approved product-neutral development banner, and a local-only Investments readiness summary. At this stage the truthful states are `not configured — optional`, `fixture mode available — live provider disabled`, or a safe local configuration error; the launcher must not contact Questrade.
+14. Update focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` together. Preserve early core readiness, late checks, final core/operational/optional totals, color/no-color/quiet behavior, and one-stop shutdown wording.
 
 ### Automated verification
 
@@ -1138,6 +1306,8 @@ The dev app can show and safely exercise all Questrade connection states using s
 - testing-map validation passes;
 - client build passes;
 - `npm run verify:investments` reaches a truthful deterministic verdict and reports the automated-browser lane separately;
+- focused launcher tests prove the new banner/tag/status wording, optional classification, no-Questrade-call behavior, secret/value redaction, and existing output modes;
+- `npm run dev:preview` shows the same privacy-safe Investments grammar without starting a service;
 - `npm run verify:core` passes before Gate 1 is offered to the user.
 
 ### User dev-app acceptance script — Gate 1
@@ -1162,6 +1332,10 @@ Prerequisite: the user enables the documented development fixture flags and rest
    - Expected: no horizontal overflow, clipped controls, hover dependency, or missing focus indicator.
 9. Open browser console and Network response previews.
    - Expected: no console errors, token canary, raw account number, or authorization header.
+10. Stop only the user-owned development stack using its normal `Ctrl+C` flow, then run `npm run dev:preview`.
+    - Expected: the banner is product-neutral; an aligned `INVEST` line describes Questrade as optional/fixture-only; core and optional totals remain distinct; no server starts and no live Questrade request occurs.
+11. Start the stack with the normal user-owned `npm run dev` command and capture the early-ready and background-check sections in the terminal.
+    - Expected: output follows the supplied screenshot grammar, the core app becomes ready without waiting on Investments, no balance/account/symbol/provider destination is printed, and `Ctrl+C` still stops only launcher-owned API and web processes cleanly.
 
 ### Gate 1 blocks Stage 2 until
 
@@ -1170,6 +1344,7 @@ Prerequisite: the user enables the documented development fixture flags and rest
 - the automated browser attempt has either passed or has one freshly reproduced inherited transport gap covered by the completed manual rendered script;
 - Google Connected Accounts behavior is proven unchanged;
 - fixture mode is proven unavailable in production.
+- the user accepts the product-neutral startup banner and privacy-safe Investments status in both preview and real user-owned startup output.
 
 ## 17. Stage 2 — Live personal-app connection, refresh, repair, and revoke
 
@@ -1193,6 +1368,7 @@ The user can connect the real Questrade personal application, verify the Margin 
 12. Add secret-safe connection audit summaries.
 13. Document `QUESTRADE_TOKEN_ENCRYPTION_KEY` in `server/.env.example` without a real value and state that it is required only when establishing or using Questrade.
 14. Document the single-use refresh-token crash window in the Stage 2 user handoff, with exact manual reauthorization steps.
+15. Extend the local startup summary to distinguish `not configured`, `connection stored — live broker check deferred`, `locked`, and `reauthorization required` from local database state only. Normal startup and `dev:check` still make no Questrade call, refresh no token, and claim no live broker health.
 
 ### Automated verification
 
@@ -1207,6 +1383,7 @@ The user can connect the real Questrade personal application, verify the Margin 
 - disconnect truthfully distinguishes confirmed, already revoked, and unconfirmed revocation;
 - no account number appears in URLs or API responses;
 - fixture and live adapters cannot be active simultaneously.
+- launcher tests prove that stored/locked/repair states are classified truthfully without decrypting or printing secrets and without a network call to Questrade.
 
 ### User dev-app acceptance script — Gate 2
 
@@ -1233,6 +1410,8 @@ The user performs all live Questrade actions. The implementation agent never ask
 12. Inspect browser console and Network responses throughout.
     - Expected: no token, raw account number, or raw Questrade payload appears in responses or console output.
 13. Repeat the repair and warning states at mobile width.
+14. During the user-owned restart in step 6, inspect the `INVEST` startup line.
+    - Expected: it says the connection is stored and that a live broker check was deferred; it does not print account identity, financial values, host/port, token state detail, or claim that Questrade answered during startup.
 
 ### Gate 2 blocks Stage 3A until
 
@@ -1240,6 +1419,7 @@ The user performs all live Questrade actions. The implementation agent never ask
 - persistence, reauthorization, and one live revoke/reconnect pass;
 - live access is proven read-only;
 - secret-safe deterministic checks pass and the user accepts the manual rendered browser checks; automated browser status remains separately reported.
+- the user accepts the truthful local-only startup wording for a real saved connection.
 
 ## 18A. Stage 3A — Complete snapshot engine and visible reconciliation workbench
 
@@ -1265,6 +1445,7 @@ The user can trigger and inspect a complete simulated or live portfolio synchron
 14. Add a development-only **Questrade snapshot reconciliation** panel under Settings > Developer Tools. It exposes normalized field labels, counts, currency, observed/fetched time, real-time state, snapshot ID/hash, sync steps, browser real-time health, and safe failure status—never raw payloads or account numbers.
 15. Add the first bounded local-investment-data deletion service and a user-facing **Delete local investment data** action under Questrade data/privacy settings. At this stage it deletes only account metadata, sync runs, and snapshots; credentials remain a separate forget/disconnect decision.
 16. Add `investment-portfolio-snapshot` capability evidence for the Stage 3A source, real-time channel, and workbench paths.
+17. Extend local startup state to say only whether saved portfolio snapshots are available. Do not print their ID, time, account identity, balances, position count, symbols, freshness, or values, and do not synchronize at startup.
 
 ### Automated verification
 
@@ -1284,6 +1465,7 @@ The user can trigger and inspect a complete simulated or live portfolio synchron
 - deletion requires an exact action intent and confirmation, deletes only Stage 3A investment records, reports deleted/remaining counts, and leaves non-investment data and Questrade credentials untouched;
 - the deterministic service/snapshot stress slice passes without requiring browser transport;
 - client build and the deterministic `verify:investments` lane pass.
+- launcher tests prove snapshot availability is derived locally, adds no sync/Questrade call, and does not expose snapshot/account/financial detail.
 
 ### User dev-app acceptance script — Gate 3A
 
@@ -1318,6 +1500,8 @@ The user can trigger and inspect a complete simulated or live portfolio synchron
 13. Synchronize the fixture again.
    - Expected: because explicit deletion removed the prior local account record and all of its history, the app creates one new internal account identity and one complete snapshot with no stale cross-references. Reauthorization or key rotation without deletion must still preserve identity.
 14. Repeat the reconciliation and deletion surfaces at desktop/mobile widths; check keyboard access, focus, overflow, console, WebSocket frames, and Network previews.
+15. Run `npm run dev:preview`, then inspect the next user-owned normal startup after one fixture/live snapshot exists.
+    - Expected: the `INVEST` lane says saved portfolio data is available without printing when, which account, which holdings, or how much; startup does not create a sync run or alter the latest snapshot.
 
 ### Gate 3A blocks Stage 3B until
 
@@ -1380,13 +1564,109 @@ The user can review the accepted Stage 3A snapshot contract in a polished, respo
     - Expected: the tab shows a concise reconnect/stale state, then resynchronizes or uses bounded polling; it never silently presents the old snapshot as current.
 12. Repeat desktop/mobile, keyboard, overflow, console, WebSocket-frame, and Network secret checks.
 
-### Gate 3B blocks Stage 4A until
+### Gate 3B blocks Stage 3C until
 
 - displayed fixture and live values match the accepted Stage 3A contract;
 - partial refresh demonstrably preserves prior evidence in the production workspace;
 - multi-tab updates and browser-socket recovery converge on the latest durable snapshot;
 - all Stage 3B deterministic checks pass;
 - the user accepts the rendered desktop and mobile workspace.
+
+## 18C. Stage 3C — Cross-domain Main Chat and platform identity
+
+### User-visible outcome
+
+The main Chat page becomes a product-level starting point where QBO escalations and Investments have equal prominence. The user can select Investments, see the latest trustworthy portfolio context, synchronize it, and open the full Investments workspace without entering an AI conversation or mixing it with QBO evidence.
+
+### Stable interaction design
+
+- **Primary task:** choose the kind of work, confirm the active evidence context, and continue without losing work from the other domain.
+- **Stable frame:** the global header/sidebar and Chat frame remain in place. A compact two-option domain selector stays at the top; only the selected domain's internal surface changes.
+- **Initially visible:** on a first visit with no saved choice, show two equal choices—**QBO escalations** and **Investments**—plus no dashboard grid, fake metrics, large hero, or preselected QBO workflow.
+- **After QBO selection:** reveal the existing QBO escalation pipeline and evidence dock unchanged in function.
+- **After Investments selection:** reveal the compact saved-account/snapshot summary, `Sync portfolio`, and `Open Investments`; do not render the QBO parser, prior-INV search, triage stages, or a fake/disabled AI composer.
+- **Motion and feedback:** use one 160–220ms content transition, preserve focus deliberately, and remove nonessential motion under reduced-motion preferences. Domain controls have equal height plus hover, focus-visible, active, selected, loading, and disabled treatment where applicable.
+- **Unsafe switch protection:** if QBO has unsaved analyst/triage work or a user action needs confirmation, domain switching uses the existing unsaved-navigation guard. An active server-owned run may continue, but the shell must say so and restore its durable state when QBO is reopened.
+
+### Implementation
+
+1. Add a platform-level Main Chat shell around the existing QBO-specific `ChatV5Container`; do not rename QBO stage internals into generic terms or rewrite the accepted pipeline.
+2. Add the two-option accessible domain selector and the neutral first-visit state described in Section 6.
+3. Extend hash parsing with the allowlisted `#/chat?domain=investments` deep link. Saved `#/chat/:conversationId` routes derive domain from the server and reject a conflicting query override.
+4. Add the immutable conversation-domain contract. Backfill or safely interpret existing conversations as `qbo-escalations`, and label domain in Sessions/history so old QBO work remains recognizable.
+5. Store only the last selected domain as a local UI preference. Do not store financial values or use browser storage as the authoritative account/snapshot source.
+6. Add an Investments Chat-context component that consumes the same safe connection/latest-snapshot API and decimal strings as `#/investments`; it performs no client-side money calculation and creates no duplicate portfolio cache.
+7. Subscribe the selected Investments context to the existing `investment-account` channel. Every event causes an authoritative refetch; reconnect/replay-gap/polling behavior matches the accepted Stage 3A/3B contract.
+8. Add `Sync portfolio` with durable run recovery and `Open Investments` preserving the selected safe `accountKey` through route state, never through an external account number.
+9. Preserve the last successful summary and visibly label an incomplete synchronization attempt. Disconnected, never-synced, empty, delayed/non-real-time, syncing, stale, locked, reauthorization-required, and failed states share meanings with the full workspace.
+10. Add server-side domain checks to all existing QBO Chat message/orchestration entry points. Before Stage 6, investment-domain message submission returns a deliberate `INVESTMENT_AGENTS_NOT_ENABLED` response rather than falling through to the QBO or generic agent.
+11. Replace whole-product QBO-only labels in the sidebar brand, product boot surface, and startup banner with the Gate 0 approved platform name. Retain `QBO escalations` wherever it identifies the actual QBO domain or specialist team.
+12. Update `DESIGN.md` and `DESIGN.HTML` after the user accepts the rendered direction, recording the durable rule that first-class domains receive equal entry treatment while deep work remains in domain workspaces.
+13. Add `main-chat-domain-selection` capability evidence with route, shell, domain-contract, QBO regression, Investments summary, realtime recovery, rendered desktop/mobile, and console evidence.
+
+### Automated verification
+
+- a first visit renders a neutral domain choice and does not instantiate or auto-start an investment agent/provider request;
+- the two controls use correct radio/segmented-control semantics, equal geometry, keyboard behavior, focus restoration, and reduced-motion behavior;
+- selecting QBO renders the existing four-stage QBO workflow, preserves current saved-conversation resume behavior, and passes the existing `ChatV5Container` suite;
+- selecting Investments renders no QBO parser, INV-search, triage, escalation banner, or QBO-specific assistant identity;
+- disconnected, never-synced, synchronized, stale, incomplete-refresh, locked, reauthorization, empty, and delayed Investments states match the dedicated workspace contract;
+- Main Chat and `#/investments` serialize the same fixture snapshot values and snapshot reference without copying or recalculating money in the client;
+- synchronizing in Chat, the workspace, or a second tab converges every surface on the same durable snapshot after normal events, reconnect, replay gap, and socket-disabled polling fallback;
+- the last selected domain survives reload, but no financial value is stored in browser persistence;
+- domain switching with unsaved QBO work invokes the existing guard, while a running durable workflow can be restored without duplication;
+- old conversations resolve to `qbo-escalations`; `#/chat/:id` cannot be relabelled by `?domain=investments`;
+- investment-domain message attempts are rejected before provider invocation in Stage 3C, and QBO requests receive no account/snapshot context;
+- Sessions/history displays explicit domain labels without combining portfolio and QBO case summaries;
+- sidebar, boot, and launcher product naming is platform-neutral while QBO domain labels remain accurate;
+- desktop/mobile component tests, client build, `verify:investments`, `verify:core`, capability-map validation, focused launcher tests, and automated browser attempt complete with separately reported results.
+
+### User dev-app acceptance script — Gate 3C
+
+1. Clear only the documented Main Chat domain preference and open `#/chat` at desktop width.
+   - Expected: the stable Chat frame asks which domain to work in and gives QBO escalations and Investments equal visual weight; neither looks like an add-on, no portfolio value is visible, and QBO is not silently preselected.
+2. Select **QBO escalations**.
+   - Expected: the existing screenshot-to-parser-to-prior-case-to-triage-to-analyst workflow appears with its accepted QBO identity and no Investments account summary or actions.
+3. Resume a saved QBO conversation and exercise its normal recovery/unsaved-work behavior.
+   - Expected: existing QBO evidence, Stop, resume, and navigation guards still work; the redesign has not flattened or discarded the domain workflow.
+4. Return to the domain selector and select **Investments**.
+   - Expected: QBO stages disappear and the Investments context shows only connection/snapshot freshness, a compact summary when available, `Sync portfolio`, and `Open Investments`; no investment-agent composer appears yet.
+5. While disconnected, use the connection action.
+   - Expected: it opens the exact Questrade Connected Accounts section. Returning to Chat restores Investments as the selected domain without claiming a portfolio exists.
+6. Select `healthy-margin-cad-usd`, synchronize from Main Chat, and compare with `#/investments`.
+   - Expected: both surfaces show the same masked account, exact snapshot reference/freshness, and compact summary values; detailed positions remain in the Investments workspace.
+7. In a second tab open `#/investments`, synchronize there, then return to Main Chat.
+   - Expected: the Chat summary refetches the saved snapshot through the safe event channel and matches the workspace without a page reload.
+8. Force a browser event replay gap and repeat once with WebSocket transport disabled during a Chat-started sync.
+   - Expected: the context says reconnecting/stale or polling as appropriate, then converges on the durable snapshot and stops fallback polling.
+9. Create a successful snapshot, then run `partial-positions-response` from Main Chat.
+   - Expected: the previous summary remains visible and the new attempt is clearly incomplete; no partial values replace accepted evidence.
+10. Attempt to send an investment chat message through the documented Stage 3C development contract probe.
+    - Expected: it is rejected before any AI provider call with a clear not-yet-enabled result; it never routes to the QBO assistant.
+11. Switch back to QBO while unsaved QBO work exists, then while a QBO run is active.
+    - Expected: unsaved-work confirmation is preserved; any durable active run continues only under its QBO identity and restores correctly when selected again.
+12. Reload Main Chat and open `#/chat?domain=investments`.
+    - Expected: reload restores the last explicit choice; the deep link selects Investments; neither operation copies financial values into the URL or browser storage.
+13. Open an existing `#/chat/:conversationId` QBO conversation with a conflicting Investments query parameter.
+    - Expected: the saved QBO domain wins or the route is rejected safely; the conversation is never relabelled and no investment context is attached.
+14. Review Sessions/history.
+    - Expected: QBO conversations are labelled QBO escalations; there is no mixed-domain summary or investment conversation before Stage 6.
+15. Inspect the global sidebar/boot copy and run `npm run dev:preview`.
+    - Expected: whole-product identity is platform-neutral, QBO remains accurately named as a domain, and the `INVEST` startup lane retains the accepted privacy-safe grammar.
+16. Repeat first visit, both selections, sync, deep link, incomplete refresh, navigation guard, and product identity at 390px width and using keyboard only.
+    - Expected: stable outer frame, equal single-line domain controls, visible focus, reachable content, no horizontal overflow/clipping, no hover-only behavior, and reduced-motion support.
+17. Inspect browser console, Network previews, WebSocket frames, and browser storage.
+    - Expected: no console error, secret, full account number, raw Questrade payload, financial WebSocket payload, or persisted portfolio value; QBO requests contain no investment reference.
+
+### Gate 3C blocks Stage 4A until
+
+- the user accepts the product-neutral Main Chat direction and equal domain prominence on desktop and mobile;
+- the QBO workflow passes regression and hands-on resume/unsaved/active-run tests;
+- Main Chat and the dedicated Investments workspace converge on the same accepted saved evidence;
+- domain routes, conversations, server entry points, and browser persistence prove QBO/Investments isolation;
+- investment AI submission is proven absent/rejected before Stage 6;
+- accepted durable design rules are recorded in `DESIGN.md` and `DESIGN.HTML`;
+- all Stage 3C deterministic checks pass and the rendered acceptance is complete.
 
 ## 19A. Stage 4A — Activities, orders, executions, and resumable REST history import
 
@@ -1499,6 +1779,7 @@ The user can explicitly enable live order/execution notifications, see actions t
 - browser reconnect/replay-gap behavior refetches canonical Orders/Executions and never trusts a socket-only value;
 - disabling, deleting, and graceful server shutdown stop reconnect timers, close the socket, and preserve/report the final safe checkpoint;
 - fixture and normal startup output truthfully distinguish disabled, enabled/live, recovering, circuit-open, unsupported, and failed without displaying hosts, ports, accounts, or tokens;
+- repeated frames/retry attempts are coalesced into meaningful lifecycle transitions; verbose mode adds only sanitized request/timing/failure evidence and passes the same financial/secret/destination canary scan;
 - all Stage 4A and earlier checks remain green.
 
 ### User dev-app acceptance script — Gate 4B
@@ -1528,7 +1809,7 @@ The user can explicitly enable live order/execution notifications, see actions t
 12. With the real account and no live trade required, enable the stream long enough to prove a certificate-verified authenticated handshake, REST baseline, and safe Live/quiet state; then disable it.
     - Expected: no token/account number appears in the browser, logs, or evidence. If Questrade cannot provide the required secure endpoint, the feature remains honestly Unsupported and Gate 4B cannot claim live-stream support.
 13. Run `npm run dev:preview`, then use the user-owned app start and Ctrl+C flow.
-    - Expected: optional stream readiness and clean shutdown are accurately reported without controlling unrelated processes.
+    - Expected: preview and startup distinguish `Order notifications off`, `live`, `recovering`, `circuit open`, or `unsupported` from the saved/runtime state; the final total classifies it correctly; no account, order, execution, host/port, or token is printed; shutdown names the optional Investments supervisor and closes only launcher-owned work.
 14. Repeat the enable/recovery/disable surfaces at desktop/mobile widths with keyboard, console, Network, and WebSocket-frame checks.
 
 ### Gate 4B blocks Stage 5 until
@@ -1684,6 +1965,19 @@ Provider/model, field set, account selection, and snapshot changes that material
 
 Stage 6 extends local-data deletion to investment-agent consent records, saved investment-agent outputs, and investment-specific evidence references containing portfolio-derived information. Deletion must not remove unrelated QBO, Workspace, or provider evidence.
 
+### Main Chat investment-agent integration
+
+1. Enable the investment composer in the Stage 3C Investments Chat context only after an accepted snapshot is selected and the Stage 6 provider/privacy consent is valid.
+2. Keep Investments and QBO conversations separate. Selecting another domain changes the active conversation; it never appends messages to or changes the domain of the prior conversation.
+3. Bind each investment user message and durable run to `domain=investments`, the internal account key, exact snapshot ID/hash, optional assessment ID/version, provider/model, approved field set, and consent record/version.
+4. Revalidate the binding on the server immediately before provider invocation and again before saving the response. If the snapshot, consent, agent authority, or domain changes, fail safely or require renewed consent.
+5. Add an always-visible compact evidence strip above the investment composer naming snapshot age, realtime/delayed state, deterministic assessment version when used, provider/model, and local/remote execution. Keep detailed fields behind a disclosure.
+6. Route every investment message through the server-owned Investment Coordinator/use-case contract; specialist fan-out follows explicit capability policy and saved run evidence, not client-selected agent IDs.
+7. Add `Open in Investments` links from answers and evidence references. The link opens the exact snapshot/assessment view without putting account numbers or financial values in the URL.
+8. Preserve explicit Stop, reconnect, resume, failed, stale-input, consent-expired, and partial-output states inside the stable Chat frame. A stopped run cannot continue writing messages after its generation is fenced.
+9. Ensure QBO's Main Chat path continues to use its existing QBO agents/tools and never receives investment summary, consent, snapshot, or portfolio-derived prompt context.
+10. Extend Sessions and provider evidence views with domain, agent, snapshot/assessment references, and safe consent scope so the user can prove which evidence supported an answer without opening raw prompts.
+
 ### Output contract
 
 Every completed response contains:
@@ -1709,6 +2003,13 @@ The output validator rejects or marks incomplete a response that lacks input evi
 - agent output validation catches missing/wrong snapshot references and execution claims;
 - synthetic evaluation cases test hallucination, stale-data handling, currency confusion, and margin-policy overclaiming;
 - agent profile and Investments panel component tests pass.
+- the Main Chat investment composer remains absent until consent and a usable snapshot exist, then names the exact active evidence/provider scope;
+- investment messages cannot be added to QBO conversations, QBO messages cannot be added to investment conversations, and a client-supplied domain/tool/evidence mismatch is rejected before provider invocation;
+- switching domains during queued/running/completed/stopped investment runs preserves separate transcripts, fences late output, and restores durable status without duplication;
+- changing snapshot, provider/model, shared field set, or consent version between send and execution prevents stale authorization from being used;
+- QBO provider requests and durable runs contain no investment account/snapshot/consent reference after investment conversations have been used in the same browser session;
+- `Open in Investments` resolves the exact safe snapshot/assessment and leaks no account/value in the route;
+- Main Chat desktop/mobile/reduced-motion/reconnect/Stop tests pass alongside the dedicated Investments panel tests.
 
 ### User dev-app acceptance script — Gate 6
 
@@ -1735,6 +2036,19 @@ The output validator rejects or marks incomplete a response that lacks input evi
 11. Recreate the fixture snapshot and request analysis again.
     - Expected: fresh investment consent is required because the prior consent was deleted.
 12. Repeat desktop/mobile, keyboard, reconnect, explicit Stop, console, and Network checks.
+13. Return to Main Chat, select Investments, and start a new investment conversation.
+    - Expected: the compact evidence strip identifies the selected snapshot/freshness, assessment when present, provider/model, and reviewed field scope before Send is available.
+14. Ask the same concentration-risk question from Main Chat.
+    - Expected: the answer is evidence-equivalent to the dedicated Investments agent panel, stays in an Investments-labelled conversation, and offers `Open in Investments` for the exact snapshot/assessment.
+15. While an investment response is running, switch to QBO, send or resume a QBO workflow message, then return to Investments.
+    - Expected: the two transcripts and run states remain separate; no portfolio summary appears in QBO, no QBO case context appears in Investments, and the investment run resumes or completes once without duplicate/late messages.
+16. Start another investment response, choose Stop, switch domains, and return.
+    - Expected: Stop remains acknowledged and no old-generation response appears later in either conversation.
+17. Change the selected snapshot or provider/model between preparing and sending a request.
+    - Expected: the evidence/consent strip updates and renewed consent is required when scope changed; the server cannot run against the stale reviewed scope.
+18. Open Sessions and provider evidence for both conversations.
+    - Expected: each is explicitly domain-labelled; the investment run names safe snapshot/assessment/consent references, while the QBO run contains none of them.
+19. Repeat the Main Chat Investments conversation, domain switch, Stop, evidence link, consent renewal, and transcript-isolation checks at 390px and by keyboard.
 
 ### Gate 6 blocks Stage 7A until
 
@@ -1743,6 +2057,7 @@ The output validator rejects or marks incomplete a response that lacks input evi
 - one controlled live analysis is evidence-backed;
 - the user proves investment-agent consent/output/evidence deletion is scoped and requires fresh consent afterward;
 - reconnect/Stop and rendered agent states pass;
+- the user accepts full investment-agent conversation from Main Chat as well as the dedicated Investments workspace, with domain isolation proven in both visible transcripts and server-owned run evidence;
 - no action authority exists.
 
 ## 22A. Stage 7A — Opt-in scheduled monitoring and Attention integration
@@ -1817,9 +2132,9 @@ The app can refresh on a user-approved schedule and open durable Attention items
 9. In fixture mode, re-enable monitoring, create one investment alert, and complete local investment-data deletion.
    - Expected: monitoring is disabled first, the investment policy/alert and its Investments/Attention references are removed, and unrelated Attention items remain.
 10. The user runs `npm run dev:preview`.
-   - Expected: Questrade monitoring status is concise, secret-free, and correctly labelled optional.
+   - Expected: Questrade monitoring status is concise, secret-free, correctly labelled optional, and distinguishes Off, Ready, and Failed without calling Questrade or running a portfolio check.
 11. The user starts their own dev app and later uses Ctrl+C.
-    - Expected: scheduler startup and shutdown reporting is clean and no unrelated process is touched.
+    - Expected: the background-activity section reports the actual local scheduler policy/state, never threshold values or alert content; the early core-ready line is not delayed; shutdown reports clean scheduler stop and touches no unrelated process.
 12. Open Investments/Attention in a second tab and repeat one trigger and recovery.
     - Expected: the second tab receives only the small alert change event, refetches the durable alert, and shows the same open/resolved state without a duplicate.
 13. Repeat Attention and Settings at desktop/mobile widths and inspect console, Network, and WebSocket output.
@@ -1905,7 +2220,7 @@ The user can explicitly start a Level 1 quote-streaming session for symbols in t
 10. Choose Stop and reload the browser.
     - Expected: the cache clears, no reconnect occurs, the stream remains Off, and scheduled monitoring continues according to its separate policy.
 11. Restart the user-owned dev server.
-    - Expected: Level 1 remains Off and startup output describes it as session-scoped rather than silently resuming it.
+    - Expected: Level 1 remains Off and the `INVEST` startup line describes it as session-scoped rather than silently resuming it; no symbols, quotes, entitlement detail, stream host/port, or token appears and no Questrade request is made by startup.
 12. With the live account, close or knowingly accept the effect on any other IQ Platform, review the warning, and start one short session during an appropriate market period.
     - Expected: a certificate-verified authenticated connection shows a real/delayed label and a quote/time that can be compared with Questrade; stopping restores Off. No live order is required.
 13. Inspect console, Network, WebSocket frames, and safe server evidence.
@@ -1940,6 +2255,8 @@ The integration can be recovered, audited, exported, and removed safely, and the
 9. Recheck official documentation and license links.
 10. Complete all capability-map entries and known gaps.
 11. Update `DESIGN.md` and `DESIGN.HTML` only for durable Investments design rules established by accepted rendered behavior.
+12. Perform a final launcher inventory audit so every Investments capability shown in the supplied startup grammar maps to a real local state/service, every enabled background owner has clean shutdown reporting, and no normal startup/development check reaches Questrade.
+13. Complete the Main Chat domain audit: product-neutral identity, equal QBO/Investments entry, immutable domain conversations, server-owned tool isolation, and exact deep links to investment evidence.
 
 ### Automated verification
 
@@ -1953,6 +2270,8 @@ The integration can be recovered, audited, exported, and removed safely, and the
 - stream security/recovery inventory proves server-only Questrade tokens, TLS-only upstream sockets, bounded frames/caches, REST gap recovery, and snapshot-before-alert behavior;
 - `npm run verify:investments`, `npm run verify:core`, client build, dependency audit, and testing-map validation pass;
 - the automated Investments browser slice completes repeatedly, or its freshly reproduced inherited transport gap remains separately documented without replacing the required accepted manual desktop/mobile workflow.
+- final launcher preview/normal/check-mode fixtures cover Questrade absent, stored, locked, snapshot-available, notifications off/live/recovering/circuit-open/unsupported, monitoring off/ready/failed, and Level 1 always off/session-scoped at process start without a provider call or sensitive value;
+- cross-domain regression proves no QBO conversation/run/provider request contains investment references and no investment conversation/run can obtain QBO tools or case evidence.
 
 ### User dev-app acceptance script — Gate 8
 
@@ -1969,19 +2288,23 @@ The integration can be recovered, audited, exported, and removed safely, and the
    - Expected: exact confirmation is required, both streams stop before deletion, their cache/state/timers are removed, no late old-generation frame recreates deleted records, and non-investment app data remains untouched.
 7. Recreate fixture data, disconnect, and confirm that history remains until separately deleted while all streams stay stopped.
 8. Review the complete live workflow on desktop:
+   - choose Investments from Main Chat and verify the saved evidence summary;
    - connect;
    - synchronize;
    - inspect positions;
    - import history;
    - enable/recover/disable order notifications;
    - calculate risk;
-   - run one consented agent analysis;
+   - run one consented agent analysis from Main Chat and open its exact evidence in Investments;
+   - switch to a QBO conversation and prove transcript/evidence isolation;
    - review scheduled monitoring and Attention state;
    - start/inspect/stop a short Level 1 session;
    - export.
 9. Repeat the complete workflow at 390px mobile width.
 10. Check keyboard navigation, focus order, reduced motion, overflow, clipped content, browser console, Network responses, and WebSocket frames.
-11. Review the final known-gaps list and explicitly accept or reject release.
+11. Run `npm run dev:preview`, then inspect one final user-owned normal startup and Ctrl+C shutdown.
+    - Expected: the product-neutral banner and `INVEST` lines match the actual configured/active states; core readiness is not delayed; normal startup makes no Questrade call and prints no account/portfolio/order/quote/alert/destination detail; every enabled Investments background owner stops cleanly.
+12. Review the final known-gaps list and explicitly accept or reject release.
 
 ### Final release decision
 
@@ -1996,6 +2319,8 @@ The integration is releasable only when:
 - every required deterministic automated group completed rather than merely passing the subset that ran;
 - automated browser evidence either passed or remains explicitly `incomplete` only for the reproduced repository-level transport gap;
 - desktop and mobile rendered acceptance passed;
+- Main Chat gives QBO and Investments equal first-class entry, and cross-domain evidence/tool isolation passed visibly and in durable run evidence;
+- startup gives Investments the agreed privacy-safe platform representation without turning startup into a broker health probe;
 - known limitations remain visible and accurate.
 
 ## 24. Stage dependency map
@@ -2013,8 +2338,11 @@ flowchart TD
     G3A -->|accepted| S3B[Stage 3B Investments workspace]
     G3A -->|rejected| S3A
     S3B --> G3B{User Gate 3B}
-    G3B -->|accepted| S4A[Stage 4A REST history]
+    G3B -->|accepted| S3C[Stage 3C cross-domain Main Chat]
     G3B -->|rejected| S3B
+    S3C --> G3C{User Gate 3C}
+    G3C -->|accepted| S4A[Stage 4A REST history]
+    G3C -->|rejected| S3C
     S4A --> G4A{User Gate 4A}
     G4A -->|accepted| S4B[Stage 4B order and execution notifications]
     G4A -->|rejected| S4A
@@ -2048,6 +2376,7 @@ flowchart TD
 - fixture adapter and connected-service harness additions
 - Questrade status route
 - provider-neutral Connected Accounts frame, Questrade provider UI, and Google regression tests
+- product-neutral launcher banner, `INVEST` status lane, local-only optional readiness, focused launcher tests, preview, and startup documentation
 - testing capability/profile updates
 
 ### Stage 2
@@ -2057,6 +2386,7 @@ flowchart TD
 - connect/reauthorize/revoke routes and tests
 - random stable account identity plus encryption/masking
 - environment documentation
+- local-only launcher connection-state projection with no Questrade startup probe
 
 ### Stage 3A
 
@@ -2066,12 +2396,22 @@ flowchart TD
 - durable sync-run status endpoint plus shared `investment-account` channel, replay/resync, and bounded polling fallback
 - visible development reconciliation workbench
 - initial bounded local-investment-data deletion service and UI
+- local snapshot-availability startup projection without values, identity, time, or synchronization
 
 ### Stage 3B
 
 - Investments route, sidebar item, workspace, styles, tests
 - quiet healthy real-time subscription plus visible reconnect/stale/fallback states
 - stress slice first rendered journey
+
+### Stage 3C
+
+- product-level Main Chat shell and equal accessible QBO/Investments selector
+- immutable conversation-domain migration/validation and explicit Sessions labels
+- Investments Chat summary/sync/deep-link component using the accepted snapshot/event contracts
+- QBO workflow regression, unsaved/active-run domain-switch handling, and pre-Stage-6 investment-message rejection
+- platform-neutral sidebar/boot identity plus accepted `DESIGN.md`/`DESIGN.HTML` cross-domain rules
+- route, client/server isolation, rendered-browser, launcher-product-identity, and capability evidence
 
 ### Stage 4A
 
@@ -2101,6 +2441,8 @@ flowchart TD
 - read-only tool handlers and server capability registrations
 - privacy consent records/UI
 - output validation, provider capture constraints, agent harness cases
+- Main Chat investment composer/evidence strip, immutable domain-bound conversations/runs, domain-switch/Stop/resume behavior, and exact `Open in Investments` references
+- server-owned QBO-versus-Investments tool/evidence isolation tests and explicit domain evidence in Sessions/provider records
 - deletion-service extension for investment consent/output/evidence references
 
 ### Stage 7A
@@ -2128,6 +2470,9 @@ flowchart TD
 Implementation stops and asks before any of these changes:
 
 - adding trade placement, impact preview, modification, or cancellation;
+- demoting Investments beneath QBO on Main Chat, hard-coding QBO as the first-visit domain, or removing the dedicated Investments workspace;
+- enabling investment-agent messages in Main Chat before Stage 6's consent, tool-authority, and exact-evidence checks pass;
+- allowing one Chat conversation, agent run, or tool context to cross the QBO/Investments domain boundary;
 - sending portfolio data to an AI provider without the Stage 6 consent flow;
 - enabling monitoring by default;
 - enabling order/execution notifications by default or automatically restarting Level 1 streaming;
@@ -2140,12 +2485,13 @@ Implementation stops and asks before any of these changes:
 - treating an app-calculated threshold as Questrade's margin policy;
 - adding external notifications that reveal portfolio values;
 - purchasing or changing a paid Questrade market-data entitlement;
-- expanding from personal application use to a public/partner integration.
+- expanding from personal application use to a public/partner integration;
+- making normal development startup/check call Questrade, refresh a token, start Level 1, or print investment-private/provider-destination detail.
 
 ## 27. Definition of done
 
 The complete plan is done only when the user can say, from the dev app:
 
-> I connected the intended read-only Questrade Margin account. I can see when the data was retrieved and whether it is real-time. The balances, positions, activity, orders, and executions reconcile with Questrade. Browser and Questrade socket interruptions recover through authoritative REST state instead of hiding gaps. Order/execution notifications are optional, Level 1 streaming is session-scoped and warns about its IQ Platform effect, and no streamed tick becomes a risk conclusion by itself. Failed refreshes preserve the prior snapshot. The risk calculations show their formulas and limitations. Any agent analysis names the exact snapshot, respects my privacy choice, and cannot trade. Monitoring is opt-in, alerts are evidence-backed, exports are secret-safe, and I can revoke or delete local data intentionally.
+> The main Chat page treats QBO escalations and Investments as equally important domains, keeps their conversations and evidence separate, and gives me a concise trustworthy investment context plus a direct path to the full workspace. I connected the intended read-only Questrade Margin account. I can see when the data was retrieved and whether it is real-time. The balances, positions, activity, orders, and executions reconcile with Questrade. Browser and Questrade socket interruptions recover through authoritative REST state instead of hiding gaps. Order/execution notifications are optional, Level 1 streaming is session-scoped and warns about its IQ Platform effect, and no streamed tick becomes a risk conclusion by itself. Failed refreshes preserve the prior snapshot. The risk calculations show their formulas and limitations. Any agent analysis names the exact snapshot, respects my privacy choice, and cannot trade. Monitoring is opt-in, alerts are evidence-backed, exports are secret-safe, and I can revoke or delete local data intentionally. Development startup represents Investments clearly without calling Questrade or printing my account, holdings, balances, orders, quotes, alerts, or connection destination.
 
 Passing tests without that hands-on acceptance is not completion.
