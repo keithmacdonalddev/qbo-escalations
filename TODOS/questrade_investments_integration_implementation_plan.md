@@ -4,7 +4,7 @@
 
 **Created:** 2026-08-14
 
-**Revised:** 2026-08-14 after independent critical review, socket-hardening review, and the product-owner requirement that Investments have first-class Main Chat and development-startup representation; documentation revision only, with no Questrade implementation started
+**Revised:** 2026-08-14 after independent critical review, socket-hardening review, the product-owner requirement that Investments have first-class Main Chat and development-startup representation, and Gate 0 account-readiness confirmation; documentation revision only, with no Questrade implementation started
 
 **Primary decision:** Add Questrade as a separate, read-only Investments domain in the broader operational-intelligence platform. Do not add trade placement, order modification, order cancellation, or autonomous financial action.
 
@@ -101,7 +101,7 @@ These claims must be rechecked immediately before each implementation stage beca
 - No Questrade service, route, model, test fixture, client screen, or agent tool exists.
 - No Investments route exists in `client/src/lib/appRoute.js`, `client/src/App.jsx`, or `client/src/components/Sidebar.jsx`.
 - Main Chat currently defaults directly into the QBO-specific workflow; it has no explicit domain selection, Investments summary, investment-agent entry point, or isolation boundary preventing one domain's evidence from being supplied to another.
-- User-facing product identity is inconsistent with the repo north star: the sidebar says `QBO Assist`, the startup banner says `QBO Operations Platform`, and the boot overlay still names a QBO Escalation Assistant. A product-neutral naming decision is required before the Main Chat/platform-shell gate; this plan uses `Operational Intelligence Platform` only as provisional acceptance copy, not a permanent brand decision.
+- User-facing product identity is inconsistent with the repo north star: the sidebar says `QBO Assist`, the startup banner says `QBO Operations Platform`, and the boot overlay still names a QBO Escalation Assistant. A product-neutral naming decision is required before the Main Chat/platform-shell gate. The product owner explicitly rejected `Operational Intelligence Platform` as the visible product/startup name on 2026-08-14, so it must not appear as provisional user-facing copy.
 - The app has no general login layer protecting all APIs. CORS, which is the browser's cross-origin request control, is not authentication and currently does not validate the incoming `Host` name. Stage 1 must harden the entire local HTTP and WebSocket boundary before adding the first Questrade route. The first Questrade release must remain loopback-only unless a separate authentication project is approved.
 - Stored Gmail tokens are excluded from normal reads but are not an acceptable encryption precedent for brokerage tokens.
 - The current testing capability map has no investments capability or focused Investments verification profile.
@@ -288,7 +288,7 @@ Every relevant control must have deliberate default, hover, focus-visible, activ
 
 The screenshots supplied on 2026-08-14 are the visual contract: startup remains concise, color-coded, and divided into **Preflight**, **Starting services**, an early **Core app ready**, **Finishing background checks**, **Background activity**, and one final elapsed-time summary. Investments extends that contract as follows:
 
-1. Replace the QBO-only banner with the product-owner-approved platform name. Until that decision is made, plan and fixture assertions use `Operational Intelligence Platform — development` as provisional copy.
+1. Replace the QBO-only banner with the product-owner-approved platform name. Until that decision is made, plan and fixture assertions use a non-rendered placeholder such as `<APPROVED_PRODUCT_NAME> — development`; the placeholder is never shown as finished user-facing copy.
 2. Add one aligned `INVEST` source tag to `scripts/dev-launcher.js`; do not intermingle raw Questrade SDK/socket output with normal `API`, `LIVE`, `JOBS`, `DATA`, or `WORK` lines.
 3. Report only locally knowable state during normal startup. Allowed examples are:
    - `Questrade not configured — optional`;
@@ -309,7 +309,7 @@ The screenshots supplied on 2026-08-14 are the visual contract: startup remains 
 Illustrative privacy-safe output after all optional stages exist:
 
 ```text
-🚀 Operational Intelligence Platform — development
+🚀 <approved product name> — development
 
 ⚙️ Starting services
 INVEST ✅ Questrade connection stored — live broker check deferred
@@ -1183,9 +1183,9 @@ Only `user-accepted` unlocks the next stage.
 
 This table is updated immediately when a gate changes state so the plan never appears stuck on an already completed stage.
 
-| Gate | Increment | Initial status | Acceptance evidence |
+| Gate | Increment | Current status | Acceptance evidence |
 | --- | --- | --- | --- |
-| 0 | Account, scope, retention, privacy, and no-trade decisions | `not-started` | User decision record; no live secret captured |
+| 0 | Account, scope, retention, privacy, and no-trade decisions | `implementation-in-progress` | User decision record; no live secret captured |
 | 1 | Development fixtures and Connected Accounts shell | `not-started` | Automated checks plus desktop/mobile dev-app script |
 | 2 | Live connection, token refresh, repair, and revoke | `not-started` | Live connect/reload/reauthorize/revoke/reconnect script |
 | 3A | Snapshot engine and visible reconciliation workbench | `not-started` | Fixture/partial-failure reconciliation, live comparison, and local-data deletion in the dev app |
@@ -1241,10 +1241,20 @@ This is the only gate that is not an implementation increment. It prevents codin
 
 Confirm that the user has the credentials and accepts the storage/privacy boundaries.
 
+### Current Gate 0 evidence — 2026-08-14
+
+- The user confirmed that the Questrade account is a Margin account.
+- The personal application `Keith Stocks` is registered in Questrade's API Centre.
+- The account-data permission for balances, positions, orders, and executions is selected; the delayed/real-time market-data permission is not selected.
+- The personal app has a manual authorization and shows **Generate new token**. No token has been generated, copied into chat, or stored in this repository; generation is deliberately deferred until the Stage 2 live-connection test needs it.
+- No callback URL was added, which is consistent with the planned manual local authorization flow.
+- `Keith Stocks` is the Questrade personal-app label only. It does not establish the website, platform-shell, or development-startup name.
+- The product owner explicitly rejected `Operational Intelligence Platform` as the visible product/startup name. A replacement name, the remaining safety-default decisions, and any required license acceptance are still open, so Gate 0 remains `implementation-in-progress`.
+
 ### Work
 
 1. Recheck official Questrade authorization, security, scopes, streaming, activity window, rate limits, and license links. Confirm that `GET symbols/:id` remains under `read_acc`; treat Activities—not symbol lookup—as the current scope ambiguity.
-2. Confirm the user can see **API Centre > Personal applications** and generate a personal-app refresh token.
+2. Confirm the user can see **API Centre > Personal applications**, the registered personal app, its manual authorization, and the **Generate new token** control. Do not generate the live token until the Stage 2 connection test is ready to receive it directly in the local app.
 3. Confirm the account type displayed by Questrade is Margin.
 4. Confirm recommended scope choice: `read_acc`; `read_md` remains optional and deferred until needed.
 5. Confirm with Questrade documentation/support or a bounded live probe whether `read_acc` permits the Activities endpoint; do not infer this from the endpoint's existence.
@@ -1259,14 +1269,14 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 14. Confirm Level 1 streaming is session-scoped, never auto-starts, stores no unrestricted tick history, and will show Questrade's warning that it can freeze market data in another IQ Platform used simultaneously.
 15. Confirm the app will disable live streaming rather than send a token through a plaintext or otherwise unverified WebSocket endpoint.
 16. Recheck current Questrade API and market-data pricing/entitlement before Stage 7B. Record whether the user's existing access produces real-time or delayed Level 1 data; any paid subscription change requires a separate user decision outside this app.
-17. Approve a product-neutral application and development-launcher name before Stage 1 implementation. `Operational Intelligence Platform` is provisional plan copy only; QBO remains the first domain label, not the whole-product brand.
+17. Approve a product-neutral application and development-launcher name before Stage 1 implementation. `Operational Intelligence Platform` was explicitly rejected on 2026-08-14 and must not be used as visible or provisional product copy. `Keith Stocks` remains the Questrade personal-app label unless the product owner separately approves it for a broader role; QBO remains the first domain label, not the whole-product brand.
 
 ### Gate 0 acceptance criteria
 
 - Personal application access is available.
 - The user accepts read-only scope, local retention, and no trading.
 - The user accepts the optional streaming defaults, REST-as-authority rule, and Level 1 IQ Platform warning boundary.
-- The user approves product-neutral banner/shell wording or explicitly accepts the provisional wording for the implementation gates.
+- The user approves product-neutral banner/shell wording for the implementation gates.
 - Any required license agreement is reviewed by the user.
 - No live token is copied into a planning document, issue, commit, or chat.
 
