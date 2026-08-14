@@ -382,3 +382,10 @@ Model: Claude Fable 5
 Is duplicate?: no
 Complexity: medium
 Special Feature: Plan Precondition Ledger - Extract every factual assumption a plan makes about the existing system ("component X is reusable", "the test harness supports transactions", "no route Z exists yet", "capability W is verified") into machine-checkable assertions, verify them when the plan is written, and automatically re-verify them immediately before each stage begins, classifying each as still-true, decayed-since-planning, or never-true. Discovered need: a critical review of the Questrade plan found reuse claims that were only half true, an atomicity requirement the in-memory test harness cannot execute, and a browser-evidence gate already broken repo-wide - none of which any test would have caught, and all of which would have surfaced mid-implementation as rework. Distinct from Completion Claim Verifier (proves done-claims after work finishes), Provenance Drift Sentinel (watches quoted values in governed artifacts rot over time), and Workflow Readiness Gate (checks provider and evidence readiness for one agent run) - this one governs whether the ground a plan stands on is actually there before anyone starts building on it.
+
+Date: 2026-08-14
+Time: 16:52 ADT
+Model: Codex GPT-5.6 Sol
+Is duplicate?: no
+Complexity: high
+Special Feature: Portfolio Exposure Look-Through Graph - Map each holding, including funds and ETFs, through underlying issuers, sectors, currencies, geographic revenue, leverage, and shared risk drivers using dated source evidence, then surface overlapping exposure that ticker-level concentration misses. Agents would cite the exact relationship path and its uncertainty, helping the user distinguish genuine diversification from several wrappers carrying the same underlying risk without turning the feature into an automated trading recommendation.
