@@ -4,9 +4,9 @@
 
 **Created:** 2026-08-14
 
-**Revised:** 2026-08-14 after independent critical review, socket-hardening review, the product-owner requirement that Investments have first-class Main Chat and development-startup representation, Gate 0 account-readiness confirmation, and the decision to build Investments as an extraction-ready module for parallel coding-agent work; documentation revision only, with no Questrade implementation started
+**Revised:** 2026-08-14 after independent critical review, socket-hardening review, the product-owner requirement that Investments have first-class Main Chat and development-startup representation, Gate 0 account-readiness confirmation, the extraction-ready module decision, and the clarification that read-only/local/no-trade/AI limits are initial-stage boundaries while credential encryption is app-managed and accepted order-notification/monitoring preferences may persist; documentation revision only, with no Questrade implementation started
 
-**Primary decision:** Add Questrade as a separate, read-only Investments domain in the broader operational-intelligence platform. Do not add trade placement, order modification, order cancellation, or autonomous financial action.
+**Primary decision:** Add Questrade as a separate Investments domain whose first implementation is read-only. This plan contains no trade placement, modification, cancellation, or autonomous financial action, but it does not permanently prohibit a separately planned and explicitly approved future trading capability.
 
 **Stage rule:** Every implementation stage ends in a working, testable increment in the user's development app. No later stage may begin until the user completes the stage's hands-on acceptance script and explicitly accepts that gate.
 
@@ -23,7 +23,7 @@ The user should be able to connect a personal Questrade margin account and answe
 5. What do specialist agents conclude, which exact snapshot supports that conclusion, and what still needs human judgment?
 6. From the main Chat page, which work domain am I in, what investment evidence is currently available, and where do I go for deeper portfolio work?
 
-The first release deliberately stops before trade execution. The app may inspect, calculate, compare, explain, and propose. The user continues placing or changing orders in Questrade.
+The first release deliberately stops before trade execution. The app may inspect, calculate, compare, explain, and propose. The user continues placing or changing orders in Questrade during the stages covered by this plan. Any future in-app trading capability is a new high-risk project with its own Questrade-permission, preview, confirmation, failure-recovery, and hands-on acceptance gates.
 
 ## 2. Role in the broader platform
 
@@ -61,7 +61,7 @@ Help the user understand a real investment account and make better-informed deci
 - Real-time socket messages act only as change notifications. Complete saved snapshots and REST reconciliation remain the evidence used by calculations and agents.
 - Connection changes, refresh attempts, and user acceptance gates create bounded, secret-free evidence.
 
-### What this deliberately does not solve
+### What this implementation plan deliberately does not solve
 
 - It does not place, replace, or cancel orders.
 - It does not request Questrade's `trade` scope.
@@ -74,6 +74,7 @@ Help the user understand a real investment account and make better-informed deci
 - It does not treat Questrade as the only future brokerage; normalized investment records remain provider-neutral.
 - It does not turn Main Chat into a compressed copy of the Investments workspace. Chat supplies domain selection, concise context, safe actions, and agent conversation; detailed tables, history, calculations, and controls remain in Investments.
 - It does not remove or weaken the accepted QBO escalation workflow. That workflow becomes one explicit domain within the broader platform rather than the identity of the whole Chat surface.
+- These are boundaries for the implementation covered by this plan, not claims that the personal application can never add trading, remote access, different storage, or broader AI use through later separately approved work.
 
 ## 3. Current starting point verified on 2026-08-14
 
@@ -172,13 +173,17 @@ If live Questrade behavior disagrees with the documentation:
 5. add a focused contract test using a sanitized fixture;
 6. update this plan or the implementation documentation before continuing.
 
-## 5. Locked product and engineering decisions
+## 5. Locked decisions for this implementation plan
+
+“Locked” means the implementation stages below may rely on these choices. It does not make them permanent limits on the owner's personal application. Anything listed in Section 26 may be reconsidered through a separate plan and explicit approval.
 
 | Decision | Chosen direction | Why |
 | --- | --- | --- |
-| Initial connection | Personal-application refresh token entered once in the local app | It is the simplest documented flow for one account owner and avoids building a public multi-user callback flow prematurely. |
+| Initial connection | Personal-application refresh token entered once through **Settings > Connected Accounts > Questrade** | It uses the same understandable in-app settings pattern as other provider credentials while keeping the token out of chat, source code, browser storage, and documentation. |
 | Browser OAuth implicit flow | Do not use | It exposes tokens in browser URL fragments and is unnecessary for this server-backed app. |
-| Brokerage authority | Read-only | A margin account makes accidental writes materially dangerous; personal apps do not need trade access for the product outcome. |
+| Brokerage authority | Read-only for every stage in this plan | A margin account makes accidental writes materially dangerous. Future trading is allowed only through a separate approved project rather than being smuggled into this read-only integration. |
+| Credential encryption | Automatic app-managed encryption in the normal local flow | The user pastes the token once in Questrade settings; the server obtains or creates its protected encryption key through a reviewed key-provider abstraction and never asks the user to encrypt the token manually. |
+| Encryption-key override | `QUESTRADE_TOKEN_ENCRYPTION_KEY` is an optional deployment/recovery override, not a normal local setup requirement | A future headless or deployed environment may need administrator-supplied key material, while the current personal Windows app should handle its own protected key lifecycle. |
 | Refresh behavior | Server-owned, single-flight token refresh | Prevents two requests from racing with the same refresh credential. |
 | Data architecture | Questrade-specific connection adapter plus provider-neutral investment records | Supports another brokerage later without pretending all broker APIs are identical. |
 | Application architecture | Extraction-ready Investments module inside the existing application (a modular monolith) | Keeps one simple personal app while allowing Investments and other future features to be developed by separate coding-agent groups with minimal shared-file edits. |
@@ -186,6 +191,7 @@ If live Questrade behavior disagrees with the documentation:
 | Module API namespace | Keep every provider connection and investment operation under `/api/investments/*`; Questrade lives under `/api/investments/providers/questrade/*` | One domain namespace makes ownership, security review, testing, removal, and future provider additions explicit. |
 | Coding-agent ownership | Domain teams own disjoint Investments or QBO paths; one integration owner handles the small allowlist of shared shell/runtime files | Parallel agents can work without routinely editing the same central files or silently crossing domain boundaries. |
 | Personal workspace identity | No permanent whole-app name is required before implementation | `Keith Stocks` is only the Questrade personal-app label. Broader visible wording is optional and can be decided with the Stage 3C Main Chat/navigation design. |
+| Storage and deployment scope | Local storage and loopback-only access for the stages in this plan | That matches the app as it exists today. Remote access or hosted storage remains possible later after authentication, encrypted transport, data migration, backup, and deletion behavior are separately designed and accepted. |
 | Main Chat role | Cross-domain personal-workspace front door with explicit, equally weighted QBO and Investments choices | Investments may be as important as QBO and must not appear as a small integration card inside a QBO-branded workflow. |
 | Deep investment work | Keep the dedicated `#/investments` workspace | Dense balances, positions, history, orders, risk, and stream controls need a purpose-built working surface rather than an overloaded chat transcript. |
 | Chat rollout | Stage 3C adds Investments summary/navigation/sync context; Stage 6 enables investment-agent conversation | The user can validate product hierarchy and data isolation before any portfolio data is sent to an AI provider. |
@@ -193,8 +199,9 @@ If live Questrade behavior disagrees with the documentation:
 | Startup representation | Extend the existing friendly launcher with a privacy-safe `INVEST` lane; keep the current banner until the owner chooses different personal-workspace wording in Stage 3C | Startup should show what is configured and active without making naming a development blocker, delaying the core app, consuming API allowance, exposing financial data, or claiming broker reachability it did not test. |
 | Initial refresh cadence | Manual refresh only | Makes data provenance and rate use easy to test before background monitoring exists. |
 | Browser real-time updates | Reuse `/api/realtime` with an `investment-account` channel; each investment `data` payload contains only `accountKey`, an allowlisted event type, event time, and nullable snapshot ID | The existing shared transport already has reconnect/resync behavior, and the browser must refetch authoritative data after every event or replay gap. |
-| Questrade order/execution stream | Optional and off by default in Stage 4B | It improves freshness for brokerage actions made elsewhere without changing this app's read-only authority. |
+| Questrade order/execution stream | Off when Stage 4B first arrives; after one explicit enable, the saved preference may resume after core startup until the user disables it | This avoids activating an untested connection during upgrade while allowing the completed personal tool to keep useful live notifications enabled. |
 | Questrade Level 1 quote stream | Separate session-scoped opt-in in Stage 7B; never starts automatically | It needs `read_md`, may affect another IQ Platform, and must not silently become a permanent background side effect. |
+| Scheduled monitoring | Off when Stage 7A first arrives; an explicitly enabled policy persists and resumes on its approved schedule after core startup | Monitoring should become dependable once the user configures it, without being silently enabled merely because Questrade connected. |
 | Market-data cost/entitlement | Use only the user's existing Questrade entitlement; never purchase or change a market-data plan | Stage 7B rechecks current pricing/entitlement and displays Questrade's real-time/delayed result before promising freshness. |
 | Socket authority | Notification only; REST records and complete snapshots remain authoritative | A socket can disconnect or omit messages, and Questrade does not stream the complete account state. |
 | Missed-message recovery | Assume every upstream disconnect creates a gap and run bounded overlapping REST reconciliation before calling the stream healthy | Questrade does not document a replay cursor or sequence that proves no order/execution notification was missed. |
@@ -202,8 +209,8 @@ If live Questrade behavior disagrees with the documentation:
 | Monetary values | Decimal-safe representation; never binary floating-point for stored calculations | Avoids rounding drift in financial calculations. |
 | Cross-currency totals | Use Questrade's explicitly reported combined balance or show currencies separately | The app must not silently add CAD and USD as if they are the same unit. |
 | Risk analysis | Deterministic engine before AI | Reproducible calculations must pass before an LLM explains them. |
-| AI portfolio access | Off by default; explicit per-agent/provider consent | Portfolio values sent to a remote model are a separate privacy decision from connecting Questrade. |
-| Trade tools | No route, adapter method, handler, prompt tool, or UI control | A missing code path is a stronger safety boundary than a disabled button. |
+| AI portfolio access | Disabled through Stage 5; Stage 6 may enable approved agents/providers through explicit consent | Portfolio values sent to a model are a separate privacy decision from connecting Questrade, but the plan does not require AI access to remain disabled forever. |
+| Trade tools | No route, adapter method, handler, prompt tool, or UI control in this plan | A missing code path is a stronger first-release safety boundary than a disabled button; Section 26 preserves a separately approved future expansion path. |
 | Stage progress | User acceptance is a blocking dependency | Tests and builds cannot substitute for the user's rendered dev-app judgment. |
 
 ## 6. User-interface contract
@@ -300,11 +307,11 @@ The screenshots supplied on 2026-08-14 are the visual contract: startup remains 
    - `Questrade connection stored — live broker check deferred`;
    - `Questrade credentials locked — reauthorization required`;
    - `Portfolio snapshots ready — saved data available`;
-   - `Order notifications off`, `live`, `recovering`, or `circuit open` after Stage 4B;
-   - `Scheduled investment monitoring off`, `ready`, or `failed` after Stage 7A;
+   - `Order notifications off`, `resume pending`, `live`, `recovering`, or `circuit open` after Stage 4B;
+   - `Scheduled investment monitoring off`, `ready`, `due`, or `failed` after Stage 7A;
    - `Level 1 quotes off — session-scoped` after Stage 7B.
 4. Never print a token, authorization header, full or masked account number, balance, position, symbol, quote, snapshot ID, Questrade API host, stream port/URL, raw provider payload, or private alert content in normal startup output.
-5. Normal `npm run dev`, `npm run dev:preview`, and `npm run dev:check` do not call Questrade, consume API allowance, keep a broker session alive, or start Level 1 streaming. A live broker/secure-stream contract probe remains an explicit user-owned stage test or opt-in deep check with clear cost/side-effect wording.
+5. `npm run dev:preview` and `npm run dev:check` never call Questrade, consume API allowance, keep a broker session alive, or start any upstream stream. Normal `npm run dev` performs no Questrade call for readiness and starts no capability the user has not enabled. After the relevant gates are accepted, it may resume a saved user-enabled Stage 4B order/execution supervisor or run a due Stage 7A monitoring policy only after the early **Core app ready** line; this expected background access is disclosed in Settings/startup documentation and rate-budgeted. Level 1 streaming never auto-starts. A separate live contract probe remains an explicit user-owned stage test or opt-in deep check with clear cost/side-effect wording.
 6. Investments is optional for core app readiness. A missing Questrade configuration is informational; a configured but locked/degraded connection needs attention; an enabled background supervisor that cannot recover is degraded. None may delay the early `Core app ready` line unless an implementation defect compromises the shared server itself.
 7. The final summary continues to distinguish `core`, `operational`, `not configured`, `needs attention`, and `optional`. It must not count an intentionally disabled Investments capability as healthy or failed.
 8. Any stage that adds or changes an Investments service, scheduler, socket supervisor, shutdown responsibility, or readiness state must update the real service inventory, launcher, focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` together.
@@ -481,13 +488,15 @@ Every investment `data` payload uses the same four-field envelope: `accountKey`,
 
 #### Credential encryption
 
-- Questrade remains an optional integration, so the app may run without `QUESTRADE_TOKEN_ENCRYPTION_KEY` when no Questrade connection exists.
-- `QUESTRADE_TOKEN_ENCRYPTION_KEY` is required before establishing, reauthorizing, or using a Questrade connection and before storing a full external account number.
+- Questrade remains an optional integration, so the app starts normally when no Questrade credential or encryption key exists.
+- In the normal local Windows flow, the app automatically loads or creates the credential-encryption key through a reviewed server-side key-provider abstraction backed by operating-system-protected storage. The exact maintained Windows mechanism/dependency is selected and documented in Stage 1 before installation; the user is never asked to encrypt the token, handle ciphertext, or paste a key into ordinary Questrade settings.
+- `QUESTRADE_TOKEN_ENCRYPTION_KEY` remains an optional server-side override for a future headless/deployed environment or explicit recovery procedure. It is not required for the normal local setup and is never accepted from the browser.
+- A usable key from either the automatic local provider or the explicit server-side override is mandatory before establishing, reauthorizing, or using a Questrade connection and before storing a full external account number.
 - Use Node's `crypto` module with AES-256-GCM, which both encrypts and detects tampering.
 - Store ciphertext, initialization vector, authentication tag, and key version in separate fields.
 - Mark encrypted secret fields `select: false` as a second defensive layer.
-- There is no plaintext fallback in development, recovery, fixture, or error paths. A missing or invalid key refuses the operation before any token or full account number is written.
-- Never store the encryption key in MongoDB, client code, Git, test artifacts, or normal logs.
+- There is no plaintext fallback in development, recovery, fixture, or error paths. If automatic key provisioning and any explicitly configured override are unavailable or invalid, refuse before the browser submits a one-time token where possible and always before any provider call, token, or full account number is written.
+- Never store the encryption key in MongoDB, browser/client code, Git, test artifacts, or normal logs. Operating-system-protected key storage and the optional server-only environment override are the only approved sources.
 - If credentials exist but the key is missing or wrong, return `locked` health. Do not delete or overwrite the stored record.
 - Tests use a fixed synthetic key. Live keys never enter test fixtures.
 
@@ -531,7 +540,7 @@ Every investment `data` payload uses the same four-field envelope: `accountKey`,
 - Sanitization tests must search serialized API responses, logs, sync evidence, and agent evidence for fixture secrets.
 - Questrade HTTP payloads are not model-provider packages and must not enter the provider payload store.
 - Questrade stream payloads follow the same rule. Persist only normalized order/execution records, bounded stream-health evidence, and separately approved quote observations; never archive raw frames.
-- Friendly startup reads only allowlisted local status fields. It never decrypts credentials for display, prints account/snapshot/financial/order/quote/alert/destination data, or invokes Questrade transport in normal start, preview, or check mode.
+- Friendly startup reads only allowlisted local status fields. It never decrypts credentials for display or prints account/snapshot/financial/order/quote/alert/destination data. Preview/check modes never invoke Questrade; a normal start may resume only a previously user-enabled Stage 4B notification supervisor or a due Stage 7A monitoring policy after core readiness, never as a hidden readiness probe.
 
 #### Socket authority, recovery, and lifecycle
 
@@ -565,7 +574,7 @@ Every investment `data` payload uses the same four-field envelope: `accountKey`,
 | --- | --- | --- |
 | Token returned to browser | Response serializer has no secret field | Route and secret-scan tests |
 | Token stored in plaintext | AES-GCM ciphertext differs from input; decryption requires server key | Crypto and Mongo model tests |
-| Connect attempted without an encryption key | Refuse before any credential or full account number is written | Missing-key route and database no-write test |
+| Automatic local key provisioning and any explicit override are unavailable | Refuse before any provider call, credential, or full account number is written; explain that secure credential storage is unavailable without asking the user to encrypt anything | Key-provider failure, route, and database no-write tests |
 | Two simultaneous refreshes | One refresh request runs; waiters reuse the result | Concurrency test |
 | Malicious `api_server` response | Connection is rejected before an outbound request | Host-validation test |
 | Visited website targets the local server through DNS rebinding | HTTP request and WebSocket upgrade are rejected on incoming Host mismatch | Express and upgrade-handler host-policy tests |
@@ -1036,6 +1045,7 @@ Token redemption and revocation are the only Questrade-hosted POST operations pe
 ### Standard error codes
 
 - `QUESTRADE_NOT_CONFIGURED`
+- `QUESTRADE_CREDENTIAL_STORAGE_UNAVAILABLE`
 - `QUESTRADE_NOT_CONNECTED`
 - `QUESTRADE_CONNECTION_LOCKED`
 - `QUESTRADE_REAUTHORIZATION_REQUIRED`
@@ -1171,6 +1181,7 @@ The user must be able to test dangerous and rare states without manipulating the
 32. `quote-stream-live-then-stale`
 33. `quote-stream-threshold-candidate`
 34. `quote-stream-read-md-missing`
+35. `credential-key-store-unavailable`
 
 Each fixture has a version, expected normalized counts, expected socket/reconciliation state where applicable, and a safe secret canary used by leakage tests. Socket fixtures use an isolated fake WebSocket server and fake clock; they never contact Questrade. Relevant fixtures may carry hand-calculated risk expectations from the beginning as test-first reference data, but those expectations are marked `pending-stage-5` and do not count as passing evidence for Stages 1 through 4B. Stage 5 reviews, versions, and activates them against the approved formula contract.
 
@@ -1387,7 +1398,12 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 - The personal app has a manual authorization and shows **Generate new token**. No token has been generated, copied into chat, or stored in this repository; generation is deliberately deferred until the Stage 2 live-connection test needs it.
 - No callback URL was added, which is consistent with the planned manual local authorization flow.
 - `Keith Stocks` is the Questrade personal-app label only. It does not establish the website, shared application shell, or development-startup name.
-- The owner clarified that this is a personal application that will grow with tools built specifically for them. A whole-app name is optional and deferred to the Stage 3C Main Chat/navigation design; it does not block Gate 0 or Stage 1. The remaining safety-default decisions and any required license acceptance are still open, so Gate 0 remains `implementation-in-progress`.
+- The owner clarified that this is a personal application that will grow with tools built specifically for them. A whole-app name is optional and deferred to the Stage 3C Main Chat/navigation design; it does not block Gate 0 or Stage 1.
+- The owner clarified that read-only brokerage access, no trade actions, local storage, and no AI data sharing are the boundaries of this implementation plan, not permanent limitations on the personal app. Any expansion still requires a separately reviewed stage or plan before it is built or enabled.
+- The owner confirmed that the Questrade token belongs in **Settings > Connected Accounts > Questrade**, like other provider credentials. The app—not the user—must create/load the encryption key and encrypt the token before storage; neither a token nor an encryption key is entered into chat or source code.
+- The owner wants explicitly enabled order/execution notifications and scheduled monitoring to remain useful after restart. Each capability therefore starts disabled when first introduced, persists only after explicit enablement, and may resume after core startup until disabled. Level 1 quotes remain a separate session-only stream because of their market-data scope and IQ Platform side effect.
+- The owner confirmed the app is currently local. Loopback-only is therefore the truthful first-release boundary and an accidental-exposure safeguard, not a claim that remote access can never be added.
+- The remaining official-documentation, Activities-scope, pricing/entitlement, secure-stream, and any required license checks are still open, so Gate 0 remains `implementation-in-progress`.
 
 ### Work
 
@@ -1396,24 +1412,27 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 3. Confirm the account type displayed by Questrade is Margin.
 4. Confirm recommended scope choice: `read_acc`; `read_md` remains optional and deferred until needed.
 5. Confirm with Questrade documentation/support or a bounded live probe whether `read_acc` permits the Activities endpoint; do not infer this from the endpoint's existence.
-6. Confirm normalized snapshots/history remain local until explicitly deleted.
-7. Confirm no trade functionality.
-8. Confirm investment data will not be sent to any AI provider until Stage 6 and separate consent.
-9. Confirm the app remains loopback-only.
-10. Confirm the user will enter all live secrets directly into the local app, never chat or source code.
-11. Confirm the app may run with Questrade disabled, but a configured encryption key is mandatory before any live connection or account identity is stored.
-12. Confirm order/execution notifications remain optional and off until Stage 4B user activation.
-13. Confirm `read_md` is deferred to Stage 7B and is required only for market quotes/candles/Level 1 streaming, not the core account snapshot.
-14. Confirm Level 1 streaming is session-scoped, never auto-starts, stores no unrestricted tick history, and will show Questrade's warning that it can freeze market data in another IQ Platform used simultaneously.
-15. Confirm the app will disable live streaming rather than send a token through a plaintext or otherwise unverified WebSocket endpoint.
-16. Recheck current Questrade API and market-data pricing/entitlement before Stage 7B. Record whether the user's existing access produces real-time or delayed Level 1 data; any paid subscription change requires a separate user decision outside this app.
-17. Record the personal-workspace identity decision: no permanent whole-app or launcher name is required before implementation. `Operational Intelligence Platform` must not be used as visible or provisional copy. `Keith Stocks` remains the Questrade personal-app label. Revisit broader visible wording only with the Stage 3C Main Chat/navigation design if the owner wants a change.
+6. Confirm that, for the stages in this plan, normalized snapshots and history remain on the user's computer until explicitly deleted. Treat hosted or remote storage as a separately approved future change.
+7. Confirm that this plan adds no trade placement, modification, or cancellation. Preserve the option to design trading later as a separate high-risk project with its own Questrade permission, preview, confirmation, recovery, and acceptance gates.
+8. Confirm that investment data is not sent to any AI provider through Stage 5. Stage 6 may enable it only through separate, explicit, revocable consent.
+9. Confirm that this implementation remains loopback-only because the app currently runs only on the user's computer. Any later LAN, tunnel, hosted, or remote access requires a separate authentication, TLS, authorization, and storage review.
+10. Confirm that the user enters the one-time Questrade refresh token only in **Settings > Connected Accounts > Questrade**, never chat, source code, documentation, browser storage, or an issue.
+11. Confirm that the app automatically creates or loads its encryption key from reviewed operating-system-protected storage and encrypts the token before saving it. The user is never asked to encrypt the token or manage a key during normal local setup; a server environment variable is only an optional deployment/recovery override.
+12. Confirm that order/execution notifications remain off until Stage 4B is accepted and the user explicitly enables them. After that choice, the saved preference may resume after core startup until the user disables it.
+13. Confirm that scheduled monitoring remains off until Stage 7A is accepted and the user explicitly configures and enables a policy. The policy may then persist and resume on its approved schedule after core startup until paused or disabled.
+14. Confirm `read_md` is deferred to Stage 7B and is required only for market quotes/candles/Level 1 streaming, not the core account snapshot.
+15. Confirm Level 1 streaming is session-scoped, never auto-starts, stores no unrestricted tick history, and will show Questrade's warning that it can freeze market data in another IQ Platform used simultaneously.
+16. Confirm the app will disable live streaming rather than send a token through a plaintext or otherwise unverified WebSocket endpoint.
+17. Recheck current Questrade API and market-data pricing/entitlement before Stage 7B. Record whether the user's existing access produces real-time or delayed Level 1 data; any paid subscription change requires a separate user decision outside this app.
+18. Record the personal-workspace identity decision: no permanent whole-app or launcher name is required before implementation. `Operational Intelligence Platform` must not be used as visible or provisional copy. `Keith Stocks` remains the Questrade personal-app label. Revisit broader visible wording only with the Stage 3C Main Chat/navigation design if the owner wants a change.
 
 ### Gate 0 acceptance criteria
 
 - Personal application access is available.
-- The user accepts read-only scope, local retention, and no trading.
-- The user accepts the optional streaming defaults, REST-as-authority rule, and Level 1 IQ Platform warning boundary.
+- The user accepts read-only access, local retention, no trading, and no AI data sharing as the boundaries of this implementation plan while preserving separately approved future expansion.
+- The user accepts the in-app token-entry and app-managed encryption workflow; normal setup requires no manual encryption or user-managed key.
+- The user accepts that order/execution notifications and scheduled monitoring are initially off, then persist and may resume only after explicit enablement; REST remains authoritative and Level 1 remains session-scoped with the IQ Platform warning.
+- The user accepts loopback-only as the current deployment boundary and understands that remote access is a separately secured future change.
 - Any required license agreement is reviewed by the user.
 - No live token is copied into a planning document, issue, commit, or chat.
 
@@ -1425,7 +1444,7 @@ The dev app can show and safely exercise all Questrade connection states using s
 
 ### Implementation
 
-1. Add field-encryption helpers and tests.
+1. Add a server-side credential-key provider, select and document a maintained Windows operating-system-protected storage mechanism, automatically create/load the local key without exposing it to the browser, support an optional server-only environment override for deployment/recovery, and add AES-256-GCM encryption/tamper tests.
 2. Add the shared incoming local-host policy and enforce it across Express, realtime WebSocket upgrades, and Live Call Assist WebSocket upgrades before the first Questrade route is registered.
 3. Add the separate outbound Questrade API-host policy; do not reuse incoming-host rules for provider destinations.
 4. Create the side-effect-free Investments module entry point and `docs/investments/module-contract.md` with the owned paths, public exports, allowed shared dependencies, data types, lifecycle owners, and shared integration allowlist from Section 9A.
@@ -1444,7 +1463,8 @@ The dev app can show and safely exercise all Questrade connection states using s
 
 ### Automated verification
 
-- crypto and tamper tests pass;
+- automatic local key creation/loading, optional server-only override, AES-256-GCM, and tamper tests pass without exposing the key;
+- importing or merely reporting status does not create a key; the app initializes secure credential storage only when the user enters the Questrade connection flow, and a key-store failure occurs before token entry where possible and always before a provider call or database write;
 - incoming Host policy rejects DNS-rebinding, external-host, malformed-host, unexpected-port, and no-Host protected requests across HTTP and both WebSocket upgrade paths while accepting the configured IPv4/IPv6/localhost development paths;
 - outbound Questrade host policy rejects malicious provider destinations;
 - importing the Investments entry point starts no provider call, decryption, timer, scheduler, socket, database write, or other lifecycle side effect;
@@ -1479,17 +1499,19 @@ Prerequisite: the user enables the documented development fixture flags and rest
    - Expected: connection is blocked with a safe error and no outbound request to the supplied host.
 6. Select `locked` by using the provided wrong-key fixture.
    - Expected: credentials are described as locked; the UI does not delete them or expose decryption details.
-7. Select `service-unavailable-preserve-prior`, then open the existing QBO Chat workflow and review the Google connected-account card.
+7. Select `credential-key-store-unavailable`.
+   - Expected: the app explains that secure credential storage is unavailable, blocks Connect, and does not ask the user to encrypt anything, paste an encryption key, or enter a token.
+8. Select `service-unavailable-preserve-prior`, then open the existing QBO Chat workflow and review the Google connected-account card.
    - Expected: Questrade is safely degraded, while QBO and Google remain usable and contain no Investments error, account context, or controls.
-8. Reload the page after each state.
+9. Reload the page after each state.
    - Expected: the selected fixture state is stable and never flickers through a false Connected claim.
-9. Repeat at 390px width and keyboard-navigate all Questrade controls.
+10. Repeat at 390px width and keyboard-navigate all Questrade controls.
    - Expected: no horizontal overflow, clipped controls, hover dependency, or missing focus indicator.
-10. Open browser console and Network response previews.
+11. Open browser console and Network response previews.
    - Expected: no console errors, token canary, raw account number, or authorization header.
-11. Stop only the user-owned development stack using its normal `Ctrl+C` flow, then run `npm run dev:preview`.
+12. Stop only the user-owned development stack using its normal `Ctrl+C` flow, then run `npm run dev:preview`.
     - Expected: the existing banner remains unchanged; an aligned `INVEST` line describes Questrade as optional/fixture-only; core and optional totals remain distinct; no server starts and no live Questrade request occurs.
-12. Start the stack with the normal user-owned `npm run dev` command and capture the early-ready and background-check sections in the terminal.
+13. Start the stack with the normal user-owned `npm run dev` command and capture the early-ready and background-check sections in the terminal.
     - Expected: output follows the supplied screenshot grammar, the core app becomes ready without waiting on Investments, no balance/account/symbol/provider destination is printed, and `Ctrl+C` still stops only launcher-owned API and web processes cleanly.
 
 ### Gate 1 blocks Stage 2 until
@@ -1499,6 +1521,7 @@ Prerequisite: the user enables the documented development fixture flags and rest
 - the automated browser attempt has either passed or has one freshly reproduced inherited transport gap covered by the completed manual rendered script;
 - Google Connected Accounts behavior is proven unchanged;
 - fixture mode is proven unavailable in production;
+- the user accepts that the app owns automatic local key management and that secure-storage failure blocks connection without asking them to handle encryption;
 - the module contract and boundary suite prove that Investments can be developed without importing QBO internals and that provider failure does not change core/QBO readiness;
 - the user accepts the privacy-safe `INVEST` status in both preview and real user-owned startup output; whole-app naming remains deferred.
 
@@ -1514,22 +1537,23 @@ The user can connect the real Questrade personal application, verify the Margin 
 2. Add single-flight token refresh and atomic credential rotation.
 3. Add short-lived sensitive-action intents.
 4. Add live connect, reauthorize, disconnect, retry-revocation, and forget-local routes.
-5. Add one-time refresh-token entry with progressive disclosure.
-6. Refuse connection or reauthorization before any provider call or database write when `QUESTRADE_TOKEN_ENCRYPTION_KEY` is missing or invalid; there is no plaintext fallback.
+5. Add one-time refresh-token entry with progressive disclosure under **Settings > Connected Accounts > Questrade**. Reveal the masked field only after the server reports that app-managed secure credential storage is ready.
+6. Load or create the local operating-system-protected key through the Stage 1 key provider, with the optional server environment override available only for deployment/recovery. If neither source is usable, refuse connection or reauthorization before any provider call or database write; there is no plaintext fallback and no prompt asking the user to encrypt or manage a key.
 7. Clear the client input immediately after submission.
 8. Fetch Questrade time and accounts after durable token storage.
 9. Generate a random stable `accountKey` for each newly discovered account, then save the full account number encrypted and expose only masked metadata. Reauthorization and reconnect must reuse the existing stable key.
 10. Translate returned scopes into plain-English permissions without hard-coding a successful grant.
 11. Handle 401/403, locked credentials, invalid server, invalid response, timeout, revocation-pending, and refresh-accepted-before-save crash-recovery states.
 12. Add secret-safe connection audit summaries.
-13. Document `QUESTRADE_TOKEN_ENCRYPTION_KEY` in `server/.env.example` without a real value and state that it is required only when establishing or using Questrade.
+13. Document `QUESTRADE_TOKEN_ENCRYPTION_KEY` in `server/.env.example` without a real value as an optional headless/deployment/recovery override. State explicitly that normal local Windows setup creates/loads its protected key automatically and needs no user-managed environment value.
 14. Document the single-use refresh-token crash window in the Stage 2 user handoff, with exact manual reauthorization steps.
 15. Extend the local startup summary to distinguish `not configured`, `connection stored — live broker check deferred`, `locked`, and `reauthorization required` from local database state only. Normal startup and `dev:check` still make no Questrade call, refresh no token, and claim no live broker health.
 
 ### Automated verification
 
 - token response validation and host allowlist pass;
-- connecting without an encryption key returns `QUESTRADE_NOT_CONFIGURED` before any token exchange or database write;
+- normal local setup creates or loads the same protected key through the app without returning it to the browser, while the server-only environment override has documented precedence for deployment/recovery;
+- an unavailable or invalid key source returns `QUESTRADE_CREDENTIAL_STORAGE_UNAVAILABLE` before any token exchange, provider request, or database write and never asks the user for an encryption key;
 - simultaneous access requests cause one refresh;
 - rotated tokens are written together;
 - persistence failure never returns Connected;
@@ -1548,11 +1572,11 @@ The user performs all live Questrade actions. The implementation agent never ask
 1. Generate a new personal-application refresh token in Questrade API Centre.
 2. Open **Settings > Connected Accounts > Questrade > Connect personal app**.
 3. Paste the token into the masked field and choose Connect.
-   - Expected: the field clears immediately; the UI moves through Connecting to Connected.
+   - Expected: the app handles encryption automatically, never asks for an encryption key, clears the token field immediately, and moves through Connecting to Connected.
 4. Verify the displayed account type is Margin and the last four digits match the intended account.
 5. Verify the permissions shown are read-only.
 6. Reload Settings and then restart the user-owned server.
-   - Expected: connection persists without re-entering the token.
+   - Expected: the app loads the same operating-system-protected key automatically and the connection persists without re-entering either the token or an encryption key.
 7. Trigger multiple read-status requests using the provided dev test action after token expiry is simulated.
    - Expected: one refresh occurs and all requests recover.
 8. Exercise `refresh-accepted-crash-before-save`.
@@ -1573,6 +1597,7 @@ The user performs all live Questrade actions. The implementation agent never ask
 
 - the user confirms the real intended Margin account connected;
 - persistence, reauthorization, and one live revoke/reconnect pass;
+- the user confirms that token entry occurred only in the in-app Questrade settings and that the app-managed encryption lifecycle required no manual key setup;
 - live access is proven read-only;
 - secret-safe deterministic checks pass and the user accepts the manual rendered browser checks; automated browser status remains separately reported.
 - the user accepts the truthful local-only startup wording for a real saved connection.
@@ -1898,7 +1923,9 @@ The user can explicitly enable live order/execution notifications, see actions t
 
 ### Defaults and authority
 
-- Order/execution streaming is off after upgrade and requires an explicit enable action.
+- Order/execution streaming is off when Stage 4B first arrives and requires an explicit enable action.
+- The explicit enable/disable choice is durable. Once enabled, the supervisor may resume after the app reaches core readiness on later normal starts; once disabled, it remains off across restart.
+- Preview/check modes never start the supervisor or contact Questrade, and normal startup never starts it merely to test readiness.
 - The server is the only Questrade WebSocket client. Browser clients subscribe only to the safe shared `investment-account` channel.
 - Stream frames accelerate freshness but do not prove completeness. REST orders/executions and the Stage 4A dedupe contract remain authoritative.
 - Activities, balances, and positions are not inferred from notification frames.
@@ -1922,10 +1949,12 @@ The user can explicitly enable live order/execution notifications, see actions t
 14. Extend local-data deletion to disable the notification stream before deleting its stream state plus Stage 4A records. Credentials remain a separate decision.
 15. Update `scripts/dev-launcher.js`, focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` because this stage adds an optional background connection and shutdown responsibility.
 16. Add `investment-realtime-notifications` capability evidence.
+17. Register idempotent supervisor restoration through the Investments module lifecycle. Restore only a previously saved enabled choice, only after the early **Core app ready** boundary, and always establish the authoritative REST baseline/reconciliation before reporting `live`; do not restore during preview/check or from module import.
 
 ### Automated verification
 
 - two simultaneous enable requests create one upstream socket, and a stale socket generation cannot commit an event;
+- a fresh Stage 4B upgrade stays disabled; a saved disabled choice remains off after restart; and a saved enabled choice creates exactly one supervisor only after core readiness, completes REST reconciliation before `live`, and is not activated by preview/check;
 - invalid host/port, redirect, IP literal, plaintext `ws:`, bad certificate, oversized frame, pre-auth frame, malformed JSON, unknown account, and authentication timeout all fail closed without leaking the token; a known unselected account is ignored without exposing its identity or poisoning the selected account state;
 - duplicate and out-of-order order/execution messages create one identity and cannot regress newer state;
 - a dropped socket with a missed execution remains `reconciling` until overlapping REST retrieval restores the omitted record, after which one safe browser event is published;
@@ -1941,9 +1970,9 @@ The user can explicitly enable live order/execution notifications, see actions t
 ### User dev-app acceptance script — Gate 4B
 
 1. Upgrade/start with fixture mode and open **Investments > Orders**.
-   - Expected: live notifications are Off and no upstream fixture socket starts automatically.
+   - Expected: live notifications are Off and no upstream fixture socket starts merely because Stage 4B exists.
 2. Enable notifications using `healthy-margin-cad-usd`.
-   - Expected: the UI progresses through Connecting and Reconciling to Live; one REST baseline is visible in safe evidence.
+   - Expected: the preference is saved; the UI progresses through Connecting and Reconciling to Live; one REST baseline is visible in safe evidence.
 3. Emit a fixture order-status change while Orders is open in two tabs.
    - Expected: one normalized update appears promptly in both tabs after their REST refetch; each investment WebSocket event contains only the four-field envelope.
 4. Emit one execution and its associated order update.
@@ -1958,22 +1987,24 @@ The user can explicitly enable live order/execution notifications, see actions t
    - Expected: expiry requests reauthorization, rate limiting shows the safe retry time, and repeated failures stop at a visible circuit with a manual retry rather than looping.
 9. Select `malicious-stream-port-or-tls-downgrade`.
    - Expected: the stream refuses to start, no token is transmitted, and ordinary REST history remains available.
-10. Disable notifications while connected.
-    - Expected: reconnects stop, final reconciliation outcome is shown, and no further fixture frame changes the UI.
-11. Re-enable the fixture stream, then complete local investment-data deletion.
-    - Expected: the stream is disabled first, its state/history is removed in scope, and unrelated app data remains.
-12. With the real account and no live trade required, enable the stream long enough to prove a certificate-verified authenticated handshake, REST baseline, and safe Live/quiet state; then disable it.
+10. Disable notifications while connected, then restart the user-owned dev app.
+    - Expected: reconnects stop, final reconciliation outcome is shown, no further fixture frame changes the UI, and the saved disabled choice stays Off after restart with no provider request.
+11. Re-enable notifications, leave them enabled, and restart the user-owned dev app again.
+    - Expected: the early **Core app ready** line appears before the supervisor starts; exactly one supervisor then restores the saved preference, runs REST reconciliation, and reaches Live. No hidden startup readiness probe or duplicate socket occurs.
+12. Disable and re-enable the fixture stream, then complete local investment-data deletion.
+    - Expected: the stream is disabled first, its saved preference/state/history is removed in scope, and unrelated app data remains.
+13. With the real account and no live trade required, enable the stream long enough to prove a certificate-verified authenticated handshake, REST baseline, safe Live/quiet state, and one restart restoration; then disable it.
     - Expected: no token/account number appears in the browser, logs, or evidence. If Questrade cannot provide the required secure endpoint, the feature remains honestly Unsupported and Gate 4B cannot claim live-stream support.
-13. Run `npm run dev:preview`, then use the user-owned app start and Ctrl+C flow.
-    - Expected: preview and startup distinguish `Order notifications off`, `live`, `recovering`, `circuit open`, or `unsupported` from the saved/runtime state; the final total classifies it correctly; no account, order, execution, host/port, or token is printed; shutdown names the optional Investments supervisor and closes only launcher-owned work.
-14. Repeat the enable/recovery/disable surfaces at desktop/mobile widths with keyboard, console, Network, and WebSocket-frame checks.
+14. Run `npm run dev:preview`, then use the user-owned app start and Ctrl+C flow with the notification preference in a known enabled or disabled state.
+    - Expected: preview never starts the supervisor or calls Questrade; normal startup reflects the saved choice and may resume it only after core readiness; the final total classifies it correctly; no account, order, execution, host/port, or token is printed; shutdown names the optional Investments supervisor and closes only launcher-owned work.
+15. Repeat the enable/recovery/disable/restart surfaces at desktop/mobile widths with keyboard, console, Network, and WebSocket-frame checks.
 
 ### Gate 4B blocks Stage 5 until
 
 - deterministic duplicate, ordering, drop/gap, token, session, rate-limit, circuit, destination, and shutdown fixtures pass;
 - the user proves browser and upstream socket loss both converge on authoritative REST state;
 - the live connection either passes the required secure handshake and reconciliation or is explicitly recorded as unsupported without weakening TLS/token rules;
-- notification streaming remains optional, read-only, and cleanly disabled;
+- notification streaming remains optional and read-only; explicit enable persists and resumes only after core readiness, while explicit disable persists and prevents restart;
 - startup/shutdown and desktop/mobile rendered acceptance pass;
 - all prior stage checks remain green.
 
@@ -2224,7 +2255,9 @@ The app can refresh on a user-approved schedule and open durable Attention items
 
 ### Defaults
 
-- Monitoring is off by default.
+- Monitoring is off when Stage 7A first arrives and remains off until the user explicitly saves and enables a policy.
+- An enabled policy persists across restart. The scheduler restores it only after core readiness and waits for the next approved due time; startup itself is not a reason to run an immediate portfolio check.
+- A paused or disabled policy remains paused or disabled across restart.
 - No schedule is created implicitly when Questrade connects.
 - The user chooses monitored account, allowed time window, minimum interval, and thresholds.
 - Monitoring produces observations and attention items, never trades or recommendations.
@@ -2250,14 +2283,15 @@ The app can refresh on a user-approved schedule and open durable Attention items
 6. Add manual `Run monitoring check now` for safe acceptance testing.
 7. Add monitoring pause, resume, and disable.
 8. Update `scripts/dev-launcher.js`, focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` because this stage adds background scheduler behavior.
-9. Never run live deep checks from normal startup or automated tests.
+9. Register scheduler restoration through the Investments module lifecycle. Preview/check and automated tests never call live Questrade. A normal start may restore a previously enabled policy only after **Core app ready** and may run it only when the approved schedule is due; it never performs a hidden brokerage-readiness or immediate deep check merely because the process started.
 10. Extend local-data deletion to disable the affected monitoring policy first, then remove investment monitoring policies, observations, alerts, and Attention references without touching unrelated Attention items.
 11. Publish four-field `monitoring.alert.opened`, `monitoring.alert.updated`, and `monitoring.alert.resolved` events only after the durable alert/Attention transition commits; subscribed browsers refetch the authoritative alert state.
 12. Add `investment-monitoring` capability evidence.
 
 ### Automated verification
 
-- monitoring remains off by default;
+- a fresh Stage 7A upgrade remains off until the user explicitly saves and enables a policy;
+- a saved enabled policy restores only after core readiness and waits until its approved due time, while saved paused/disabled policies create no background request and preview/check modes never call Questrade;
 - scheduler respects interval, window, account, and disable state;
 - one observation produces one alert and repeats update it rather than duplicate it;
 - recovery resolves the right alert;
@@ -2271,33 +2305,38 @@ The app can refresh on a user-approved schedule and open durable Attention items
 ### User dev-app acceptance script — Gate 7A
 
 1. Confirm monitoring is Off after upgrading.
-2. Enable monitoring for fixture `healthy-margin-cad-usd` with an explicit interval and thresholds.
-   - Expected: saved policy is summarized in plain language.
-3. Choose `Run monitoring check now`.
-   - Expected: one successful observation appears without an alert.
-4. Switch to `margin-pressure` and run again.
+   - Expected: no policy or background Questrade request is created merely because Stage 7A exists.
+2. Enable monitoring for fixture `healthy-margin-cad-usd` with an explicit interval, allowed time window, and thresholds.
+   - Expected: the saved enabled policy is summarized in plain language.
+3. Restart the user-owned dev app before the next due time.
+   - Expected: the early **Core app ready** line appears first, the enabled policy restores afterward, and no monitoring request runs early merely because startup occurred.
+4. Advance the fixture clock into the approved due window.
+   - Expected: one scheduled successful observation appears without an alert, proving the persisted policy resumed on schedule.
+5. Choose `Run monitoring check now`.
+   - Expected: one additional user-requested successful observation appears without an alert.
+6. Switch to `margin-pressure` and run again.
    - Expected: one threshold alert appears in Investments and Attention with exact observed value, threshold, snapshot, and time.
-5. Run the same failing scenario repeatedly.
+7. Run the same failing scenario repeatedly.
    - Expected: the existing alert updates; duplicates do not accumulate.
-6. Switch to `resolved-alert` and run again.
+8. Switch to `resolved-alert` and run again.
    - Expected: the alert resolves with recovery evidence.
-7. Test token failure, rate limit, and outage fixtures.
+9. Test token failure, rate limit, and outage fixtures.
    - Expected: messages differ accurately and preserve the last successful snapshot.
-8. Disable monitoring, wait through one configured interval, and run the read-only status check.
-   - Expected: no background portfolio request runs.
-9. In fixture mode, re-enable monitoring, create one investment alert, and complete local investment-data deletion.
-   - Expected: monitoring is disabled first, the investment policy/alert and its Investments/Attention references are removed, and unrelated Attention items remain.
-10. The user runs `npm run dev:preview`.
-   - Expected: Questrade monitoring status is concise, secret-free, correctly labelled optional, and distinguishes Off, Ready, and Failed without calling Questrade or running a portfolio check.
-11. The user starts their own dev app and later uses Ctrl+C.
-    - Expected: the background-activity section reports the actual local scheduler policy/state, never threshold values or alert content; the early core-ready line is not delayed; shutdown reports clean scheduler stop and touches no unrelated process.
-12. Open Investments/Attention in a second tab and repeat one trigger and recovery.
+10. Disable monitoring, restart, wait through one configured interval, and run the read-only status check.
+    - Expected: the saved disabled choice remains Off and no background portfolio request runs.
+11. In fixture mode, re-enable monitoring, create one investment alert, and complete local investment-data deletion.
+    - Expected: monitoring is disabled first, the investment policy/alert and its Investments/Attention references are removed, and unrelated Attention items remain.
+12. The user runs `npm run dev:preview`.
+    - Expected: Questrade monitoring status is concise, secret-free, correctly labelled optional, and distinguishes Off, Ready, Due, and Failed without calling Questrade or running a portfolio check.
+13. The user starts their own dev app with a known policy state and later uses Ctrl+C.
+    - Expected: the background-activity section reports the actual local scheduler policy/state, never threshold values or alert content; the early core-ready line is not delayed; an enabled policy resumes only after core readiness and only runs when due; shutdown reports clean scheduler stop and touches no unrelated process.
+14. Open Investments/Attention in a second tab and repeat one trigger and recovery.
     - Expected: the second tab receives only the small alert change event, refetches the durable alert, and shows the same open/resolved state without a duplicate.
-13. Repeat Attention and Settings at desktop/mobile widths and inspect console, Network, and WebSocket output.
+15. Repeat Attention and Settings at desktop/mobile widths and inspect console, Network, and WebSocket output.
 
 ### Gate 7A blocks Stage 7B until
 
-- opt-in/off behavior is proven;
+- first-use opt-in, persisted enabled resume-after-core behavior, and persisted paused/disabled behavior are proven;
 - alerts dedupe and resolve correctly;
 - multi-tab alert changes converge through safe events and REST refetch;
 - investment-data deletion disables monitoring and removes only its investment Attention state;
@@ -2411,7 +2450,7 @@ The integration can be recovered, audited, exported, and removed safely, and the
 9. Recheck official documentation and license links.
 10. Complete all capability-map entries and known gaps.
 11. Update `DESIGN.md` and `DESIGN.HTML` only for durable Investments design rules established by accepted rendered behavior.
-12. Perform a final launcher inventory audit so every Investments capability shown in the supplied startup grammar maps to a real local state/service, every enabled background owner has clean shutdown reporting, and no normal startup/development check reaches Questrade.
+12. Perform a final launcher inventory audit so every Investments capability shown in the supplied startup grammar maps to a real local state/service, every enabled background owner has clean shutdown reporting, preview/check and readiness reporting never reach Questrade, and normal startup can contact Questrade only through a previously user-enabled Stage 4B supervisor or a due Stage 7A policy after core readiness.
 13. Complete the Main Chat domain audit: user-approved or omitted whole-app wording, equal QBO/Investments entry, immutable domain conversations, server-owned tool isolation, and exact deep links to investment evidence.
 
 ### Automated verification
@@ -2426,7 +2465,7 @@ The integration can be recovered, audited, exported, and removed safely, and the
 - stream security/recovery inventory proves server-only Questrade tokens, TLS-only upstream sockets, bounded frames/caches, REST gap recovery, and snapshot-before-alert behavior;
 - `npm run verify:investments`, `npm run verify:core`, client build, dependency audit, and testing-map validation pass;
 - the automated Investments browser slice completes repeatedly, or its freshly reproduced inherited transport gap remains separately documented without replacing the required accepted manual desktop/mobile workflow.
-- final launcher preview/normal/check-mode fixtures cover Questrade absent, stored, locked, snapshot-available, notifications off/live/recovering/circuit-open/unsupported, monitoring off/ready/failed, and Level 1 always off/session-scoped at process start without a provider call or sensitive value;
+- final launcher fixtures prove that preview/check modes make no provider call; a normal start with notifications/monitoring disabled also makes no call; a normal start with a saved enabled notification preference or due monitoring policy begins only after core readiness; and all absent, stored, locked, snapshot-available, notifications off/live/recovering/circuit-open/unsupported, monitoring off/ready/due/failed, and Level 1 off/session-scoped states remain secret-safe;
 - cross-domain regression proves no QBO conversation/run/provider request contains investment references and no investment conversation/run can obtain QBO tools or case evidence.
 
 ### User dev-app acceptance script — Gate 8
@@ -2459,7 +2498,7 @@ The integration can be recovered, audited, exported, and removed safely, and the
 9. Repeat the complete workflow at 390px mobile width.
 10. Check keyboard navigation, focus order, reduced motion, overflow, clipped content, browser console, Network responses, and WebSocket frames.
 11. Run `npm run dev:preview`, then inspect one final user-owned normal startup and Ctrl+C shutdown.
-    - Expected: the current user-approved personal-workspace banner (or deliberately omitted whole-app label) and `INVEST` lines match the actual configured/active states; core readiness is not delayed; normal startup makes no Questrade call and prints no account/portfolio/order/quote/alert/destination detail; every enabled Investments background owner stops cleanly.
+    - Expected: the current user-approved personal-workspace banner (or deliberately omitted whole-app label) and `INVEST` lines match the actual configured/active states; core readiness is not delayed; preview makes no Questrade call; normal startup makes no hidden readiness call and contacts Questrade only for the saved enabled notification supervisor or a due monitoring policy after core readiness; no account/portfolio/order/quote/alert/destination detail is printed; every enabled Investments background owner stops cleanly.
 12. Review the final known-gaps list and explicitly accept or reject release.
 
 ### Final release decision
@@ -2529,7 +2568,7 @@ Every stage keeps new implementation inside the Investments-owned paths from Sec
 ### Stage 1
 
 - side-effect-free Investments public module entry point and module-contract documentation
-- encryption helper plus shared incoming HTTP/WebSocket host policy and tests
+- app-managed credential-key provider, reviewed Windows operating-system-protected storage adapter, optional server-only override, encryption helper, and shared incoming HTTP/WebSocket host policy with tests
 - separate outbound Questrade API-host policy and tests
 - Questrade connection model/serializer
 - provider-adapter contract, Investments-owned fixture adapter, and connected-service harness additions
@@ -2545,7 +2584,7 @@ Every stage keeps new implementation inside the Investments-owned paths from Sec
 - sensitive-action intent protection
 - connect/reauthorize/revoke routes and tests
 - random stable account identity plus encryption/masking
-- environment documentation
+- normal automatic key-management documentation plus optional deployment/recovery environment override documentation
 - local-only launcher connection-state projection with no Questrade startup probe
 
 ### Stage 3A
@@ -2586,7 +2625,7 @@ Every stage keeps new implementation inside the Investments-owned paths from Sec
 - order/execution notification normalization, deduplication, generation fencing, and REST gap reconciliation
 - stream health/enable/disable/retry APIs and UI
 - browser safe-event integration and deterministic fake-socket/fake-clock fixtures
-- launcher/startup inventory, graceful shutdown, capability evidence, and deletion extension
+- persisted enable/disable lifecycle restoration after core readiness, launcher/startup inventory, graceful shutdown, capability evidence, and deletion extension
 
 ### Stage 5
 
@@ -2607,7 +2646,7 @@ Every stage keeps new implementation inside the Investments-owned paths from Sec
 
 ### Stage 7A
 
-- monitoring policy, scheduler, alerts, Attention integration
+- persisted monitoring policy, resume-after-core scheduler lifecycle, alerts, and Attention integration
 - launcher/startup documentation and tests
 - notification/badge UI and stress scenarios
 - deletion-service extension for investment monitoring and Attention records
@@ -2635,8 +2674,8 @@ Implementation stops and asks before any of these changes:
 - enabling investment-agent messages in Main Chat before Stage 6's consent, tool-authority, and exact-evidence checks pass;
 - allowing one Chat conversation, agent run, or tool context to cross the QBO/Investments domain boundary;
 - sending portfolio data to an AI provider without the Stage 6 consent flow;
-- enabling monitoring by default;
-- enabling order/execution notifications by default or automatically restarting Level 1 streaming;
+- creating or enabling a monitoring policy without the user's explicit Stage 7A configuration, or ignoring a saved pause/disable choice;
+- enabling order/execution notifications without a saved explicit choice, restarting either persistent background capability before core readiness, or automatically restarting session-scoped Level 1 streaming;
 - exposing the app beyond loopback;
 - extracting Investments into a separate repository, server process, port, deployment, database, or security identity;
 - weakening the Investments/QBO import, data, conversation, evidence, or agent-tool boundary;
@@ -2649,12 +2688,12 @@ Implementation stops and asks before any of these changes:
 - adding external notifications that reveal portfolio values;
 - purchasing or changing a paid Questrade market-data entitlement;
 - expanding from personal application use to a public/partner integration;
-- making normal development startup/check call Questrade, refresh a token, start Level 1, or print investment-private/provider-destination detail.
+- making preview/check or startup-readiness reporting call Questrade; starting an order stream or monitoring policy the user did not enable; starting any enabled background owner before core readiness; auto-starting Level 1; or printing investment-private/provider-destination detail.
 
 ## 27. Definition of done
 
 The complete plan is done only when the user can say, from the dev app:
 
-> The main Chat page treats QBO escalations and Investments as equally important domains, keeps their conversations and evidence separate, and gives me a concise trustworthy investment context plus a direct path to the full workspace. Investments is a clearly owned module that another coding-agent group can work on without importing or rewriting QBO internals, and Questrade failure does not prevent the rest of my personal app from being ready. I connected the intended read-only Questrade Margin account. I can see when the data was retrieved and whether it is real-time. The balances, positions, activity, orders, and executions reconcile with Questrade. Browser and Questrade socket interruptions recover through authoritative REST state instead of hiding gaps. Order/execution notifications are optional, Level 1 streaming is session-scoped and warns about its IQ Platform effect, and no streamed tick becomes a risk conclusion by itself. Failed refreshes preserve the prior snapshot. The risk calculations show their formulas and limitations. Any agent analysis names the exact snapshot, respects my privacy choice, cannot trade, and cannot obtain QBO-only tools or evidence. Monitoring is opt-in, alerts are evidence-backed, exports are secret-safe, and I can revoke or delete local data intentionally. Development startup represents Investments clearly without calling Questrade or printing my account, holdings, balances, orders, quotes, alerts, or connection destination.
+> The main Chat page treats QBO escalations and Investments as equally important domains, keeps their conversations and evidence separate, and gives me a concise trustworthy investment context plus a direct path to the full workspace. Investments is a clearly owned module that another coding-agent group can work on without importing or rewriting QBO internals, and Questrade failure does not prevent the rest of my personal app from being ready. I connected the intended read-only Questrade Margin account for this release, without closing off a separately designed future trading project. I entered the token only in the app's Questrade settings, and the app handled protected-key management and encryption without asking me to do it. I can see when the data was retrieved and whether it is real-time. The balances, positions, activity, orders, and executions reconcile with Questrade. Browser and Questrade socket interruptions recover through authoritative REST state instead of hiding gaps. Order/execution notifications are optional and their explicit enabled/disabled choice survives restart; Level 1 streaming is session-scoped, warns about its IQ Platform effect, and never restarts automatically; no streamed tick becomes a risk conclusion by itself. Failed refreshes preserve the prior snapshot. The risk calculations show their formulas and limitations. Any agent analysis names the exact snapshot, respects my privacy choice, cannot trade in this release, and cannot obtain QBO-only tools or evidence. Monitoring is opt-in, its saved policy resumes only on the approved schedule after core readiness, alerts are evidence-backed, exports are secret-safe, and I can revoke or delete local data intentionally. Development preview/check never contacts Questrade; normal startup performs no hidden brokerage-readiness probe and may resume only the background capabilities I explicitly enabled after the core app is ready. Startup never prints my account, holdings, balances, orders, quotes, alerts, or connection destination.
 
 Passing tests without that hands-on acceptance is not completion.
