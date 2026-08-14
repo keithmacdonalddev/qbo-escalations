@@ -4,13 +4,13 @@
 
 **Created:** 2026-08-14
 
-**Revised:** 2026-08-14 after independent critical review; documentation revision only, with no Questrade implementation started
+**Revised:** 2026-08-14 after independent critical review and socket-hardening review; documentation revision only, with no Questrade implementation started
 
 **Primary decision:** Add Questrade as a separate, read-only Investments domain in the broader operational-intelligence platform. Do not add trade placement, order modification, order cancellation, or autonomous financial action.
 
 **Stage rule:** Every implementation stage ends in a working, testable increment in the user's development app. No later stage may begin until the user completes the stage's hands-on acceptance script and explicitly accepts that gate.
 
-**Review disposition:** The revision accepts the local-server, encryption, identity-lifecycle, snapshot-publication, browser-evidence, provider-card, stage-sizing, dependency, token-recovery, and deletion findings. It does not carry forward the proposed `getSymbol` scope ambiguity because Questrade's current official scope table explicitly assigns `GET symbols/:id` to `read_acc`; Activities remains the one documented account endpoint whose published scope mapping is unclear.
+**Review disposition:** The revision accepts the local-server, encryption, identity-lifecycle, snapshot-publication, browser-evidence, provider-card, stage-sizing, dependency, token-recovery, and deletion findings. It does not carry forward the proposed `getSymbol` scope ambiguity because Questrade's current official scope table explicitly assigns `GET symbols/:id` to `read_acc`; Activities remains the one documented account endpoint whose published scope mapping is unclear. The socket-hardening revision adds a minimal browser event channel, server-only Questrade streams, REST gap reconciliation, deduplication/generation fencing, TLS and destination controls, session maintenance, bounded backoff/circuit breaking, quote staleness, and snapshot-before-alert rules.
 
 ## 1. Practical outcome
 
@@ -56,6 +56,7 @@ Help the user understand a real investment account and make better-informed deci
 - Every agent response identifies the portfolio snapshot it used.
 - Failed refreshes preserve the last successful evidence instead of replacing it with partial data.
 - Historical imports are repeatable and deduplicated.
+- Real-time socket messages act only as change notifications. Complete saved snapshots and REST reconciliation remain the evidence used by calculations and agents.
 - Connection changes, refresh attempts, and user acceptance gates create bounded, secret-free evidence.
 
 ### What this deliberately does not solve
@@ -63,6 +64,8 @@ Help the user understand a real investment account and make better-informed deci
 - It does not place, replace, or cancel orders.
 - It does not request Questrade's `trade` scope.
 - It does not guarantee real-time market data.
+- It does not treat a WebSocket connection as proof that balances, positions, activities, orders, or executions are complete.
+- It does not create an unrestricted tick-by-tick market-data archive.
 - It does not calculate Questrade's proprietary margin requirements.
 - It does not provide tax, legal, or fiduciary advice.
 - It does not expose this local single-user app safely to the public internet.
@@ -79,6 +82,7 @@ These claims must be rechecked immediately before each implementation stage beca
 - `server/src/models/GmailAuth.js` demonstrates `select: false` for token fields so ordinary queries do not return them. This is not encryption and is insufficient by itself for brokerage credentials.
 - `server/src/services/gmail.js` demonstrates token refresh, permission projection, account health, and connection repair patterns.
 - `server/src/app.js` mounts provider-specific server routes under `/api/*`.
+- `server/src/services/realtime-server.js` and `client/src/api/realtime.js` already provide one shared browser-to-server WebSocket with named channels, reconnect backoff, event deduplication, bounded replay, and an authoritative-resync signal. Investment events should extend this shared transport instead of opening a second browser socket.
 - `stress-testing/slices/connected-services/` and `server/test/connected-services-harness.test.js` provide a controlled external-service-stub pattern.
 - `testing/app-capabilities.json`, `testing/check-profiles.json`, and `scripts/run-app-checks.js` provide honest `passed`, `failed`, and `incomplete` verification contracts.
 - `server/src/services/agent-tool-capabilities.js` provides server-owned maximum tool permissions for agents. Prompt text alone is not authority.
@@ -92,6 +96,7 @@ These claims must be rechecked immediately before each implementation stage beca
 - The app has no general login layer protecting all APIs. CORS, which is the browser's cross-origin request control, is not authentication and currently does not validate the incoming `Host` name. Stage 1 must harden the entire local HTTP and WebSocket boundary before adding the first Questrade route. The first Questrade release must remain loopback-only unless a separate authentication project is approved.
 - Stored Gmail tokens are excluded from normal reads but are not an acceptable encryption precedent for brokerage tokens.
 - The current testing capability map has no investments capability or focused Investments verification profile.
+- No server-owned Questrade notification or Level 1 quote-stream supervisor exists.
 
 ### Concurrent-work boundary
 
@@ -112,11 +117,20 @@ Official Questrade documentation was checked on 2026-08-14. Stage 0 must recheck
 - Questrade's current scope table explicitly includes `GET symbols/:id`, `GET symbols/:id/options`, and `GET markets` under `read_acc`; security classification does not require `read_md` under the current contract.
 - `read_md` covers quotes and candles.
 - Questrade documents `trade` as partner-only. This project will not request or implement it even if it later becomes available.
+- Questrade supports RawSocket and WebSocket streaming. This plan chooses WebSocket only.
+- Questrade's notification stream can send order-status changes and executions. It does not stream balances, positions, or Activities, so normal REST synchronization remains required.
+- Questrade supports Level 1 quote streaming when `stream=true`; quote access belongs to `read_md` and remains separately permission-gated.
+- Questrade returns a stream port from an authenticated request. The port may vary by API server and day, so it must be validated from a trusted response rather than hard-coded or accepted from the browser.
+- Questrade says a second RawSocket/WebSocket connection replaces the previous connection, and that an access token must be sent promptly after WebSocket connection without the `Bearer` prefix. The app therefore needs one server-owned supervisor per stream kind and must never expose that handshake to the browser.
+- Keeping the socket open does not keep the Questrade session active. Questrade requires authenticated requests at least every 30 minutes, so an enabled stream needs bounded session maintenance plus normal token-expiry handling.
+- Questrade warns that Level 1 API streaming can freeze market data in another IQ Platform used at the same time. Live quote streaming must therefore be separately opt-in, session-scoped, and preceded by a plain-language warning.
 
 Official references:
 
 - [Authorization](https://www.questrade.com/api/documentation/authorization)
 - [Security, token exchange, revocation, and scopes](https://www.questrade.com/api/documentation/security)
+- [Streaming](https://www.questrade.com/api/documentation/streaming)
+- [Current market-data packages and pricing](https://www.questrade.com/pricing/self-directed-commissions-plans-fees/market-data/)
 
 ### Data facts
 
@@ -124,7 +138,7 @@ Official references:
 - Balances include per-currency and combined values such as cash, market value, total equity, buying power, maintenance excess, and a real-time flag.
 - Positions include quantity, price, market value, average entry price, open and closed profit/loss, total cost, real-time status, and reorganization status.
 - Activities include trades, dividends, interest, commissions, and other cash movements. A single activity request may span no more than 31 days.
-- The current scope table does not explicitly list the Activities endpoint even though Questrade documents the endpoint. Preflight records Activities as the remaining external-contract ambiguity, and Stage 4 requires a safe live `read_acc` probe before promising activity import.
+- The current scope table does not explicitly list the Activities endpoint even though Questrade documents the endpoint. Preflight records Activities as the remaining external-contract ambiguity, and Stage 4A requires a safe live `read_acc` probe before promising activity import.
 - Orders and executions expose their own status and timestamps and must not be inferred from position changes.
 - Questrade returns rate-limit headers and documents different limits for account and market-data calls.
 
@@ -159,6 +173,12 @@ If live Questrade behavior disagrees with the documentation:
 | Refresh behavior | Server-owned, single-flight token refresh | Prevents two requests from racing with the same refresh credential. |
 | Data architecture | Questrade-specific connection adapter plus provider-neutral investment records | Supports another brokerage later without pretending all broker APIs are identical. |
 | Initial refresh cadence | Manual refresh only | Makes data provenance and rate use easy to test before background monitoring exists. |
+| Browser real-time updates | Reuse `/api/realtime` with an `investment-account` channel; each investment `data` payload contains only `accountKey`, an allowlisted event type, event time, and nullable snapshot ID | The existing shared transport already has reconnect/resync behavior, and the browser must refetch authoritative data after every event or replay gap. |
+| Questrade order/execution stream | Optional and off by default in Stage 4B | It improves freshness for brokerage actions made elsewhere without changing this app's read-only authority. |
+| Questrade Level 1 quote stream | Separate session-scoped opt-in in Stage 7B; never starts automatically | It needs `read_md`, may affect another IQ Platform, and must not silently become a permanent background side effect. |
+| Market-data cost/entitlement | Use only the user's existing Questrade entitlement; never purchase or change a market-data plan | Stage 7B rechecks current pricing/entitlement and displays Questrade's real-time/delayed result before promising freshness. |
+| Socket authority | Notification only; REST records and complete snapshots remain authoritative | A socket can disconnect or omit messages, and Questrade does not stream the complete account state. |
+| Missed-message recovery | Assume every upstream disconnect creates a gap and run bounded overlapping REST reconciliation before calling the stream healthy | Questrade does not document a replay cursor or sequence that proves no order/execution notification was missed. |
 | Historical storage | Normalized, deduplicated data; no unrestricted raw brokerage payload archive | Preserves useful evidence while reducing sensitive-data spread. |
 | Monetary values | Decimal-safe representation; never binary floating-point for stored calculations | Avoids rounding drift in financial calculations. |
 | Cross-currency totals | Use Questrade's explicitly reported combined balance or show currencies separately | The app must not silently add CAD and USD as if they are the same unit. |
@@ -204,6 +224,8 @@ When synchronized:
 - total equity, maintenance excess, buying power, and cash by currency in one compact summary bar;
 - positions table as the main first-viewport working surface;
 - the previous snapshot remains visible if a refresh fails, with a clear failure notice.
+- healthy browser real-time transport stays visually quiet; reconnecting, stale, reconciliation, or polling-fallback status appears only when it changes what the user can trust or when work is active.
+- order/execution notification status appears near Orders only after Stage 4B, and Level 1 quote status appears near quote/monitoring controls only after Stage 7B. Neither creates another top-level navigation surface.
 
 ### Progressive disclosure
 
@@ -211,6 +233,7 @@ When synchronized:
 - Technical permission identifiers stay behind a disclosure; plain-English permissions remain visible.
 - Detailed calculation definitions stay behind `How this is calculated` disclosures.
 - Agent provider/privacy consent appears only when the user first enables an investment agent or changes its provider.
+- The Level 1 IQ Platform interference warning appears immediately before each session Start, not as a permanent large card. Stream diagnostics remain behind a health disclosure unless action is required.
 - Destructive actions such as forgetting credentials or deleting history use a stable confirmation dialog and explicit consequences.
 
 ### Required interaction states
@@ -224,8 +247,12 @@ flowchart LR
     U[User] --> S[Connected Accounts]
     S --> C[Questrade connection service]
     C --> QT[Questrade HTTPS API]
+    QT -. optional order, execution, and L1 streams .-> QS[Server-owned Questrade stream supervisor]
+    QS --> C
     C --> N[Validated normalized records]
     N --> P[Investments workspace]
+    N --> E[Safe investment realtime events]
+    E -. small change signal only .-> P
     N --> R[Deterministic risk engine]
     R --> P
     N --> T[Read-only investment tools]
@@ -276,6 +303,45 @@ flowchart TD
     I --> J[Preserve previous successful snapshot]
 ```
 
+### Socket update and recovery sequence
+
+```mermaid
+flowchart TD
+    A[Saved state or Questrade stream indicates a change] --> B[Normalize and deduplicate on the server]
+    B --> C[Publish safe investment-account event]
+    C --> D[Browser receives identifier, status, and time only]
+    D --> E[Browser GETs current authoritative state]
+    F[Browser socket reconnect or replay gap] --> E
+    G[Questrade socket disconnect, token change, or inactivity] --> H[Mark upstream stream recovering]
+    H --> I[Reconnect with bounded backoff]
+    I --> J[Run overlapping REST reconciliation]
+    J -->|complete| K[Mark upstream stream healthy]
+    J -->|incomplete| L[Remain degraded and preserve prior evidence]
+```
+
+For the browser socket, a missed event causes a normal API refetch. For the upstream Questrade socket, any interruption is treated as a possible data gap; the app does not call the stream healthy again until REST reconciliation succeeds.
+
+### Browser investment event allowlist
+
+The `investment-account` channel may publish only these event types as their stages land:
+
+- `sync.started`
+- `sync.progressed`
+- `snapshot.published`
+- `sync.failed`
+- `connection.reauthorization-required`
+- `history-import.changed`
+- `order.changed`
+- `execution.recorded`
+- `monitoring.alert.opened`
+- `monitoring.alert.updated`
+- `monitoring.alert.resolved`
+- `upstream-stream.status-changed`
+- `quotes.changed`
+- `quotes.stale`
+
+Every investment `data` payload uses the same four-field envelope: `accountKey`, `eventType`, `occurredAt`, and nullable `snapshotId`. The existing shared transport wrapper may add its already-defined channel, subscription, event ID, sequence, and resync metadata, but no investment/provider fields. Adding another data field or event type requires a contract/test update; arbitrary provider event names or payload spreads are forbidden.
+
 ## 8. Security and privacy design
 
 ### Protected assets
@@ -318,6 +384,10 @@ flowchart TD
 - Disable automatic cross-host redirects for authenticated brokerage requests.
 - Use the access token only in the `Authorization: Bearer` header, never a query string.
 - Define an explicit allowlist of Questrade paths and HTTP methods. Authenticated account data permits `GET` only.
+- The upstream Questrade WebSocket is created only by the server. The browser never receives the Questrade stream host, port, access token, or raw stream message.
+- Derive the stream host only from the already validated `api_server` origin. Accept a stream port only from the expected authenticated Questrade REST operation, require an integer from `1` through `65535`, and never accept a complete socket URL from Questrade data, the database, a fixture, or the browser.
+- Require a TLS-protected `wss:` connection with normal certificate verification before sending an access token. Because Questrade's public streaming page does not state the WebSocket TLS URL explicitly, Stage 4B must prove the secure live handshake; if Questrade supports only plaintext for the applicable endpoint, live streaming remains disabled rather than sending a token over an unencrypted socket.
+- Send the access token only as Questrade's first WebSocket authentication message, without `Bearer`, inside the documented five-second window. Redact it from errors, close reasons, traces, fixtures, and packet-level diagnostic output.
 
 #### Browser-to-local-server protection
 
@@ -336,6 +406,23 @@ flowchart TD
 - Central logs may record request ID, operation, status code, duration, safe provider error code, retry decision, and rate-limit metadata.
 - Sanitization tests must search serialized API responses, logs, sync evidence, and agent evidence for fixture secrets.
 - Questrade HTTP payloads are not model-provider packages and must not enter the provider payload store.
+- Questrade stream payloads follow the same rule. Persist only normalized order/execution records, bounded stream-health evidence, and separately approved quote observations; never archive raw frames.
+
+#### Socket authority, recovery, and lifecycle
+
+- The shared browser WebSocket carries notification metadata only. Its investment `data` payload contains exactly a safe `accountKey`, an allowlisted event type, event time, and nullable snapshot ID; only the existing generic transport wrapper may add channel/subscription/sequence/resync metadata. It carries no progress values, run/order/execution/alert identifiers, financial values, raw broker IDs, account number, token, status/error detail, provider frame, or agent prompt; the browser obtains those through the relevant REST endpoint.
+- The browser refetches the relevant REST resource after an event. On reconnect, sequence gap, process-generation change, or `resyncRequired`, it refetches current connection, active run, latest snapshot, and visible alerts before clearing the stale indicator.
+- If the browser socket is unavailable during an active synchronization or history import, use bounded fallback polling of the run-status endpoint. Stop polling immediately when the operation completes, the view unmounts, or the user cancels.
+- Run at most one upstream Questrade notification socket and one Level 1 socket per connection. A single-flight supervisor rejects duplicate starts and uses a generation/fencing value so events from a closing old socket cannot update current state.
+- Treat every upstream close, error, authentication rejection, token rotation, server restart, inactivity deadline, and network transition as a possible message gap. Mark the stream `recovering` or `degraded`; never leave it visibly `live`.
+- Reconnect with exponential backoff and random jitter, a maximum delay, and a consecutive-failure circuit breaker. Respect Questrade rate-limit reset metadata and provide a manual retry; do not create a tight reconnect/reconciliation loop.
+- Before first connection and after every reconnect, refresh, or process restart, establish a REST baseline. Reconcile orders/executions from the last durable checkpoint with a bounded overlap window, upsert by provider identity, ignore stale state regressions, and only then mark notifications healthy.
+- Since Questrade does not document a replay sequence for upstream notifications, no amount of socket uptime proves completeness. Periodic REST reconciliation continues while streaming is enabled and on clean disable/shutdown when a final bounded read is safe.
+- While an upstream stream is enabled, complete a lightweight authenticated REST session-maintenance call no later than 20 minutes after the previous successful authenticated call. This provides margin under Questrade's 30-minute rule, is counted against the account-call rate budget, and does not replace expiry-based single-flight token refresh.
+- Coordinate token rotation with the supervisor: stop accepting old-generation frames, durably save the new token pair, authenticate a new socket, run overlap reconciliation, and only then retire the recovering state.
+- On graceful server shutdown, stop new reconnects, close upstream sockets, persist safe final status/checkpoint evidence, and drain already-normalized writes. Startup never silently enables Level 1 streaming.
+- For Level 1 quotes, keep only a bounded in-memory latest-quote cache unless a normalized snapshot explicitly records a value. Mark quotes stale after the configured inactivity threshold, clear them on account/symbol deselection, and do not retain an unrestricted tick history.
+- A streamed quote may raise a threshold candidate, but it cannot open or resolve a durable risk alert directly. Debounce the candidate, run a complete rate-budgeted REST snapshot plus deterministic assessment, and create or resolve an alert only from that evidence.
 
 #### Agent privacy
 
@@ -361,6 +448,15 @@ flowchart TD
 | Rate limit | Preserve prior snapshot and show exact safe retry time | 429 fixture and UI test |
 | Stale data mistaken as current | Exact age and `isRealTime` state remain visible | Component and browser gate |
 | Multiple currencies silently combined | Currency remains attached to every value | Normalizer and UI tests |
+| Browser misses an investment event | Client receives replay or `resyncRequired`, then refetches authoritative REST state; active work has bounded polling fallback | Reconnect, replay-gap, process-generation, and socket-disabled tests |
+| Questrade stream drops silently | Inactivity deadline marks it degraded and triggers bounded reconnect plus REST overlap reconciliation | Fake-clock inactivity and missed-event recovery tests |
+| Questrade disconnects the prior duplicate stream | Single-flight supervisor and generation fencing permit one owner per stream kind | Concurrent-start and stale-generation tests |
+| Order/execution frame is duplicated or out of order | Stable upsert keys deduplicate; older updates cannot regress current order state | Duplicate, reordering, and stale-frame fixtures |
+| Token rotates while a stream is open | Old generation is fenced, new socket authenticates, and REST reconciliation completes before healthy status | Refresh-during-stream fixture |
+| Malicious or plaintext stream destination | Host derives from validated API origin, port is bounded, and `wss:` with certificate verification is mandatory | Invalid-port, host-swap, redirect, and TLS-downgrade tests |
+| Questrade session expires despite open socket | Rate-budgeted authenticated call completes within 20 minutes and failure degrades the stream | Fake-clock session-maintenance and 401/429 tests |
+| Quote stream stops updating | Quote becomes stale/unknown; it cannot support a new assessment or alert until verified | Inactivity, closed-market, and reconnect tests |
+| Streamed quote alone triggers a risk alert | Quote only creates a candidate; complete snapshot and deterministic assessment are required | Candidate debounce and evidence-reference tests |
 | Agent invents portfolio facts | Output validator requires snapshot references and separates facts from assumptions | Agent harness tests |
 | Trade path accidentally appears | Source inventory rejects write methods and forbidden tool names | Static contract test |
 | Development fixture enabled in production | App refuses startup or omits the fixture routes | Environment gate test |
@@ -433,7 +529,7 @@ Purpose: prove what each refresh attempted and whether it was complete.
 Key fields:
 
 - `runId`, `requestId`, `provider`, `accountKey`
-- `trigger`: `manual`, `history-backfill`, or later `scheduled`
+- `trigger`: `manual`, `history-backfill`, later `scheduled`, `stream-reconciliation`, or `quote-threshold-candidate`
 - `status`: `running`, `succeeded`, `failed`, `incomplete`, `cancelled`
 - start and completion timestamps
 - safe operation steps with status and count, never payload bodies
@@ -442,6 +538,7 @@ Key fields:
 - sanitized failure code and recovery action
 - published snapshot ID and hash when successful
 - prior snapshot ID preserved on failure
+- originating stream generation/candidate ID when applicable, using opaque internal values only
 
 ### `PortfolioSnapshot`
 
@@ -449,7 +546,7 @@ Purpose: immutable account state used by the UI, calculations, and agents.
 
 Key fields:
 
-- `snapshotId`, `schemaVersion`, `provider`, `accountKey`
+- `snapshotId`, `syncRunId`, `schemaVersion`, `provider`, `accountKey`
 - `observedAt` from Questrade time and `fetchedAt` from this server
 - `sourceIsRealTime` plus per-section/per-position flags when they disagree
 - `sourceResponseHash` over canonical normalized data, not raw secret-bearing traffic
@@ -515,7 +612,32 @@ Rules:
 - Use provider IDs only inside the server; return opaque internal IDs to the browser unless the user explicitly asks to inspect a broker ID.
 - Upsert orders by provider order identity and update time.
 - Upsert executions by provider execution identity.
+- Apply the same upsert contract to REST and streamed observations. A duplicate is harmless, and an older streamed observation cannot regress a newer saved order state.
+- Record first/last observed time and the normalized source kind (`rest-import`, `rest-reconciliation`, or `stream-notification`) without storing raw frames.
 - Never derive an execution from an order status or position delta.
+
+### `InvestmentStreamState` (Stages 4B and 7B)
+
+Purpose: retain the user's stream choice, a safe recovery checkpoint, and enough health evidence to explain whether live updates can be trusted.
+
+Key fields:
+
+- `provider`, `ownerKey`, `accountKey`, and stream kind: `order-notifications` or `l1-quotes`
+- `enabled` for order notifications; Level 1 activation is session-scoped and therefore is never restored as active after process startup
+- status: `disabled`, `connecting`, `authenticating`, `reconciling`, `live`, `stale`, `cooldown`, `circuit-open`, `reauthorization-required`, or `unsupported`
+- opaque stream generation and safe supervisor owner identity; never socket URL, port, or token
+- `lastConnectedAt`, `lastMessageAt`, `lastDisconnectedAt`, and `lastSuccessfulRestReconciliationAt`
+- durable order/execution reconciliation checkpoint plus bounded overlap policy version
+- next retry time, consecutive safe failure count, and sanitized last failure code
+- latest session-maintenance success time and rate-limit reset metadata
+
+Rules:
+
+- runtime socket objects and raw frames are never persisted;
+- only a completed REST reconciliation advances the durable completeness checkpoint;
+- a process restart always begins `reconciling`, never `live`;
+- Level 1 latest quotes stay in a bounded runtime cache and are not written here;
+- deletion disables the stream before removing this record and its related investment data.
 
 ### `InvestmentRiskAssessment`
 
@@ -533,7 +655,7 @@ Key fields:
 - scenario inputs, excluded positions, warnings, and outputs
 - completeness state
 
-### `InvestmentAlert` (Stage 7 only)
+### `InvestmentAlert` (Stage 7A only)
 
 Purpose: durable, deduplicated attention item for a user-defined threshold or connection failure.
 
@@ -557,7 +679,8 @@ Key fields:
 - `server/src/models/BrokerageOrder.js`
 - `server/src/models/BrokerageExecution.js`
 - `server/src/models/InvestmentRiskAssessment.js`
-- `server/src/models/InvestmentAlert.js` in Stage 7
+- `server/src/models/InvestmentAlert.js` in Stage 7A
+- `server/src/models/InvestmentStreamState.js` in Stages 4B and 7B
 - `server/src/lib/field-encryption.js`
 - `server/src/lib/local-request-host-policy.js` for the app-wide incoming HTTP and WebSocket boundary
 - `server/src/lib/questrade-api-host-policy.js` for Questrade's outbound `api_server` destination
@@ -565,9 +688,11 @@ Key fields:
 - `server/src/services/questrade/token-service.js`
 - `server/src/services/questrade/normalizers.js`
 - `server/src/services/questrade/fixture-adapter.js`
+- `server/src/services/questrade/stream-supervisor.js` in Stage 4B
 - `server/src/services/investment-sync-service.js`
 - `server/src/services/investment-history-service.js`
 - `server/src/services/investment-risk-engine.js`
+- `server/src/services/investment-realtime-events.js` and `server/src/services/realtime-channels/investment-account.js`
 - `server/src/routes/questrade.js`
 - `server/src/routes/investments.js`
 
@@ -591,7 +716,8 @@ Do not use a generic `/proxy` endpoint.
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/investments/accounts` | List masked connected investment accounts and selection state |
-| `POST /api/investments/accounts/:accountKey/sync` | Perform one manual, read-only complete snapshot sync |
+| `POST /api/investments/accounts/:accountKey/sync` | Start one manual, read-only complete snapshot sync and return `202` with its opaque run ID; a duplicate active request returns the existing run |
+| `GET /api/investments/sync-runs/:runId` | Read durable synchronization progress/outcome for socket resync and bounded polling fallback |
 | `GET /api/investments/accounts/:accountKey/snapshots/latest` | Return latest complete snapshot and freshness |
 | `GET /api/investments/accounts/:accountKey/snapshots` | Return bounded historical snapshot summaries |
 | `POST /api/investments/accounts/:accountKey/history-imports` | Start bounded 31-day-chunk activity/order/execution import |
@@ -600,6 +726,15 @@ Do not use a generic `/proxy` endpoint.
 | `GET /api/investments/accounts/:accountKey/activities` | Filter normalized activity |
 | `GET /api/investments/accounts/:accountKey/orders` | Filter orders by date/status |
 | `GET /api/investments/accounts/:accountKey/executions` | Filter actual executions |
+| `GET /api/investments/accounts/:accountKey/streams` | Return safe notification/quote stream status, staleness, and last reconciliation time |
+| `POST /api/investments/accounts/:accountKey/order-stream/intent` | Create a short-lived intent to enable, disable, or retry order/execution notifications |
+| `POST /api/investments/accounts/:accountKey/order-stream/enable` | Enable the optional server-owned notification stream after a REST baseline |
+| `POST /api/investments/accounts/:accountKey/order-stream/disable` | Stop reconnects, perform a final safe reconciliation when possible, and close the stream |
+| `POST /api/investments/accounts/:accountKey/order-stream/retry` | Manually retry after circuit-open or degraded state without bypassing backoff/rate limits |
+| `POST /api/investments/accounts/:accountKey/quote-stream/intent` | Create a short-lived, warning-bound intent for one session-scoped Level 1 stream |
+| `POST /api/investments/accounts/:accountKey/quote-stream/start` | Start an explicitly approved Level 1 session for selected position symbols |
+| `POST /api/investments/accounts/:accountKey/quote-stream/stop` | Stop the Level 1 session and clear its volatile quote cache |
+| `GET /api/investments/accounts/:accountKey/quotes/latest` | Return the bounded volatile latest-quote view with source/freshness labels after a safe browser event |
 | `POST /api/investments/accounts/:accountKey/risk-assessments` | Calculate a deterministic assessment from an exact snapshot |
 | `GET /api/investments/risk-assessments/:assessmentId` | Read the immutable assessment and formulas |
 | `POST /api/investments/local-data/deletion-intent` | Create an exact, short-lived intent for the currently implemented local investment record types |
@@ -633,6 +768,12 @@ Token redemption and revocation are the only Questrade-hosted POST operations pe
 - `INVESTMENT_SYNC_INCOMPLETE`
 - `INVESTMENT_SNAPSHOT_STALE`
 - `INVESTMENT_HISTORY_IMPORT_INCOMPLETE`
+- `QUESTRADE_STREAM_UNSUPPORTED`
+- `QUESTRADE_STREAM_AUTHENTICATION_FAILED`
+- `QUESTRADE_STREAM_RECONCILING`
+- `QUESTRADE_STREAM_STALE`
+- `QUESTRADE_STREAM_CIRCUIT_OPEN`
+- `QUESTRADE_STREAM_TLS_REQUIRED`
 - `INVESTMENT_AI_CONSENT_REQUIRED`
 
 All failures use the project's `{ ok: false, code, error }` response shape. Messages explain what happened, what was preserved, and what the user should do next.
@@ -653,7 +794,8 @@ The transport exports named operations rather than a general request method:
 - `getActivities`
 - `getOrders`
 - `getExecutions`
-- later `getQuote` and `getCandles` only if `read_md` is approved
+- `requestOrderNotificationStream` in Stage 4B, returning validated connection metadata only to the server-owned supervisor
+- later `getQuote`, `getCandles`, and `requestL1QuoteStream` only if `read_md` and Stage 7B are approved
 
 ### Timeouts and retry behavior
 
@@ -679,6 +821,19 @@ The transport exports named operations rather than a general request method:
 - Reject impossible currency identifiers, invalid dates, non-finite numbers, or missing account identities.
 - Allow legitimate zero, negative cash, negative position quantity, and negative P/L values.
 - Treat missing as unknown, not zero.
+
+### Streaming operations and hardening
+
+- The REST transport obtains and validates Questrade stream connection metadata. Only the dedicated supervisor may create a WebSocket; the general REST transport does not expose a user-controlled request or socket method.
+- Authenticate inside five seconds, require Questrade's explicit success response, and reject any order/execution/quote frame received before successful authentication.
+- Validate every frame's top-level shape, account match, identifiers, timestamps, symbol IDs, and numeric values before normalization. Match the provider account number only inside the server against known encrypted identities; ignore a known but unselected account, while an unknown account identity degrades the stream and triggers an account/REST reconciliation. One invalid frame is not partially applied.
+- Use a bounded message size, bounded parse time, bounded in-memory pre-baseline buffer, and per-connection event-rate ceiling to prevent memory exhaustion. Buffer overflow closes/degrades the stream and falls back to REST reconciliation.
+- Establish baseline REST state before applying live frames. Frames that arrive during baseline creation may be buffered only within the strict bound, then normalized and deduplicated after baseline publication.
+- Use an inactivity deadline based on the stream kind and market state. Do not confuse a quiet order stream or a closed market with proof of failure; session-maintenance failure, socket close/error, or an exceeded documented/tested inactivity policy changes health.
+- Reconnect backoff uses randomized delays and opens a circuit after the configured consecutive failures. The circuit remains visible and requires the next scheduled window or explicit retry; it never loops indefinitely.
+- REST reconciliation uses the last successful checkpoint minus a documented overlap, current open orders, and recent executions. It advances the checkpoint only after every required page/window succeeds.
+- The order/execution socket is a freshness accelerator, not the history importer. Activities always use Stage 4A REST imports.
+- The Level 1 stream updates only a volatile latest-quote view. It never mutates a saved `PortfolioSnapshot`; a complete explicit/scheduled sync remains the publication boundary.
 
 ## 12. Development fixture system
 
@@ -722,8 +877,19 @@ The user must be able to test dangerous and rare states without manipulating the
 21. `high-concentration`
 22. `margin-pressure`
 23. `resolved-alert`
+24. `browser-realtime-replay-gap`
+25. `order-stream-duplicate-out-of-order`
+26. `order-stream-drop-missed-execution`
+27. `order-stream-token-rotation`
+28. `order-stream-session-expired`
+29. `order-stream-circuit-open`
+30. `malicious-stream-port-or-tls-downgrade`
+31. `stream-reconciliation-rate-limited`
+32. `quote-stream-live-then-stale`
+33. `quote-stream-threshold-candidate`
+34. `quote-stream-read-md-missing`
 
-Each fixture has a version, expected normalized counts, and a safe secret canary used by leakage tests. Relevant fixtures may carry hand-calculated risk expectations from the beginning as test-first reference data, but those expectations are marked `pending-stage-5` and do not count as passing evidence for Stages 1 through 4. Stage 5 reviews, versions, and activates them against the approved formula contract.
+Each fixture has a version, expected normalized counts, expected socket/reconciliation state where applicable, and a safe secret canary used by leakage tests. Socket fixtures use an isolated fake WebSocket server and fake clock; they never contact Questrade. Relevant fixtures may carry hand-calculated risk expectations from the beginning as test-first reference data, but those expectations are marked `pending-stage-5` and do not count as passing evidence for Stages 1 through 4B. Stage 5 reviews, versions, and activates them against the approved formula contract.
 
 ## 13. Testing and verification strategy
 
@@ -743,9 +909,11 @@ Add the following capabilities to `testing/app-capabilities.json` as their stage
 - `questrade-connection-safety`
 - `investment-portfolio-snapshot`
 - `investment-history`
+- `investment-realtime-notifications`
 - `investment-margin-risk`
 - `investment-agent-analysis`
 - `investment-monitoring`
+- `investment-market-streaming`
 
 Each capability names its source paths, required evidence types, current evidence, and known gaps. A static map may prove evidence is mapped, but only a completed run may claim it passed.
 
@@ -758,6 +926,7 @@ Expected final groups:
 - focused Questrade server tests;
 - focused Investments client tests;
 - connected-services harness contracts;
+- deterministic browser-channel and upstream-stream supervisor suites using fake WebSocket servers, fake clocks, and no live Questrade traffic;
 - deterministic Investments service/snapshot stress slice that does not depend on a real browser;
 - a separately reported automated Investments browser journey when the transport is available;
 - testing-map validation;
@@ -777,6 +946,10 @@ Expected final groups:
 - complete single-document snapshot publication, sync-run reconciliation, and prior-snapshot preservation;
 - activity 31-day chunk boundaries and idempotent deduplication;
 - order/execution separation;
+- browser investment-channel replay, deduplication, authoritative resync, and fallback polling;
+- upstream single-owner/generation fencing, bounded frame parsing, session maintenance, reconnect backoff, circuit breaking, and graceful shutdown;
+- order/execution stream gap recovery through overlapping REST reconciliation;
+- Level 1 quote staleness, volatile-cache bounds, and snapshot-before-alert enforcement;
 - rate-limit and timeout mapping;
 - disconnect and revocation-pending behavior;
 - API serializers never expose secrets or raw account numbers;
@@ -792,6 +965,8 @@ Expected final groups:
 - currency formatting and unknown-value behavior;
 - loading, empty, warning, error, and success states;
 - history import progress/cancel/resume;
+- real-time status that distinguishes connecting, reconciling, live, stale, cooldown, circuit-open, disabled, and unsupported;
+- browser socket reconnect/resync that refetches canonical state instead of trusting a missed event stream;
 - deterministic risk formula disclosures;
 - stale and non-real-time warnings;
 - agent consent and snapshot-reference display;
@@ -852,10 +1027,12 @@ This table is updated immediately when a gate changes state so the plan never ap
 | 2 | Live connection, token refresh, repair, and revoke | `not-started` | Live connect/reload/reauthorize/revoke/reconnect script |
 | 3A | Snapshot engine and visible reconciliation workbench | `not-started` | Fixture/partial-failure reconciliation, live comparison, and local-data deletion in the dev app |
 | 3B | Investments workspace | `not-started` | Accepted desktop/mobile portfolio workspace using the Stage 3A snapshot contract |
-| 4 | Activities, orders, executions, and history import | `not-started` | Duplicate/resume fixtures plus live activity comparison |
+| 4A | Activities, orders, executions, and REST history import | `not-started` | Duplicate/resume fixtures plus live activity comparison |
+| 4B | Optional Questrade order/execution notifications | `not-started` | Drop/gap/reconnect/token fixtures plus secure live handshake and REST reconciliation |
 | 5 | Deterministic margin and risk calculations | `not-started` | Hand-calculated fixtures plus selected live arithmetic |
 | 6 | Read-only investment agent team | `not-started` | Privacy consent, behavior harness, and one controlled live analysis |
-| 7 | Opt-in monitoring and Attention integration | `not-started` | Threshold lifecycle, disable proof, and user-owned startup/shutdown |
+| 7A | Opt-in scheduled monitoring and Attention integration | `not-started` | Threshold lifecycle, disable proof, and user-owned startup/shutdown |
+| 7B | Session-scoped Level 1 quote streaming | `not-started` | Permission/warning, stale/reconnect/candidate fixtures, secure live quote comparison, and clean stop |
 | 8 | Recovery, export, deletion, and release | `not-started` | Complete desktop/mobile workflow and final release decision |
 
 ### Required stage handoff
@@ -902,7 +1079,7 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 
 ### Work
 
-1. Recheck official Questrade authorization, security, scopes, activity window, rate limits, and license links. Confirm that `GET symbols/:id` remains under `read_acc`; treat Activities—not symbol lookup—as the current scope ambiguity.
+1. Recheck official Questrade authorization, security, scopes, streaming, activity window, rate limits, and license links. Confirm that `GET symbols/:id` remains under `read_acc`; treat Activities—not symbol lookup—as the current scope ambiguity.
 2. Confirm the user can see **API Centre > Personal applications** and generate a personal-app refresh token.
 3. Confirm the account type displayed by Questrade is Margin.
 4. Confirm recommended scope choice: `read_acc`; `read_md` remains optional and deferred until needed.
@@ -913,11 +1090,17 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 9. Confirm the app remains loopback-only.
 10. Confirm the user will enter all live secrets directly into the local app, never chat or source code.
 11. Confirm the app may run with Questrade disabled, but a configured encryption key is mandatory before any live connection or account identity is stored.
+12. Confirm order/execution notifications remain optional and off until Stage 4B user activation.
+13. Confirm `read_md` is deferred to Stage 7B and is required only for market quotes/candles/Level 1 streaming, not the core account snapshot.
+14. Confirm Level 1 streaming is session-scoped, never auto-starts, stores no unrestricted tick history, and will show Questrade's warning that it can freeze market data in another IQ Platform used simultaneously.
+15. Confirm the app will disable live streaming rather than send a token through a plaintext or otherwise unverified WebSocket endpoint.
+16. Recheck current Questrade API and market-data pricing/entitlement before Stage 7B. Record whether the user's existing access produces real-time or delayed Level 1 data; any paid subscription change requires a separate user decision outside this app.
 
 ### Gate 0 acceptance criteria
 
 - Personal application access is available.
 - The user accepts read-only scope, local retention, and no trading.
+- The user accepts the optional streaming defaults, REST-as-authority rule, and Level 1 IQ Platform warning boundary.
 - Any required license agreement is reviewed by the user.
 - No live token is copied into a planning document, issue, commit, or chat.
 
@@ -1070,13 +1253,18 @@ The user can trigger and inspect a complete simulated or live portfolio synchron
 2. Review and explicitly approve one direct decimal-arithmetic dependency before installation; record why it was chosen, its license, maintenance state, and the exact server paths allowed to use it.
 3. Add decimal-safe normalizers for accounts, balances, and positions.
 4. Implement complete snapshot synchronization with one total deadline.
-5. Validate every required section in memory and insert one complete immutable snapshot document only after validation succeeds.
-6. Query the latest complete snapshot through the account/time index; do not maintain a separate latest pointer.
-7. Add idempotent sync-run finalization and reconciliation for a snapshot inserted immediately before a secondary evidence-write failure.
-8. Preserve the prior successful snapshot after any failed or incomplete refresh.
-9. Add a development-only **Questrade snapshot reconciliation** panel under Settings > Developer Tools. It exposes normalized field labels, counts, currency, observed/fetched time, real-time state, snapshot ID/hash, sync steps, and safe failure status—never raw payloads or account numbers.
-10. Add the first bounded local-investment-data deletion service and a user-facing **Delete local investment data** action under Questrade data/privacy settings. At this stage it deletes only account metadata, sync runs, and snapshots; credentials remain a separate forget/disconnect decision.
-11. Add `investment-portfolio-snapshot` capability evidence for the Stage 3A source and workbench paths.
+5. Make manual synchronization a server-owned run: return `202` with its opaque run ID, allow only one active snapshot run per account, and reconcile an interrupted `running` record on the next startup/status read.
+6. Validate every required section in memory and insert one complete immutable snapshot document only after validation succeeds.
+7. Query the latest complete snapshot through the account/time index; do not maintain a separate latest pointer.
+8. Add idempotent sync-run finalization and reconciliation for a snapshot inserted immediately before a secondary evidence-write failure.
+9. Preserve the prior successful snapshot after any failed or incomplete refresh.
+10. Add `GET /api/investments/sync-runs/:runId` so progress and completion can be recovered independently of a browser socket.
+11. Extend the existing shared `/api/realtime` service with an `investment-account` channel and server event source. Publish only the four-field event envelope after the corresponding durable sync/snapshot or connection-reauthorization state transition commits.
+12. Implement bounded replay, process-generation/resync handling, event deduplication, and active-run polling fallback using the existing shared real-time client. A socket event causes a normal REST refetch; it never supplies authoritative financial values.
+13. Add development controls that can drop the browser socket, force an event replay gap, and disable WebSocket transport while a fixture sync is running.
+14. Add a development-only **Questrade snapshot reconciliation** panel under Settings > Developer Tools. It exposes normalized field labels, counts, currency, observed/fetched time, real-time state, snapshot ID/hash, sync steps, browser real-time health, and safe failure status—never raw payloads or account numbers.
+15. Add the first bounded local-investment-data deletion service and a user-facing **Delete local investment data** action under Questrade data/privacy settings. At this stage it deletes only account metadata, sync runs, and snapshots; credentials remain a separate forget/disconnect decision.
+16. Add `investment-portfolio-snapshot` capability evidence for the Stage 3A source, real-time channel, and workbench paths.
 
 ### Automated verification
 
@@ -1085,7 +1273,12 @@ The user can trigger and inspect a complete simulated or live portfolio synchron
 - zero, negative, missing, and multi-currency values normalize correctly;
 - partial responses insert no snapshot and preserve the prior latest snapshot;
 - repeated identical sync does not create conflicting latest state;
+- simultaneous manual sync requests reuse one active run, and an interrupted `running` run becomes accurately reconciled rather than remaining permanently active;
 - a snapshot insert followed by sync-run finalization failure is reconciled without duplication or hidden data;
+- the investment channel publishes no event before its durable state exists, contains no values or external account identity, deduplicates replayed events, and sends `resyncRequired` when replay cannot prove continuity;
+- a durable connection transition to reauthorization-required publishes the allowlisted small event and makes subscribed clients refetch safe connection health;
+- browser reconnect, forced replay gap, and server process-generation change refetch the active run/latest snapshot and reach the same final UI state;
+- disabling the browser socket during an active fixture run uses bounded polling and stops polling when the run completes;
 - tests pass with the existing standalone `MongoMemoryServer`; no replica-set transaction is required;
 - the reconciliation panel renders safe counts, values, times, and failure states without fixture canaries;
 - deletion requires an exact action intent and confirmation, deletes only Stage 3A investment records, reports deleted/remaining counts, and leaves non-investment data and Questrade credentials untouched;
@@ -1112,17 +1305,26 @@ The user can trigger and inspect a complete simulated or live portfolio synchron
    - maintenance excess;
    - three representative positions, including quantity and average price.
 7. Record expected timing differences when Questrade marks values non-real-time; do not force equality for values observed at different times.
-8. In fixture mode, choose **Delete local investment data**, review the exact record counts, enter the required confirmation, and proceed.
+8. Start a fixture sync, use the development control to drop the browser investment socket, and allow it to reconnect.
+   - Expected: the workbench says reconnecting/stale, then refetches the durable run and latest snapshot; no progress or completed snapshot is lost or duplicated.
+9. Force a replay gap, then repeat with WebSocket transport disabled.
+   - Expected: the first case performs an authoritative resync; the second uses bounded polling until completion. Both end on the same saved snapshot and stop background polling afterward.
+10. Inspect the browser's WebSocket frames in Developer Tools.
+    - Expected: each investment `data` payload contains only `accountKey`, allowlisted event type, event time, and nullable snapshot ID; the generic wrapper contains only its existing channel/subscription/sequence/resync metadata, with no progress/status detail, other investment identifiers, financial values, raw Questrade identifiers, account numbers, or secret canary.
+11. With two tabs subscribed, select `token-expired-refresh-failure` and request a fixture sync.
+    - Expected: the durable connection becomes reauthorization-required, both tabs refetch safe connection health after the small event, and neither the token nor provider error detail appears in the event.
+12. In fixture mode, choose **Delete local investment data**, review the exact record counts, enter the required confirmation, and proceed.
    - Expected: Stage 3A investment records are removed, unrelated app data remains, and the Questrade connection remains until separately disconnected or forgotten.
-9. Synchronize the fixture again.
+13. Synchronize the fixture again.
    - Expected: because explicit deletion removed the prior local account record and all of its history, the app creates one new internal account identity and one complete snapshot with no stale cross-references. Reauthorization or key rotation without deletion must still preserve identity.
-10. Repeat the reconciliation and deletion surfaces at desktop/mobile widths; check keyboard access, focus, overflow, console, and Network previews.
+14. Repeat the reconciliation and deletion surfaces at desktop/mobile widths; check keyboard access, focus, overflow, console, WebSocket frames, and Network previews.
 
 ### Gate 3A blocks Stage 3B until
 
 - fixture values and completeness rules match their exact expected contract;
 - the live snapshot materially reconciles with Questrade;
 - partial refresh and sync-run reconciliation preserve trustworthy evidence;
+- socket reconnect, replay-gap resync, and polling fallback converge on the same durable state without exposing financial values in events;
 - the user proves bounded local-data deletion in fixture mode;
 - Stage 3A deterministic checks pass and the user accepts the rendered reconciliation workbench.
 
@@ -1139,8 +1341,9 @@ The user can review the accepted Stage 3A snapshot contract in a polished, respo
 3. Show CAD and USD separately and label Questrade-provided combined balances.
 4. Add position sorting/filtering without altering source values.
 5. Add exact data age, observed time, fetched time, real-time labels, snapshot ID, and incomplete-refresh evidence.
-6. Keep the stable workspace frame defined in Section 6 while internal views and states change.
-7. Extend `investment-portfolio-snapshot` capability evidence with the route, sidebar, workspace, component, stress, and rendered-acceptance paths.
+6. Subscribe the workspace to the Stage 3A `investment-account` channel. Healthy transport stays visually quiet; reconnecting, stale, and polling-fallback states appear only when they affect trust or an active operation.
+7. Keep the stable workspace frame defined in Section 6 while internal views and states change.
+8. Extend `investment-portfolio-snapshot` capability evidence with the route, sidebar, workspace, component, stress, real-time, and rendered-acceptance paths.
 
 ### Automated verification
 
@@ -1149,6 +1352,7 @@ The user can review the accepted Stage 3A snapshot contract in a polished, respo
 - displayed values serialize from the exact accepted snapshot without client-side money arithmetic;
 - failed refresh keeps the prior accepted snapshot visible with the correct warning;
 - sorting and filtering never mutate source values;
+- two open Investments clients converge after one sync, and a missed event forces a canonical refetch rather than leaving different snapshots visible;
 - Investments stress coverage proves fixture sync through the rendered portfolio when automated browser transport is available and reports that lane separately when it is not;
 - client build and deterministic `verify:investments` groups pass.
 
@@ -1170,16 +1374,21 @@ The user can review the accepted Stage 3A snapshot contract in a polished, respo
 8. Switch to the live account, synchronize, and compare the displayed summary and three representative positions with the Gate 3A reconciliation evidence and Questrade.
 9. Sort/filter positions, reload, and revisit the route.
    - Expected: source data remains unchanged and the latest snapshot restores correctly.
-10. Repeat desktop/mobile, keyboard, overflow, console, and Network secret checks.
+10. Open Investments in two browser tabs, synchronize in one tab, and observe the other.
+    - Expected: the second tab receives a safe change event, fetches the completed snapshot normally, and shows the same snapshot ID without a page reload.
+11. Drop the browser socket in the second tab and synchronize again.
+    - Expected: the tab shows a concise reconnect/stale state, then resynchronizes or uses bounded polling; it never silently presents the old snapshot as current.
+12. Repeat desktop/mobile, keyboard, overflow, console, WebSocket-frame, and Network secret checks.
 
-### Gate 3B blocks Stage 4 until
+### Gate 3B blocks Stage 4A until
 
 - displayed fixture and live values match the accepted Stage 3A contract;
 - partial refresh demonstrably preserves prior evidence in the production workspace;
+- multi-tab updates and browser-socket recovery converge on the latest durable snapshot;
 - all Stage 3B deterministic checks pass;
 - the user accepts the rendered desktop and mobile workspace.
 
-## 19. Stage 4 — Activities, orders, executions, and resumable history import
+## 19A. Stage 4A — Activities, orders, executions, and resumable REST history import
 
 ### User-visible outcome
 
@@ -1199,7 +1408,8 @@ The user can import and inspect account changes without duplicates and can disti
 10. Add filters for date, type, symbol, currency, and order state.
 11. Add import outcome states: complete, cancelled, incomplete, and failed.
 12. Extend the Stage 3A deletion service, count preview, and exact confirmation to activities, orders, executions, and history-import runs as soon as those records can exist.
-13. Add `investment-history` capability evidence.
+13. Publish four-field history-import change/completion events through the existing `investment-account` channel, with the durable run endpoint as reconnect/polling fallback.
+14. Add `investment-history` capability evidence.
 
 ### Automated verification
 
@@ -1208,11 +1418,11 @@ The user can import and inspect account changes without duplicates and can disti
 - cancellation and resume do not reprocess completed windows incorrectly;
 - timezone offsets normalize without changing source dates;
 - order and execution identities never collide;
-- local-data deletion includes Stage 4 investment records, leaves credentials and unrelated domains untouched, and reports partial deletion honestly;
+- local-data deletion includes Stage 4A investment records, leaves credentials and unrelated domains untouched, and reports partial deletion honestly;
 - history UI tests cover progress, cancellation, resume, no results, and partial failure;
 - stress scenario imports duplicate fixtures and proves one record per identity.
 
-### User dev-app acceptance script — Gate 4
+### User dev-app acceptance script — Gate 4A
 
 1. Select fixture `history-with-duplicates` and import 90 days.
    - Expected: progress advances by bounded windows and the final counts match the fixture manifest.
@@ -1231,17 +1441,103 @@ The user can import and inspect account changes without duplicates and can disti
 10. In fixture mode, review the local-data deletion count preview after an import.
     - Expected: activity, order, execution, and import-run counts appear alongside snapshot records; cancellation leaves all data unchanged.
 11. Repeat the fixture deletion, enter the exact confirmation, and proceed.
-    - Expected: Stage 4 investment history and snapshot records are removed, the Questrade connection remains, and unrelated app records remain untouched.
+    - Expected: Stage 4A investment history and snapshot records are removed, the Questrade connection remains, and unrelated app records remain untouched.
 12. Re-run the fixture synchronization and import.
     - Expected: one clean set of records is recreated without stale references or duplicates.
 13. Repeat filters, mobile layout, keyboard access, console, and Network checks.
 
-### Gate 4 blocks Stage 5 until
+### Gate 4A blocks Stage 4B until
 
 - duplicate and resume fixtures pass;
 - representative live activity reconciles with Questrade;
-- the user proves Stage 4 history records are included in bounded fixture deletion and can be re-imported cleanly;
+- the user proves Stage 4A history records are included in bounded fixture deletion and can be re-imported cleanly;
 - the user can explain the difference between Orders and Executions from the UI;
+- all prior stage checks remain green.
+
+## 19B. Stage 4B — Optional Questrade order and execution notifications
+
+### User-visible outcome
+
+The user can explicitly enable live order/execution notifications, see actions taken in Questrade or another authorized app appear promptly, and see whether the stream is live, reconciling, stale, rate-limited, or stopped. The app still cannot place or change an order.
+
+### Defaults and authority
+
+- Order/execution streaming is off after upgrade and requires an explicit enable action.
+- The server is the only Questrade WebSocket client. Browser clients subscribe only to the safe shared `investment-account` channel.
+- Stream frames accelerate freshness but do not prove completeness. REST orders/executions and the Stage 4A dedupe contract remain authoritative.
+- Activities, balances, and positions are not inferred from notification frames.
+- No live trade is required merely to pass this gate; deterministic fixtures prove event behavior, while the live gate proves a secure authenticated connection and REST reconciliation. A naturally occurring live notification may be recorded as additional evidence.
+
+### Implementation
+
+1. Add `InvestmentStreamState` for durable user choice, safe health, and the last successful REST reconciliation checkpoint.
+2. Add a single-flight Questrade stream supervisor with one notification socket per connection, generation fencing, bounded buffers/frame sizes, and clean lifecycle hooks.
+3. Request notification connection metadata through the validated REST transport, derive the host from the approved API origin, validate the returned port, and require a certificate-verified `wss:` handshake. If the live Questrade contract cannot meet that rule, return `unsupported` and leave the stream disabled.
+4. Establish current orders/recent executions through REST before opening the stream or applying buffered notifications.
+5. Send the access token as the first WebSocket message without `Bearer` inside five seconds, require Questrade's success acknowledgement, and redact the handshake everywhere.
+6. Validate, normalize, and upsert order/execution messages through the same functions used by REST. Demultiplex the connection-wide stream to enabled known accounts inside the server, ignore known unselected accounts, dedupe repeated executions, and prevent older order updates from regressing newer state.
+7. After each committed normalized change, publish a four-field `order.changed` or `execution.recorded` event through `investment-account`; the browser then fetches the relevant REST collection.
+8. Add explicit states and UI for connecting, authenticating, reconciling, live, stale, cooldown, circuit-open, reauthorization-required, unsupported, and disabled. Healthy state stays compact.
+9. Coordinate expiry-based token refresh with socket generation changes. The new credential must be durably stored before a replacement socket authenticates.
+10. Complete an authenticated `GET time` or another already-required account read no later than 20 minutes after the prior authenticated success while the stream is enabled. Count it against the rate budget; it does not replace token refresh.
+11. On close/error/inactivity/token change/restart, assume a message gap. Reconnect with exponential backoff and jitter, then reconcile from the last checkpoint minus a bounded overlap before returning to `live`.
+12. Open a visible circuit after repeated failures, respect `X-RateLimit-Reset`, and provide one manual retry action. Never spin indefinitely.
+13. On disable, stop future reconnects first, attempt one final bounded reconciliation when credentials/rate budget permit, close the socket, and report whether completeness was confirmed.
+14. Extend local-data deletion to disable the notification stream before deleting its stream state plus Stage 4A records. Credentials remain a separate decision.
+15. Update `scripts/dev-launcher.js`, focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` because this stage adds an optional background connection and shutdown responsibility.
+16. Add `investment-realtime-notifications` capability evidence.
+
+### Automated verification
+
+- two simultaneous enable requests create one upstream socket, and a stale socket generation cannot commit an event;
+- invalid host/port, redirect, IP literal, plaintext `ws:`, bad certificate, oversized frame, pre-auth frame, malformed JSON, unknown account, and authentication timeout all fail closed without leaking the token; a known unselected account is ignored without exposing its identity or poisoning the selected account state;
+- duplicate and out-of-order order/execution messages create one identity and cannot regress newer state;
+- a dropped socket with a missed execution remains `reconciling` until overlapping REST retrieval restores the omitted record, after which one safe browser event is published;
+- reconnect delays use fake-clock exponential backoff/jitter, rate-limit reset is honored, and repeated failure opens a circuit rather than looping;
+- token rotation fences the old socket, authenticates the new generation, reconciles, and never reuses an invalidated refresh token;
+- session maintenance completes within the 20-minute safety margin while enabled, stops when disabled, and degrades accurately on 401/429/outage;
+- browser reconnect/replay-gap behavior refetches canonical Orders/Executions and never trusts a socket-only value;
+- disabling, deleting, and graceful server shutdown stop reconnect timers, close the socket, and preserve/report the final safe checkpoint;
+- fixture and normal startup output truthfully distinguish disabled, enabled/live, recovering, circuit-open, unsupported, and failed without displaying hosts, ports, accounts, or tokens;
+- all Stage 4A and earlier checks remain green.
+
+### User dev-app acceptance script — Gate 4B
+
+1. Upgrade/start with fixture mode and open **Investments > Orders**.
+   - Expected: live notifications are Off and no upstream fixture socket starts automatically.
+2. Enable notifications using `healthy-margin-cad-usd`.
+   - Expected: the UI progresses through Connecting and Reconciling to Live; one REST baseline is visible in safe evidence.
+3. Emit a fixture order-status change while Orders is open in two tabs.
+   - Expected: one normalized update appears promptly in both tabs after their REST refetch; each investment WebSocket event contains only the four-field envelope.
+4. Emit one execution and its associated order update.
+   - Expected: Orders and Executions remain separate, and each contains one record.
+5. Select `order-stream-duplicate-out-of-order`.
+   - Expected: duplicate execution frames do not increase counts and an older order frame cannot regress the displayed status.
+6. Select `order-stream-drop-missed-execution`.
+   - Expected: status immediately leaves Live, reconnect uses bounded backoff, REST overlap discovers the intentionally missed execution, and Live returns only after reconciliation succeeds.
+7. Select `order-stream-token-rotation`.
+   - Expected: the old generation stops updating state, the replacement authenticates with the rotated credential, and the post-refresh reconciliation completes without duplicate records.
+8. Select `order-stream-session-expired`, `stream-reconciliation-rate-limited`, and `order-stream-circuit-open` in turn.
+   - Expected: expiry requests reauthorization, rate limiting shows the safe retry time, and repeated failures stop at a visible circuit with a manual retry rather than looping.
+9. Select `malicious-stream-port-or-tls-downgrade`.
+   - Expected: the stream refuses to start, no token is transmitted, and ordinary REST history remains available.
+10. Disable notifications while connected.
+    - Expected: reconnects stop, final reconciliation outcome is shown, and no further fixture frame changes the UI.
+11. Re-enable the fixture stream, then complete local investment-data deletion.
+    - Expected: the stream is disabled first, its state/history is removed in scope, and unrelated app data remains.
+12. With the real account and no live trade required, enable the stream long enough to prove a certificate-verified authenticated handshake, REST baseline, and safe Live/quiet state; then disable it.
+    - Expected: no token/account number appears in the browser, logs, or evidence. If Questrade cannot provide the required secure endpoint, the feature remains honestly Unsupported and Gate 4B cannot claim live-stream support.
+13. Run `npm run dev:preview`, then use the user-owned app start and Ctrl+C flow.
+    - Expected: optional stream readiness and clean shutdown are accurately reported without controlling unrelated processes.
+14. Repeat the enable/recovery/disable surfaces at desktop/mobile widths with keyboard, console, Network, and WebSocket-frame checks.
+
+### Gate 4B blocks Stage 5 until
+
+- deterministic duplicate, ordering, drop/gap, token, session, rate-limit, circuit, destination, and shutdown fixtures pass;
+- the user proves browser and upstream socket loss both converge on authoritative REST state;
+- the live connection either passes the required secure handshake and reconciliation or is explicitly recorded as unsupported without weakening TLS/token rules;
+- notification streaming remains optional, read-only, and cleanly disabled;
+- startup/shutdown and desktop/mobile rendered acceptance pass;
 - all prior stage checks remain green.
 
 ## 20. Stage 5 — Deterministic margin and portfolio risk
@@ -1440,7 +1736,7 @@ The output validator rejects or marks incomplete a response that lacks input evi
     - Expected: fresh investment consent is required because the prior consent was deleted.
 12. Repeat desktop/mobile, keyboard, reconnect, explicit Stop, console, and Network checks.
 
-### Gate 6 blocks Stage 7 until
+### Gate 6 blocks Stage 7A until
 
 - the user accepts privacy consent and agent boundaries;
 - synthetic behavior evaluation passes current models;
@@ -1449,7 +1745,7 @@ The output validator rejects or marks incomplete a response that lacks input evi
 - reconnect/Stop and rendered agent states pass;
 - no action authority exists.
 
-## 22. Stage 7 — Opt-in monitoring and Attention integration
+## 22A. Stage 7A — Opt-in scheduled monitoring and Attention integration
 
 ### User-visible outcome
 
@@ -1485,7 +1781,8 @@ The app can refresh on a user-approved schedule and open durable Attention items
 8. Update `scripts/dev-launcher.js`, focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` because this stage adds background scheduler behavior.
 9. Never run live deep checks from normal startup or automated tests.
 10. Extend local-data deletion to disable the affected monitoring policy first, then remove investment monitoring policies, observations, alerts, and Attention references without touching unrelated Attention items.
-11. Add `investment-monitoring` capability evidence.
+11. Publish four-field `monitoring.alert.opened`, `monitoring.alert.updated`, and `monitoring.alert.resolved` events only after the durable alert/Attention transition commits; subscribed browsers refetch the authoritative alert state.
+12. Add `investment-monitoring` capability evidence.
 
 ### Automated verification
 
@@ -1493,13 +1790,14 @@ The app can refresh on a user-approved schedule and open durable Attention items
 - scheduler respects interval, window, account, and disable state;
 - one observation produces one alert and repeats update it rather than duplicate it;
 - recovery resolves the right alert;
+- alert events publish only after durable state, use the exact four-field investment payload, and make two browser tabs converge through REST refetch;
 - deleting local investment data disables/removes the affected monitoring policy and investment alerts without changing unrelated Attention items;
 - 401/429/outage states use safe backoff;
 - startup preview truthfully distinguishes disabled, not configured, ready, and failed;
 - fixture scheduler cannot call live Questrade;
 - Attention UI and badge tests pass.
 
-### User dev-app acceptance script — Gate 7
+### User dev-app acceptance script — Gate 7A
 
 1. Confirm monitoring is Off after upgrading.
 2. Enable monitoring for fixture `healthy-margin-cad-usd` with an explicit interval and thresholds.
@@ -1522,15 +1820,106 @@ The app can refresh on a user-approved schedule and open durable Attention items
    - Expected: Questrade monitoring status is concise, secret-free, and correctly labelled optional.
 11. The user starts their own dev app and later uses Ctrl+C.
     - Expected: scheduler startup and shutdown reporting is clean and no unrelated process is touched.
-12. Repeat Attention and Settings at desktop/mobile widths and inspect console/Network output.
+12. Open Investments/Attention in a second tab and repeat one trigger and recovery.
+    - Expected: the second tab receives only the small alert change event, refetches the durable alert, and shows the same open/resolved state without a duplicate.
+13. Repeat Attention and Settings at desktop/mobile widths and inspect console, Network, and WebSocket output.
 
-### Gate 7 blocks Stage 8 until
+### Gate 7A blocks Stage 7B until
 
 - opt-in/off behavior is proven;
 - alerts dedupe and resolve correctly;
+- multi-tab alert changes converge through safe events and REST refetch;
 - investment-data deletion disables monitoring and removes only its investment Attention state;
 - startup preview and user-owned start/stop acceptance pass;
 - no background check occurs after disable.
+
+## 22B. Stage 7B — Session-scoped Level 1 quote streaming
+
+### User-visible outcome
+
+The user can explicitly start a Level 1 quote-streaming session for symbols in the selected portfolio, see current quote freshness, and use fast quote changes to request a fully verified monitoring check. The app never treats a streamed tick as a complete portfolio or risk assessment.
+
+### Defaults, warning, and evidence boundary
+
+- Level 1 streaming is off by default and never starts automatically when the app, Questrade connection, or monitoring scheduler starts.
+- Activation lasts only for the current server session. Restarting the server requires a new explicit activation.
+- `read_md` is required. Missing permission leaves the control disabled with reauthorization guidance; it does not weaken scope checks.
+- The app uses only the user's existing market-data entitlement and cannot buy or change a Questrade data package. It displays Questrade's real-time/delayed result and current pricing findings before the live gate.
+- Before each live activation, the UI warns that Questrade says Level 1 API streaming can freeze market data in another IQ Platform used at the same time. The user must explicitly confirm that consequence.
+- The UI distinguishes `live quote preview` from `verified portfolio snapshot`. Risk calculations, agents, and durable alerts continue to reference complete snapshots only.
+- No unrestricted tick history is retained. The runtime holds only the latest bounded quote per currently selected position symbol.
+
+### Implementation
+
+1. Extend the Stage 4B supervisor with a separately owned/generation-fenced Level 1 WebSocket and a bounded latest-quote cache. Never combine the notification and quote stream lifecycles implicitly.
+2. Add session-scoped Start/Stop controls, the IQ Platform interference warning, permission explanation, selected-symbol count, freshness, and stream health to Investments monitoring settings.
+3. Request streaming quotes only for the current selected account's position symbol IDs, with an explicit maximum subscription count and no user-controlled arbitrary symbol/URL passthrough.
+4. Validate the Questrade-derived host/port and require the same certificate-verified `wss:` policy as Stage 4B. An insecure or undocumented live endpoint remains `unsupported`.
+5. Authenticate and validate/bound every quote frame before replacing the in-memory latest value. Preserve Questrade source time, receipt time, market status, and real-time/delayed indicator.
+6. Publish only the four-field envelope with allowlisted `quotes.changed`, `quotes.stale`, or stream-status event types through `investment-account`. The browser fetches `quotes/latest`; quote values never travel in the shared WebSocket event.
+7. Mark quotes stale/unknown after the approved inactivity rule, socket interruption, account change, symbol deselection, or session stop. A closed market is labelled rather than treated as an unexplained connection failure.
+8. On reconnect or token change, discard old-generation frames, rebuild the subscription set from the latest complete snapshot, obtain a normal quote/snapshot baseline, and only then label new frames Live.
+9. Reuse Stage 4B session maintenance, rate budgeting, backoff, circuit breaker, shutdown, and secret-safe evidence. Stop quote-stream reconnect attempts immediately when the session is stopped.
+10. When a streamed quote crosses a user threshold, create one debounced monitoring candidate. Respect the user's monitoring window/minimum interval and Questrade rate budget, then run a complete REST snapshot and deterministic assessment. Only that evidence may open, update, resolve, or reject an alert.
+11. Coalesce repeated ticks while a candidate check is pending. A failed, partial, stale, or rate-limited verification produces no new risk conclusion and preserves the previous alert/snapshot with a truthful status.
+12. Recompute the subscription set only after a new complete snapshot changes selected positions. Unsubscribe removed symbols and clear their cached quotes; subscribe additions within the cap.
+13. Stop the Level 1 session and clear its cache before local investment-data deletion, Questrade disconnect, permission loss, or server shutdown.
+14. Update friendly startup inventory, preview, focused launcher tests, and development-startup documentation to report Level 1 streaming as session-scoped and off at startup.
+15. Add `investment-market-streaming` capability evidence.
+
+### Automated verification
+
+- Level 1 never starts at process startup, after reconnection, or when scheduled monitoring starts;
+- starting requires `read_md`, a current warning-bound action intent, an allowed selected account, and an allowed bounded symbol set;
+- raw quote frames, external account identifiers, tokens, host/port, and price values never appear in browser WebSocket events or normal logs;
+- latest quote retrieval returns exact decimal strings plus source/receipt/freshness state, and cache limits/cleanup prevent tick-history growth;
+- inactivity, closed-market, disconnect, token rotation, rate-limit, and circuit-open cases display distinct states and never leave an old quote marked Live;
+- reconnect discards old-generation frames, resubscribes the current position set, and obtains baseline evidence before returning to Live;
+- repeated threshold ticks coalesce into one verification run, and no alert changes until a complete snapshot and assessment cite the candidate;
+- incomplete/rate-limited candidate verification preserves prior evidence and reports why no alert decision was made;
+- account/position changes update the subscription set without leaking removed symbols or exceeding the cap;
+- session Stop, deletion, disconnect, permission loss, and graceful shutdown cancel reconnect/session-maintenance timers and clear the volatile cache;
+- the secure live contract check never falls back to plaintext;
+- all Stage 7A and earlier checks remain green.
+
+### User dev-app acceptance script — Gate 7B
+
+1. Start the dev app in fixture mode and open **Investments > Monitoring**.
+   - Expected: Level 1 streaming is Off even if scheduled monitoring or order notifications are enabled.
+2. Select `quote-stream-read-md-missing`.
+   - Expected: Start is unavailable and the UI explains that market-data permission is missing without requesting trade access.
+3. Select `quote-stream-live-then-stale`, choose Start, and review the confirmation.
+   - Expected: the warning plainly states that Questrade may freeze market data in another IQ Platform; cancelling opens no socket.
+4. Confirm and start the fixture stream.
+   - Expected: the selected symbol count and health progress to Live; quote values arrive through `quotes/latest`, while each investment WebSocket event contains only the four-field envelope.
+5. Pause fixture quote messages without closing the socket.
+   - Expected: the last quote becomes Stale/unknown at the tested deadline and cannot be presented as a current risk input.
+6. Drop the fixture socket, change one quote while disconnected, and allow reconnect.
+   - Expected: status becomes Recovering, the app rebuilds subscriptions and baseline evidence, and it returns to Live without claiming to reconstruct every missed tick.
+7. Select `quote-stream-threshold-candidate` and emit repeated crossing ticks.
+   - Expected: one candidate produces one complete snapshot/assessment check; the durable alert cites that evidence rather than the streamed tick.
+8. Repeat the candidate with partial-sync and rate-limit fixtures.
+   - Expected: no new alert conclusion appears, the prior snapshot/alert is preserved, and the safe retry/recovery state is visible.
+9. Change fixture positions through a complete synchronization.
+   - Expected: removed symbols disappear and clear their quotes; new position symbols subscribe within the configured cap.
+10. Choose Stop and reload the browser.
+    - Expected: the cache clears, no reconnect occurs, the stream remains Off, and scheduled monitoring continues according to its separate policy.
+11. Restart the user-owned dev server.
+    - Expected: Level 1 remains Off and startup output describes it as session-scoped rather than silently resuming it.
+12. With the live account, close or knowingly accept the effect on any other IQ Platform, review the warning, and start one short session during an appropriate market period.
+    - Expected: a certificate-verified authenticated connection shows a real/delayed label and a quote/time that can be compared with Questrade; stopping restores Off. No live order is required.
+13. Inspect console, Network, WebSocket frames, and safe server evidence.
+    - Expected: no token, full account number, stream port/URL, raw provider frame, or unrestricted tick history appears.
+14. Repeat Start/status/Stop at mobile width and by keyboard, including focus, disabled, loading, warning, error, stale, and reduced-motion behavior.
+
+### Gate 7B blocks Stage 8 until
+
+- permission, warning, cache-bound, stale, reconnect, token, subscription-change, candidate, rate-limit, stop, deletion, and shutdown fixtures pass;
+- the user proves a streamed threshold cannot become a durable alert without a complete snapshot and assessment;
+- the live Level 1 session passes the secure endpoint, source-status, comparison, and clean-stop checks, or the capability is released as explicitly unsupported/disabled without weakening security;
+- restart never silently resumes Level 1 streaming;
+- the user accepts the desktop/mobile flow and the IQ Platform interference warning;
+- all prior stage checks remain green.
 
 ## 23. Stage 8 — Recovery, export, deletion, and final release gate
 
@@ -1540,14 +1929,14 @@ The integration can be recovered, audited, exported, and removed safely, and the
 
 ### Implementation
 
-1. Add a bounded connection/sync history view with secret-free evidence.
+1. Add a bounded connection/sync/stream history view with secret-free evidence, including socket status transitions and the last successful REST reconciliation—not raw frames or destinations.
 2. Add export of normalized snapshots, activities, orders, executions, risk assessments, and agent decision references.
 3. Default exports to masked account identity and explicit currency fields.
-4. Add reconnect guidance for revoked token, wrong encryption key, invalid API host, repeated rate limits, and Questrade outage.
+4. Add reconnect guidance for revoked token, wrong encryption key, invalid API host, invalid/unsupported secure stream endpoint, repeated socket drops, circuit-open, stale quotes, repeated rate limits, and Questrade outage.
 5. Complete key-version support and a documented encryption/fingerprint-key rotation procedure. Rotation must not change the random stable `accountKey` or orphan any related record.
-6. Polish the incremental local-data deletion capability introduced in Stage 3A: include every investment-domain record type, typed confirmation, final record counts, irreversible warning, bounded failure recovery, and deletion audit evidence.
+6. Polish the incremental local-data deletion capability introduced in Stage 3A: stop both upstream stream kinds and all reconnect/session-maintenance timers first, then include every investment-domain record type and stream state, typed confirmation, final record counts, irreversible warning, bounded failure recovery, and deletion audit evidence.
 7. Keep remote revocation and local history deletion as separate decisions.
-8. Add a final source inventory proving no trading scope, route, method, handler, prompt tool, or UI action exists.
+8. Add a final source inventory proving no trading scope, route, method, handler, prompt tool, or UI action exists and no direct browser-to-Questrade socket or plaintext upstream socket can be created.
 9. Recheck official documentation and license links.
 10. Complete all capability-map entries and known gaps.
 11. Update `DESIGN.md` and `DESIGN.HTML` only for durable Investments design rules established by accepted rendered behavior.
@@ -1557,9 +1946,11 @@ The integration can be recovered, audited, exported, and removed safely, and the
 - exports contain the expected normalized records and no secret fields;
 - deletion requires exact confirmation and deletes only investment-domain records;
 - failed/partial deletion reports exact remaining collections and never claims success;
+- deletion/disconnect/shutdown leave no upstream investment socket, reconnect timer, session-maintenance timer, volatile quote, or browser subscription tied to deleted state;
 - key rotation preserves credential access, stable `accountKey` values, and reachability of every existing snapshot/activity/order/execution/assessment/alert while never logging plaintext;
 - full secret scan passes;
 - forbidden trade inventory passes;
+- stream security/recovery inventory proves server-only Questrade tokens, TLS-only upstream sockets, bounded frames/caches, REST gap recovery, and snapshot-before-alert behavior;
 - `npm run verify:investments`, `npm run verify:core`, client build, dependency audit, and testing-map validation pass;
 - the automated Investments browser slice completes repeatedly, or its freshly reproduced inherited transport gap remains separately documented without replacing the required accepted manual desktop/mobile workflow.
 
@@ -1572,21 +1963,25 @@ The integration can be recovered, audited, exported, and removed safely, and the
 3. Export a user-approved live range and compare sample records to the UI.
 4. Exercise fixture wrong-key and revoked-token recovery instructions.
    - Expected: instructions are actionable and do not destroy data.
-5. In fixture mode, delete all local investment history.
-   - Expected: exact confirmation is required and non-investment app data remains untouched.
-6. Recreate fixture data, disconnect, and confirm that history remains until separately deleted.
-7. Review the complete live workflow on desktop:
+5. Exercise notification drop/circuit-open and quote-stale recovery instructions.
+   - Expected: instructions distinguish browser transport, Questrade transport, session expiry, secure-endpoint support, and REST reconciliation without exposing socket destinations or tokens.
+6. In fixture mode, enable order notifications and a quote session, then delete all local investment history.
+   - Expected: exact confirmation is required, both streams stop before deletion, their cache/state/timers are removed, no late old-generation frame recreates deleted records, and non-investment app data remains untouched.
+7. Recreate fixture data, disconnect, and confirm that history remains until separately deleted while all streams stay stopped.
+8. Review the complete live workflow on desktop:
    - connect;
    - synchronize;
    - inspect positions;
    - import history;
+   - enable/recover/disable order notifications;
    - calculate risk;
    - run one consented agent analysis;
-   - review Attention state;
+   - review scheduled monitoring and Attention state;
+   - start/inspect/stop a short Level 1 session;
    - export.
-8. Repeat the complete workflow at 390px mobile width.
-9. Check keyboard navigation, focus order, reduced motion, overflow, clipped content, browser console, and Network responses.
-10. Review the final known-gaps list and explicitly accept or reject release.
+9. Repeat the complete workflow at 390px mobile width.
+10. Check keyboard navigation, focus order, reduced motion, overflow, clipped content, browser console, Network responses, and WebSocket frames.
+11. Review the final known-gaps list and explicitly accept or reject release.
 
 ### Final release decision
 
@@ -1595,6 +1990,7 @@ The integration is releasable only when:
 - every earlier gate is `user-accepted`;
 - Gate 8 is accepted;
 - live Questrade data materially reconciles with the broker;
+- browser and Questrade socket interruptions have each been shown to converge on authoritative REST state;
 - no credential leakage is found;
 - no trading authority exists;
 - every required deterministic automated group completed rather than merely passing the subset that ran;
@@ -1617,20 +2013,26 @@ flowchart TD
     G3A -->|accepted| S3B[Stage 3B Investments workspace]
     G3A -->|rejected| S3A
     S3B --> G3B{User Gate 3B}
-    G3B -->|accepted| S4[Stage 4 history]
+    G3B -->|accepted| S4A[Stage 4A REST history]
     G3B -->|rejected| S3B
-    S4 --> G4{User Gate 4}
-    G4 -->|accepted| S5[Stage 5 deterministic risk]
-    G4 -->|rejected| S4
+    S4A --> G4A{User Gate 4A}
+    G4A -->|accepted| S4B[Stage 4B order and execution notifications]
+    G4A -->|rejected| S4A
+    S4B --> G4B{User Gate 4B}
+    G4B -->|accepted| S5[Stage 5 deterministic risk]
+    G4B -->|rejected| S4B
     S5 --> G5{User Gate 5}
     G5 -->|accepted| S6[Stage 6 investment agents]
     G5 -->|rejected| S5
     S6 --> G6{User Gate 6}
-    G6 -->|accepted| S7[Stage 7 monitoring]
+    G6 -->|accepted| S7A[Stage 7A scheduled monitoring]
     G6 -->|rejected| S6
-    S7 --> G7{User Gate 7}
-    G7 -->|accepted| S8[Stage 8 release hardening]
-    G7 -->|rejected| S7
+    S7A --> G7A{User Gate 7A}
+    G7A -->|accepted| S7B[Stage 7B Level 1 quote streaming]
+    G7A -->|rejected| S7A
+    S7B --> G7B{User Gate 7B}
+    G7B -->|accepted| S8[Stage 8 release hardening]
+    G7B -->|rejected| S7B
     S8 --> G8{User Gate 8}
     G8 -->|accepted| R[Read-only Investments integration released]
     G8 -->|rejected| S8
@@ -1661,20 +2063,30 @@ flowchart TD
 - account, sync-run, and snapshot models
 - reviewed direct decimal dependency, normalizers, and synchronization service
 - single-document snapshot publication and sync-run reconciliation
+- durable sync-run status endpoint plus shared `investment-account` channel, replay/resync, and bounded polling fallback
 - visible development reconciliation workbench
 - initial bounded local-investment-data deletion service and UI
 
 ### Stage 3B
 
 - Investments route, sidebar item, workspace, styles, tests
+- quiet healthy real-time subscription plus visible reconnect/stale/fallback states
 - stress slice first rendered journey
 
-### Stage 4
+### Stage 4A
 
 - activity/order/execution models and history service
 - history APIs and UI
 - import progress, cancellation, resume, filters, tests
 - deletion-service extension for history records
+
+### Stage 4B
+
+- `InvestmentStreamState`, server-owned Questrade supervisor, and secure stream transport
+- order/execution notification normalization, deduplication, generation fencing, and REST gap reconciliation
+- stream health/enable/disable/retry APIs and UI
+- browser safe-event integration and deterministic fake-socket/fake-clock fixtures
+- launcher/startup inventory, graceful shutdown, capability evidence, and deletion extension
 
 ### Stage 5
 
@@ -1691,16 +2103,23 @@ flowchart TD
 - output validation, provider capture constraints, agent harness cases
 - deletion-service extension for investment consent/output/evidence references
 
-### Stage 7
+### Stage 7A
 
 - monitoring policy, scheduler, alerts, Attention integration
 - launcher/startup documentation and tests
 - notification/badge UI and stress scenarios
 - deletion-service extension for investment monitoring and Attention records
 
+### Stage 7B
+
+- session-scoped Level 1 supervisor path and bounded volatile quote cache
+- read-market-data permission/warning/start/stop/latest-quote APIs and UI
+- quote staleness, reconnect/resubscribe, rate budgeting, and snapshot-before-alert verification
+- fake-socket/fake-clock fixtures, secure live contract gate, startup/shutdown reporting, and deletion cleanup
+
 ### Stage 8
 
-- export, deletion hardening, recovery, and identity-stable key-rotation support
+- export, deletion hardening, socket/timer/cache recovery, and identity-stable key-rotation support
 - final source inventory and complete verification evidence
 - accepted durable design documentation updates
 
@@ -1711,18 +2130,22 @@ Implementation stops and asks before any of these changes:
 - adding trade placement, impact preview, modification, or cancellation;
 - sending portfolio data to an AI provider without the Stage 6 consent flow;
 - enabling monitoring by default;
+- enabling order/execution notifications by default or automatically restarting Level 1 streaming;
 - exposing the app beyond loopback;
 - adding another human user or Questrade account owner;
 - changing local financial-data retention or deleting history automatically;
-- storing unrestricted raw Questrade payloads;
+- storing unrestricted raw Questrade HTTP payloads, WebSocket frames, or tick history;
+- allowing a browser to connect directly to Questrade, accepting plaintext `ws:`, or weakening certificate/host/port validation;
+- allowing a streamed quote or notification to become a durable risk conclusion without REST reconciliation and a complete snapshot;
 - treating an app-calculated threshold as Questrade's margin policy;
 - adding external notifications that reveal portfolio values;
+- purchasing or changing a paid Questrade market-data entitlement;
 - expanding from personal application use to a public/partner integration.
 
 ## 27. Definition of done
 
 The complete plan is done only when the user can say, from the dev app:
 
-> I connected the intended read-only Questrade Margin account. I can see when the data was retrieved and whether it is real-time. The balances, positions, activity, orders, and executions reconcile with Questrade. Failed refreshes preserve the prior snapshot. The risk calculations show their formulas and limitations. Any agent analysis names the exact snapshot, respects my privacy choice, and cannot trade. Monitoring is opt-in, alerts are evidence-backed, exports are secret-safe, and I can revoke or delete local data intentionally.
+> I connected the intended read-only Questrade Margin account. I can see when the data was retrieved and whether it is real-time. The balances, positions, activity, orders, and executions reconcile with Questrade. Browser and Questrade socket interruptions recover through authoritative REST state instead of hiding gaps. Order/execution notifications are optional, Level 1 streaming is session-scoped and warns about its IQ Platform effect, and no streamed tick becomes a risk conclusion by itself. Failed refreshes preserve the prior snapshot. The risk calculations show their formulas and limitations. Any agent analysis names the exact snapshot, respects my privacy choice, and cannot trade. Monitoring is opt-in, alerts are evidence-backed, exports are secret-safe, and I can revoke or delete local data intentionally.
 
 Passing tests without that hands-on acceptance is not completion.
