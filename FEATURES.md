@@ -368,3 +368,10 @@ Model: Codex GPT-5.6 Sol (xhigh)
 Is duplicate?: no
 Complexity: medium
 Special Feature: Prompt Budget and Influence Map - For every agent run, show each assembled prompt section with its source, trust level, version/hash, estimated tokens, and share of the final context, then compare those measurements with provider-reported input/output usage, response quality, and labelled reasoning evidence. Let the operator test removing or shortening one section without changing the live prompt, so prompt-efficiency work can identify costly or behavior-dominating context instead of guessing from one large combined prompt; this is distinct from Execution Identity Verification because it explains what influenced the run rather than only which provider and model executed it.
+
+Date: 2026-08-14
+Time: 13:36 ADT
+Model: Codex GPT-5.6 Sol (xhigh)
+Is duplicate?: no
+Complexity: high
+Special Feature: Investment Decision Calibration Ledger - Before acting, save a snapshot-bound decision record containing the thesis, expected range, important risks, disconfirming evidence, responsible human, and review date. Later compare the actual outcome with that original record and measure which assumptions and agent contributions were well-calibrated without grading the decision only by profit, preventing hindsight from rewriting the rationale and improving future judgment.
