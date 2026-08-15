@@ -11,6 +11,7 @@ Coding-agent memory is a set of saved notes for future development chats. It is 
 - A small memory index.
 - A reviewed project overview with `last_verified` and `authority` metadata.
 - Stable facts that are difficult to rediscover and still match current source.
+- Reviewed, durable user preferences such as the requirement that every task classify design impact. Mandatory enforcement still belongs in root or scoped instruction files.
 
 ## What Must Stay Local
 

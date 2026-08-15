@@ -23,6 +23,7 @@ Changes outside those paths must stay small and deliberate:
 - `server/src/app.js` mounts the module under `/api/investments`.
 - `client/src/components/Settings.jsx` places the public Questrade account card in Connected Accounts.
 - `client/src/components/connected-accounts/ConnectedAccountCard.jsx` is a provider-neutral visual frame shared with Google.
+- `client/src/settings.css` and `client/src/settings-v2.css` own the shared responsive provider grid and active Settings presentation. Investments may use these shared classes but must keep Questrade-specific styling inside `client/src/components/investments/`.
 - `client/src/api/http.js` is the shared HTTP transport used by the Investments client boundary.
 - `server/src/lib/field-encryption.js` is the reviewed shared field-encryption seam.
 - The development launcher and testing maps report Investments as a separately classified startup dependency. That startup classification does not reduce its product importance.
@@ -39,5 +40,7 @@ Changes outside those paths must stay small and deliberate:
 ## Cross-team rule
 
 An Investments team owns the Investments paths above. A change to a shared integration point requires a focused regression test for the existing consumer, especially Google Connected Accounts and the startup launcher. Teams must not add Investments behavior to QBO routes, QBO models, or QBO-specific UI components.
+
+User-facing work also follows the repository design-impact rule. The normal account state must remain primary, while simulated fixtures and developer controls use progressive disclosure. Component/build success does not accept the interface; desktop/mobile rendering and the user's visual approval remain the stage gate.
 
 `server/test/investments/module-boundaries.test.js` enforces these import seams, the public server/client entry points, the Questrade route ownership boundary, and side-effect-free server module registration. Its focused check group runs in both `verify:investments` and `verify:core`.

@@ -1,10 +1,10 @@
 # Questrade Investments Integration Implementation Plan
 
-**Status:** Gate 0 user-accepted; Stage 1 implemented and awaiting the user's Gate 1 acceptance
+**Status:** Gate 0 user-accepted; Gate 1 user-rejected on visual quality; Stage 1 design correction implemented and awaiting renewed user testing
 
 **Created:** 2026-08-14
 
-**Revised:** 2026-08-14 after independent critical review, socket-hardening review, product-owner clarification, a fresh Gate 0 check of Questrade's official documentation, and completion of the simulated Stage 1 foundation; no live token was created and no live Questrade request was made
+**Revised:** 2026-08-14 after independent critical review, socket-hardening review, product-owner clarification, a fresh Gate 0 check of Questrade's official documentation, completion of the simulated Stage 1 foundation, and the owner's rejection of the first Connected Accounts rendering; no live token was created and no live Questrade request was made
 
 **Primary decision:** Add Questrade as a separate Investments domain whose first implementation is read-only. This plan contains no trade placement, modification, cancellation, or autonomous financial action. Questrade currently limits API trade execution to approved partner developers, so any future trading capability would require both Questrade partner approval and a separately planned, explicitly accepted high-risk project.
 
@@ -1338,7 +1338,7 @@ This table is updated immediately when a gate changes state so the plan never ap
 | Gate | Increment | Current status | Acceptance evidence |
 | --- | --- | --- | --- |
 | 0 | Account, scope, retention, privacy, and no-trade decisions | `user-accepted` | Official documentation rechecked; owner instructed implementation to proceed; no live secret captured |
-| 1 | Development fixtures and Connected Accounts shell | `awaiting-user` | Dedicated verification profile passed; automated desktop/mobile journey passed all seven fixtures with no browser errors or live Questrade traffic; owner acceptance remains required |
+| 1 | Development fixtures and Connected Accounts shell | `user-rejected` | Automation passed, but the owner rejected the 2026-08-14 rendering because oversized containers, weak hierarchy, low-contrast metadata, and an always-visible developer selector made the account experience unacceptable. A compact peer-card redesign is implemented and requires renewed desktop/mobile acceptance. |
 | 2 | Live connection, token refresh, repair, and revoke | `not-started` | Live connect/reload/reauthorize/revoke/reconnect script |
 | 3A | Snapshot engine and visible reconciliation workbench | `not-started` | Fixture/partial-failure reconciliation, live comparison, and local-data deletion in the dev app |
 | 3B | Investments workspace | `not-started` | Accepted desktop/mobile portfolio workspace using the Stage 3A snapshot contract |
@@ -1505,6 +1505,11 @@ The dev app can show and safely exercise all Questrade connection states using s
 - The dedicated `npm run verify:investments` profile passes its server/security, client/Google-regression, friendly-startup, rendered-browser, and testing-map lanes against the current already-running user-owned stack.
 - The final passing Investments evidence is recorded at `test-results/app-check/2026-08-15T00-48-00-082Z-e720c8ed/summary.json`; all six groups passed, including the required browser lane and the separately reported module-ownership boundary.
 - Automated rendered checks passed at desktop and 390px mobile widths, including reduced motion, all seven simulated states, card viewport bounds, an empty browser-error list, and zero requests to a `questrade.com` host.
+- The owner then rejected the rendered Gate 1 result. This overrides the earlier automated visual pass: the stacked full-width panels, low-contrast metadata, heavy nested status surface, decorative pills, and dominant fixture selector did not meet the product's design standard.
+- The correction places compact providers in an equal desktop grid, gives each card a calmer identity/status hierarchy, keeps readable secondary text, and moves Stage 1 simulation controls behind a labelled disclosure. This correction remains `user-rejected` until the owner accepts fresh desktop/mobile rendering.
+- The corrected `npm run verify:investments` profile passed all six required groups at `test-results/app-check/2026-08-15T01-46-19-417Z-637361c0/summary.json`, including all seven disclosed simulated states, the desktop two-column/mobile one-column contract, reduced motion, no horizontal overflow, no browser errors, and no `questrade.com` request. The production client build also passed.
+- The complete `npm run verify:core` profile then passed all seven groups at `test-results/app-check/2026-08-15T01-54-50-618Z-df2e89d3/summary.json`, including 36 client test files, 132 server test files, stress-harness infrastructure, runner contracts, startup contracts, Investments ownership boundaries, and the testing map.
+- The manual review evidence is saved as `review-screenshots/connected-accounts-before-2026-08-14.png`, `review-screenshots/connected-accounts-after-desktop-2026-08-14.png`, `review-screenshots/connected-accounts-after-desktop-expanded-2026-08-14.png`, and `review-screenshots/connected-accounts-after-mobile-2026-08-14.png`. These screenshots support renewed owner review; they do not self-accept Gate 1.
 - The production client build passed, and the complete whole-app `npm run verify:core` profile passed all seven groups at `test-results/app-check/2026-08-15T00-42-37-174Z-ab3c651a/summary.json`, including the same module-ownership boundary required by the Investments profile.
 - `server/test/investments/module-boundaries.test.js` proves that Investments imports only owned code and reviewed shared seams, shared registration uses only public server/client entry points, Questrade provider routes remain Investments-owned, and creating the module performs no network, storage, child-process, or repeating-timer work.
 - `npm run dev:preview -- --no-color` shows the aligned `INVEST` line and optional total without starting a service or printing a token, account number, financial value, or provider destination.
@@ -1515,9 +1520,9 @@ The dev app can show and safely exercise all Questrade connection states using s
 Prerequisite: use the already-running development app. Stage 1 fixtures are available by default outside production unless `QUESTRADE_DEV_FIXTURES=0` was deliberately set; no token or environment change is required.
 
 1. Open **Settings > Connected Accounts** and review Google before testing Questrade.
-   - Expected: Google retains its prior identity, connection state, account defaults, permission health, and actions; Questrade appears as a separate provider without duplicating Google-specific controls.
-2. In the Questrade card, select `Not connected` (`disconnected`).
-   - Expected: Questrade says no token has been saved, live access is off, and the card remains clearly labelled Margin and Simulated.
+   - Expected: disconnected/compact Google and Questrade accounts appear as equal peers on a wide desktop and one column on a narrow screen. Google retains its prior identity, connection state, account defaults, permission health, and actions; Questrade does not duplicate Google-specific controls.
+2. In the Questrade card, open **Preview connection states**, then select `Not connected` (`disconnected`).
+   - Expected: the simulation selector is available but does not dominate the normal card. Questrade says it is not connected, live access is off, no token or portfolio data is saved, and the header clearly identifies a Margin-account simulated preview.
 3. Select `Connected` (`healthy-margin`).
    - Expected: status becomes Connected, the non-sensitive label `margin-demo-01` appears, and a last-complete-save time is visible. No balances, positions, account number, or live permission claim appears in Stage 1.
 4. Select `Reauthorization required` (`token-expired`).

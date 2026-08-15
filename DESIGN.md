@@ -1,6 +1,6 @@
 # QBO Escalations Design System
 
-> Source-backed product UI guidance. Last verified against the production client source and rendered at desktop and 390px mobile widths on 2026-07-25. Rendered browser verification is a required release gate whenever the browser test surface is available.
+> Source-backed product UI guidance. Last verified against the production client source, the local Apple design-systems research, and the rendered Connected Accounts desktop/mobile flow on 2026-08-14. Rendered browser verification is a required release gate whenever the browser test surface is available.
 
 ## Product and interface purpose
 
@@ -15,6 +15,31 @@ The interface is not a marketing site and should not behave like one. Large hero
 3. **Make hierarchy match value.** Size and position communicate importance. A summary metric is compact context, not a hero card. A warning may be prominent only when the user can act on it.
 4. **Prefer one organized surface over card collections.** Group related controls with dividers inside one panel. Do not give every preference its own large container.
 5. **Explain at the point of uncertainty.** Use one short sentence by default. Put rare details in a tooltip, disclosure, help link, or confirmation shown when it matters.
+
+## Design impact is evaluated on every change
+
+Design quality starts before a user-interface file is edited.
+
+1. Classify the change as user-visible or not user-visible.
+2. For a non-user-visible change, record that presentation and interaction are unaffected. No artificial screenshot work is required.
+3. For a user-visible change, define the primary task, stable frame, initially visible information, progressively revealed information, and feedback/recovery states before implementation.
+4. Apply this guide while building—not after the feature is considered functionally complete.
+5. Treat direct user criticism and screenshots as acceptance evidence. A rejected rendering keeps the design gate failed even when automated checks passed.
+
+This classification prevents both failure modes: backend work is not burdened with irrelevant visual ceremony, and visible work cannot quietly defer design to a future “polish” phase.
+
+## Apple research translated for this product
+
+The maintained source is `docs/research/apple-design-systems/apple-design-systems-research.md`. It informs judgment, not branding. QBO Escalations keeps its Slate identity and does not imitate Apple logos, product chrome, or decorative materials.
+
+- **Begin with the human goal.** Order decisions as goal, context, mechanism, feedback, recovery, and proof. Do not present implementation machinery as the task.
+- **Protect agency and familiarity.** Use recognizable controls, truthful state, reversible actions, and clear consequences. Novel styling must not make an ordinary action harder to recognize.
+- **Choose simplicity over mere minimalism.** Remove friction and low-value material while preserving the guidance needed to decide safely. Fewer elements are not automatically better.
+- **Match density to the platform and work.** This is a desktop operational tool with deep workflows. Prefer compact, precise layouts that keep evidence visible; do not inherit oversized touch-first spacing.
+- **Use progressive disclosure with visible signifiers.** Keep rare developer, policy, and recovery controls available but secondary. The user must be able to discover them without having them dominate the normal state.
+- **Make depth, material, ornament, and motion do work.** Use them only to explain hierarchy, focus, selection, or causality. Do not stack translucent materials, decorate content cards, or animate ordinary static settings.
+- **Treat accessibility as a binding design input.** Readable contrast, visible keyboard focus, non-color status meaning, reduced-motion behavior, and reachable content are part of the design—not a compliance pass added later.
+- **Iterate until the result feels resolved.** Source review is not craft. Render at desktop and mobile, exercise the real states, inspect screenshots, correct weak hierarchy or density, and repeat.
 
 ## Interaction quality is a release gate
 
@@ -333,6 +358,24 @@ Connected Accounts answers four questions in this order: does access work, what 
 
 Inbox, sending, and calendar defaults are independent. Keep their selects together in one grid and let the same defaults guide visible UI actions and background agent calls.
 
+On a wide desktop, disconnected or compact providers appear as equal peer cards in a two-column grid; the grid becomes one column when the available width is narrow. A provider may span the full width only when its connected workflow has earned that space through real account rows, defaults, permissions, or repair controls.
+
+Each provider header contains only identity, one useful descriptor, and truthful status. The body starts with the current state and the next safe action. Development fixtures, simulated-state selectors, raw permission detail, and rare recovery tools belong behind a clearly labelled disclosure. A simulation must remain unmistakable without turning the ordinary account card into a developer panel.
+
+### August 14 Connected Accounts correction record
+
+The first Questrade Stage 1 rendering passed component, build, and automated browser checks but failed the user's design review. It used full-width stacked gray slabs, a heavy black status panel, low-contrast labels, decorative all-caps pills, and an always-visible test-state selector that visually outweighed the account itself.
+
+The corrected pattern establishes a stricter rule:
+
+- compact providers are visual peers, not oversized page sections;
+- normal account state is primary and simulation tooling is disclosed on demand;
+- secondary text remains readable rather than fading into the surface;
+- status uses a label plus shape/icon, never a floating low-contrast pill alone;
+- card depth stays restrained and consistent with Slate;
+- removing content must also remove the space it occupied;
+- automated visual checks are evidence, while the user's rendered acceptance remains the gate.
+
 ## Buttons and controls
 
 ### Buttons
@@ -460,20 +503,22 @@ Use 160–220ms transitions for hover, focus, switching, and small disclosure ch
 
 Before merging a UI change:
 
-1. Identify the user goal and primary action.
-2. Apply the space/value assessment to every first-viewport element.
-3. Use the canonical tokens; search for new hard-coded colors.
-4. Confirm title, copy, and action hierarchy.
-5. Confirm progressive disclosure: only controls needed for the current decision are prominent.
-6. Verify that each workflow mode earns its frame size, the writing frame stays stable, and expanded content uses intrinsic height plus reachable scrolling instead of clipping.
-7. Check hover, focus-visible, active, selected, disabled, loading, empty, warning, error, dirty, and saved states as applicable.
-8. Verify equal control heights, label gaps, alignment, keyboard focus, and accessible names.
-9. Build the client and run focused interaction tests.
-10. Inspect the live desktop route at a typical laptop viewport.
-11. Inspect a mobile viewport, including every compact selector and expanded disclosure; confirm `scrollWidth` does not exceed the available width.
-12. Check browser console errors.
-13. If visual inspection was blocked, mark the visual gate incomplete instead of declaring a visual pass.
-14. Re-read changed files before reporting current state.
+1. Classify design impact; if it is not user-visible, record why presentation and interaction are unaffected.
+2. Identify the user goal and primary action.
+3. Define the stable frame, initial state, progressive disclosures, feedback, recovery, and reduced-motion behavior.
+4. Apply the space/value assessment to every first-viewport element.
+5. Use the canonical tokens; search for new hard-coded colors.
+6. Confirm title, copy, and action hierarchy.
+7. Confirm progressive disclosure: only controls needed for the current decision are prominent, and hidden controls remain discoverable.
+8. Verify that each workflow mode earns its frame size, the working frame stays stable, and expanded content uses intrinsic height plus reachable scrolling instead of clipping.
+9. Check hover, focus-visible, active, selected, disabled, loading, empty, warning, error, dirty, and saved states as applicable.
+10. Verify equal control heights, label gaps, alignment, keyboard focus, readable contrast, and accessible names.
+11. Build the client and run focused interaction tests.
+12. Inspect the live desktop route at a typical laptop viewport and compare it with the request or reported screenshot.
+13. Inspect a mobile viewport, including every compact selector and expanded disclosure; confirm `scrollWidth` does not exceed the available width.
+14. Check browser console errors.
+15. If visual inspection was blocked, mark the visual gate incomplete instead of declaring a visual pass.
+16. Re-read changed files before reporting current state.
 
 ## Known design debt
 

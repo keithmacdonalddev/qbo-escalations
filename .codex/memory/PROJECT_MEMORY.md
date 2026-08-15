@@ -1,6 +1,6 @@
 # Codex Project Memory
 
-Last verified: 2026-07-11. Authority: `AGENTS.md`, `CLAUDE.md`, `PRODUCT_NORTH_STAR.md`, current source, and saved deterministic harness evidence.
+Last verified: 2026-08-14. Authority: `AGENTS.md`, `CLAUDE.md`, `PRODUCT_NORTH_STAR.md`, current source, and saved deterministic harness evidence.
 
 ## Durable Orientation
 
@@ -11,6 +11,7 @@ Last verified: 2026-07-11. Authority: `AGENTS.md`, `CLAUDE.md`, `PRODUCT_NORTH_S
 - The escalation-image harness's saved real-fixture evidence is the authority for provider/model response quality, accuracy, and speed.
 - Use the newest appropriate provider model and let deterministic evaluation expose regressions.
 - Memory aids recall but never overrides current source, root rules, or explicit user direction.
+- Every task classifies design impact. User-visible work must follow `DESIGN.md`, use the local Apple research for method rather than branding, and pass rendered desktop/mobile acceptance; tests and builds cannot substitute for a strong interface, and user screenshots are acceptance evidence.
 
 ## Harness Routing
 

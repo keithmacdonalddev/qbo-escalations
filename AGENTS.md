@@ -117,11 +117,13 @@ Before reporting:
 ### UI/UX Acceptance Gate
 
 - Premium UI/UX is a product requirement, not optional polish. Functional code, passing tests, and a successful build do not prove that a UI change is acceptable.
+- Classify design impact for every change before implementation. If the change is not user-visible, record that no presentation or interaction is affected. If it is user-visible, the full design gate in this section is mandatory; design is never deferred to a later polish pass.
 - Before changing a user-facing flow, state the primary user task, the stable frame or layout invariant, what is visible initially, what is revealed after each choice, and which states require motion or feedback.
 - Preserve the outer size and position of modals, drawers, and panels while their internal content changes unless the user explicitly asks for adaptive sizing. Scroll content inside the stable frame.
 - Every visible element must earn its space. Remove duplicate navigation, placeholder tabs, verbose disclosures, large optional cards, and implementation explanations when they do not help the next action.
 - Related controls must have deliberate hover, focus-visible, active, selected, disabled, loading, and reduced-motion behavior where applicable. Equal controls must use one explicit height and aligned label spacing.
 - Treat user screenshots and direct design criticism as acceptance evidence. Address every marked issue and check the surrounding flow for the same class of defect.
+- Use `docs/research/apple-design-systems/apple-design-systems-research.md` as a judgment source for user-facing work: begin with the human goal, favor familiarity and agency, use progressive disclosure, match desktop density to the task, and let every ornament, material, and motion earn its place. Apply the principles without copying Apple branding or weakening the project’s Slate visual language.
 - Substantial UI work is not complete until the rendered desktop and mobile experience has been compared against the request, including transition behavior and browser console output. If browser verification is unavailable, report the visual gate as incomplete; never infer a visual pass from source, tests, or build output.
 - Read and follow `DESIGN.md` before user-facing UI work. Update `DESIGN.md` and `DESIGN.HTML` when feedback establishes a durable design rule.
 

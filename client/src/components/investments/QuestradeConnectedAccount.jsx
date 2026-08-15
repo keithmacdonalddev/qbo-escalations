@@ -4,12 +4,25 @@ import './questrade-connected-account.css';
 
 function QuestradeMark() {
   return (
-    <svg width="25" height="25" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="2" y="2" width="20" height="20" rx="6" fill="currentColor" opacity="0.13" />
-      <path d="M7.3 7.1h9.4v3.1h-2.9v6.7h-3.6v-6.7H7.3V7.1Z" fill="currentColor" />
-      <path d="m14.1 14.7 2.6 2.2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5.25 16.25 9.1 12.4l2.75 2.75 6.9-7.15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M14.75 8h4v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.25 5.25v13.5h13.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.55" />
     </svg>
   );
+}
+
+function StateGlyph({ tone }) {
+  if (tone === 'connected') {
+    return <path d="m7.5 12 3 3 6-7" />;
+  }
+  if (tone === 'warning') {
+    return <><path d="M12 7.5v5" /><path d="M12 16.5h.01" /></>;
+  }
+  if (tone === 'danger') {
+    return <><path d="m9 9 6 6" /><path d="m15 9-6 6" /></>;
+  }
+  return <><path d="M12 10v6" /><path d="M12 7.5h.01" /></>;
 }
 
 function toneForState(state) {
@@ -31,16 +44,19 @@ export default function QuestradeConnectedAccount({ connection }) {
   const statusLabel = connection.loading ? 'Checking...' : data?.statusLabel || (connection.error ? 'Unavailable' : 'Not connected');
   const statusTone = connection.loading ? 'loading' : connection.error ? 'danger' : toneForState(data?.state);
   const transition = reducedMotion ? { duration: 0 } : { duration: 0.18 };
+  const summary = data?.state === 'disconnected' ? 'Questrade is not connected.' : data?.summary;
+  const action = data?.state === 'disconnected'
+    ? 'Live access is off, and no token or portfolio data is saved.'
+    : data?.action;
 
   return (
     <ConnectedAccountCard
       className="questrade-account-card"
       icon={<QuestradeMark />}
       providerName="Questrade"
-      providerDescription="Personal investments"
+      providerDescription={`${data?.accountType || 'Margin'} account · ${data?.mode === 'simulated' ? 'Simulated preview' : 'Personal investments'}`}
       statusLabel={statusLabel}
       statusTone={statusTone}
-      badges={[data?.accountType || 'Margin', data?.mode === 'simulated' ? 'Simulated' : 'Read-only']}
     >
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
@@ -65,30 +81,49 @@ export default function QuestradeConnectedAccount({ connection }) {
           ) : (
             <>
               <div className={`questrade-state-message is-${statusTone}`} role={statusTone === 'danger' ? 'alert' : 'status'}>
-                <strong>{data.summary}</strong>
-                <p>{data.action}</p>
+                <span className="questrade-state-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <StateGlyph tone={statusTone} />
+                  </svg>
+                </span>
+                <span className="questrade-state-copy">
+                  <strong>{summary}</strong>
+                  <p>{action}</p>
+                </span>
               </div>
 
               {(data.safeAccountId || data.lastSuccessfulSyncAt) && (
                 <dl className="questrade-safe-details">
-                  {data.safeAccountId && <div><dt>Safe account label</dt><dd>{data.safeAccountId}</dd></div>}
+                  {data.safeAccountId && <div><dt>Account label</dt><dd>{data.safeAccountId}</dd></div>}
                   {data.lastSuccessfulSyncAt && <div><dt>Last complete save</dt><dd>{formatSavedTime(data.lastSuccessfulSyncAt)}</dd></div>}
                   {data.previousSnapshotAvailable && <div><dt>Saved data</dt><dd>Previous complete snapshot preserved</dd></div>}
                 </dl>
               )}
 
               {data.fixtureControlsAvailable && (
-                <label className="questrade-scenario-control">
-                  <span><strong>Stage 1 test state</strong><small>Simulated only. No Questrade request or token is used.</small></span>
-                  <select
-                    value={data.scenario}
-                    disabled={connection.changingScenario}
-                    onChange={(event) => connection.selectScenario(event.target.value)}
-                    aria-label="Simulated Questrade state"
-                  >
-                    {(data.scenarios || []).map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.label}</option>)}
-                  </select>
-                </label>
+                <details className="questrade-preview-tools">
+                  <summary role="button" aria-label="Preview Questrade connection states">
+                    <span>
+                      <strong>Preview connection states</strong>
+                      <small>Stage 1 · simulated only</small>
+                    </span>
+                    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m6 8 4 4 4-4" /></svg>
+                  </summary>
+                  <div className="questrade-preview-content">
+                    <label className="questrade-scenario-control">
+                      <span>Connection state</span>
+                      <select
+                        value={data.scenario}
+                        disabled={connection.changingScenario}
+                        onChange={(event) => connection.selectScenario(event.target.value)}
+                        aria-label="Simulated Questrade state"
+                      >
+                        {(data.scenarios || []).map((scenario) => <option key={scenario.id} value={scenario.id}>{scenario.label}</option>)}
+                      </select>
+                    </label>
+                    <p>No Questrade request or token is used. No financial values are loaded in this preview.</p>
+                  </div>
+                </details>
               )}
             </>
           )}

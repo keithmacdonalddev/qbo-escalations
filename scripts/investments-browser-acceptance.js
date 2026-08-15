@@ -70,12 +70,28 @@ function findRef(data, role, namePattern) {
   const match = Object.entries(data.refs || {}).find(([, value]) => (
     value.role === role && namePattern.test(value.name || '')
   ));
-  if (!match) throw new Error(`Could not find ${role} matching ${namePattern}.`);
+  if (!match) {
+    const available = Object.values(data.refs || {})
+      .filter((value) => value.role === role)
+      .map((value) => value.name || '(unnamed)')
+      .slice(0, 12)
+      .join(', ');
+    throw new Error(`Could not find ${role} matching ${namePattern}. Available ${role}s: ${available || 'none'}.`);
+  }
   return `@${match[0]}`;
 }
 
 function assertIncludes(value, expected, label) {
   if (!String(value).includes(expected)) throw new Error(`${label} did not include "${expected}".`);
+}
+
+function waitForBodyText(binary, expected, attempts = 12) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const body = mainRun(binary, ['get', 'text', 'body']);
+    if (body.includes(expected)) return body;
+    mainRun(binary, ['wait', '150']);
+  }
+  throw new Error(`Rendered page did not show "${expected}" within the bounded wait.`);
 }
 
 async function main() {
@@ -101,18 +117,36 @@ async function main() {
     const settings = snapshot(binary);
     mainRun(binary, ['click', findRef(settings, 'button', /^Connected Accounts/)]);
     mainRun(binary, ['wait', '--text', 'Questrade']);
-    mainRun(binary, ['wait', '--text', 'Stage 1 test state']);
+    mainRun(binary, ['wait', '--text', 'Preview connection states']);
 
     let accounts = snapshot(binary);
-    mainRun(binary, ['select', findRef(accounts, 'combobox', /^Simulated Questrade state$/), 'disconnected']);
-    mainRun(binary, ['wait', '--text', 'No Questrade token has been saved']);
+    const previewRef = findRef(accounts, 'button', /^Preview Questrade connection states$/);
+    const initiallyOpen = JSON.parse(mainRun(binary, ['eval', `document.querySelector('.questrade-preview-tools').open`]));
+    if (initiallyOpen) throw new Error('Simulation controls should be collapsed in the normal account view.');
+    mainRun(binary, ['click', previewRef]);
+    mainRun(binary, ['wait', '150']);
+    const openedForTesting = JSON.parse(mainRun(binary, ['eval', `document.querySelector('.questrade-preview-tools').open`]));
+    if (!openedForTesting) throw new Error('Simulation controls did not open for Stage 1 testing.');
+    const renderedSelect = JSON.parse(mainRun(binary, ['eval', `(() => { const select = document.querySelector('.questrade-scenario-control select'); const rect = select?.getBoundingClientRect(); return { label: select?.getAttribute('aria-label'), width: rect?.width || 0, height: rect?.height || 0 }; })()`]));
+    if (renderedSelect.label !== 'Simulated Questrade state' || renderedSelect.width <= 0 || renderedSelect.height <= 0) {
+      throw new Error('The disclosed simulated-state selector is not visibly rendered with its accessible name.');
+    }
+    mainRun(binary, ['select', '.questrade-scenario-control select', 'disconnected']);
+    let body = waitForBodyText(binary, 'Questrade is not connected');
     accounts = snapshot(binary);
-    let body = mainRun(binary, ['get', 'text', 'body']);
-    assertIncludes(body, 'MARGIN', 'Desktop account card');
-    assertIncludes(body, 'SIMULATED', 'Desktop account card');
-    assertIncludes(body, 'No Questrade token has been saved', 'Disconnected fixture');
+    mainRun(binary, ['click', findRef(accounts, 'button', /^Preview Questrade connection states$/)]);
+    accounts = snapshot(binary);
+    assertIncludes(body, 'Margin account · Simulated preview', 'Desktop account card');
+    assertIncludes(body, 'Questrade is not connected', 'Disconnected fixture');
+    const desktopLayout = JSON.parse(mainRun(binary, ['eval', `(() => { const cards = [...document.querySelectorAll('.settings-accounts-grid > .settings-accounts-card')].map((card) => card.getBoundingClientRect()); return { count: cards.length, topDelta: cards.length > 1 ? Math.abs(cards[0].top - cards[1].top) : null, columns: getComputedStyle(document.querySelector('.settings-accounts-grid')).gridTemplateColumns }; })()`]));
+    if (desktopLayout.count < 2 || desktopLayout.topDelta > 2 || desktopLayout.columns.split(' ').length < 2) {
+      throw new Error('Compact providers are not presented as equal desktop peers.');
+    }
     mainRun(binary, ['screenshot', desktopShot]);
     if (!fs.existsSync(desktopShot) || fs.statSync(desktopShot).size === 0) throw new Error('Desktop screenshot was not created.');
+
+    mainRun(binary, ['click', findRef(accounts, 'button', /^Preview Questrade connection states$/)]);
+    mainRun(binary, ['wait', '150']);
 
     const scenarios = [
       ['healthy-margin', 'margin-demo-01'],
@@ -121,13 +155,11 @@ async function main() {
       ['locked', 'Credential locked'],
       ['key-store-unavailable', 'Credential protection unavailable'],
       ['service-unavailable', 'Previous complete snapshot preserved'],
-      ['disconnected', 'No Questrade token has been saved'],
+      ['disconnected', 'Questrade is not connected'],
     ];
     for (const [scenario, expected] of scenarios) {
-      accounts = snapshot(binary);
-      mainRun(binary, ['select', findRef(accounts, 'combobox', /^Simulated Questrade state$/), scenario]);
-      mainRun(binary, ['wait', '--text', expected]);
-      body = mainRun(binary, ['get', 'text', 'body']);
+      mainRun(binary, ['select', '.questrade-scenario-control select', scenario]);
+      body = waitForBodyText(binary, expected);
       assertIncludes(body, expected, scenario);
     }
 
@@ -145,8 +177,11 @@ async function main() {
     mainRun(binary, ['wait', '--text', 'Connected Accounts']);
     mainRun(binary, ['screenshot', '--full', mobileShot]);
     if (!fs.existsSync(mobileShot) || fs.statSync(mobileShot).size === 0) throw new Error('Mobile screenshot was not created.');
-    const bounds = JSON.parse(mainRun(binary, ['eval', `JSON.stringify((() => { const r = document.querySelector('.questrade-account-card').getBoundingClientRect(); return { left: r.left, right: r.right, width: innerWidth }; })())`]));
+    const bounds = JSON.parse(mainRun(binary, ['eval', `(() => { const r = document.querySelector('.questrade-account-card').getBoundingClientRect(); return { left: r.left, right: r.right, width: innerWidth, pageWidth: document.documentElement.scrollWidth }; })()`]));
     if (bounds.left < 0 || bounds.right > bounds.width + 1) throw new Error('The Questrade card overflows the mobile viewport.');
+    if (bounds.pageWidth > bounds.width + 1) throw new Error('Connected Accounts creates horizontal page overflow on mobile.');
+    const mobileColumns = JSON.parse(mainRun(binary, ['eval', `getComputedStyle(document.querySelector('.settings-accounts-grid')).gridTemplateColumns`]));
+    if (mobileColumns.split(' ').length !== 1) throw new Error('Connected Accounts did not collapse to one mobile column.');
 
     const errors = mainRun(binary, ['errors']);
     if (errors) throw new Error(`Browser page errors were reported: ${errors.slice(0, 500)}`);

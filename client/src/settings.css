@@ -619,6 +619,17 @@
 
 /* ----- Connected Accounts Section ----- */
 
+.settings-accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.settings-accounts-grid > .is-expanded {
+  grid-column: 1 / -1;
+}
+
 .settings-accounts-card {
   background: var(--bg-raised);
   border: 1px solid var(--line-subtle);
@@ -677,6 +688,25 @@
   color: var(--ink-tertiary);
 }
 
+.connected-account-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.connected-account-badges > span {
+  min-height: 18px;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--line));
+  border-radius: 5px;
+  background: var(--accent-subtle);
+  color: var(--accent-hover);
+  font-size: 0.58rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
 /* Status badges */
 .settings-accounts-status {
   font-size: var(--text-xs);
@@ -711,7 +741,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--success);
+  background: currentColor;
   flex-shrink: 0;
 }
 
@@ -1134,6 +1164,16 @@
 .settings-info-footer svg {
   flex-shrink: 0;
   margin-top: 2px;
+}
+
+@media (max-width: 900px) {
+  .settings-accounts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-accounts-grid > .is-expanded {
+    grid-column: auto;
+  }
 }
 
 /* ----- AI Assistant Settings ----- */

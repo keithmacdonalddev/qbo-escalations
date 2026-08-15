@@ -104,6 +104,14 @@ Before reporting:
 - Base factual code-state claims on fresh on-disk checks from the current turn.
 - Mention any relevant concurrent-work risk if it affected the task.
 
+## UI/UX Acceptance Gate
+
+- Classify design impact before every change. For non-user-visible work, record that presentation and interaction are unaffected. For user-visible work, premium design is part of the implementation—not a later polish step.
+- Read `DESIGN.md` before editing a user-facing flow. Define the primary task, stable frame, initial content, progressively revealed content, and required feedback states before changing code.
+- Use the local Apple design research as a judgment source: start from the human goal, preserve agency and familiarity, prefer simplicity over mere subtraction, match Mac-style desktop density to deep workflows, and make every material, ornament, and motion do useful work. Keep the product’s own Slate identity.
+- Treat screenshots and direct design criticism as acceptance evidence. Passing tests or a build never proves a UI is acceptable.
+- Verify substantial UI changes in the live desktop and mobile app, including keyboard focus, expanded disclosures, overflow, reduced motion, and browser console output. If rendered verification is unavailable, report the visual gate as incomplete.
+
 ## Codex MCP Collaboration
 
 Claude Code may have access to a separately authenticated Codex coding agent through a user-level MCP connection. MCP (Model Context Protocol) is the tool connection that lets Claude give Codex a bounded task. This is an optional local development capability, not a dependency of the running QBO application.

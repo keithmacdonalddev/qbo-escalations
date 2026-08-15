@@ -29,6 +29,7 @@ Memory helps recall; it never overrides current evidence or grants permission.
 ## Active Architecture
 
 - The repeated PM hooks stay because they materially improved agent compliance.
+- Design governance is reinforced at every layer: root and scoped instructions require a design-impact classification for every task, user-visible work follows `DESIGN.md` and the local Apple research method, PM hooks repeat the rendered acceptance gate, and curated memory preserves the preference without outranking current evidence.
 - The Claude runtime guard blocks attempts to take over long-running services.
 - The Claude workspace guard blocks destructive Git operations and direct full-file reads of common secret files.
 - The session-start freshness hook reports instruction-map drift, missing harness files, and visibly stale curated memory.

@@ -530,9 +530,13 @@
         "server/src/lib/field-encryption.js",
         "server/src/services/investments/credential-key-provider.js",
         "server/src/services/investments/providers/questrade/api-host-policy.js",
+        "client/src/components/SettingsAccountsSection.jsx",
         "client/src/components/connected-accounts/ConnectedAccountCard.jsx",
         "client/src/components/investments/QuestradeConnectedAccount.jsx",
+        "client/src/components/investments/questrade-connected-account.css",
         "client/src/hooks/useQuestradeConnection.js",
+        "client/src/settings.css",
+        "client/src/settings-v2.css",
         "scripts/dev-launcher.js"
       ],
       "requiredCheckTypes": ["unit", "component", "server", "browser"],
@@ -544,7 +548,7 @@
         { "type": "browser", "groupId": "investments-browser", "paths": ["scripts/investments-browser-acceptance.js"] }
       ],
       "knownGaps": [
-        "Rendered desktop and mobile acceptance is required before Stage 1 passes.",
+        "Gate 1 remains user-rejected until the corrected Connected Accounts desktop and mobile presentation is explicitly accepted.",
         "No live Questrade request, token storage, account read, streaming connection, scheduler, or portfolio value exists in Stage 1 by design."
       ],
       "lastHumanReviewDate": "2026-08-14"

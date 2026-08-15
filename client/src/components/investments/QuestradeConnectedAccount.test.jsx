@@ -34,12 +34,15 @@ function buildConnection(overrides = {}) {
 }
 
 describe('QuestradeConnectedAccount', () => {
-  it('shows an unmistakable safe simulated Margin account state', () => {
+  it('shows an unmistakable safe simulated Margin account state behind a compact account summary', async () => {
+    const user = userEvent.setup();
     render(<QuestradeConnectedAccount connection={buildConnection()} />);
     expect(screen.getByRole('region', { name: 'Questrade connection' })).toBeVisible();
-    expect(screen.getByText('Margin')).toBeVisible();
-    expect(screen.getByText('Simulated')).toBeVisible();
+    expect(screen.getByText(/Margin account · Simulated preview/)).toBeVisible();
     expect(screen.getByText('margin-demo-01')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Preview Questrade connection states' })).toBeVisible();
+    expect(screen.getByText(/No Questrade request or token is used/)).not.toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Preview Questrade connection states' }));
     expect(screen.getByText(/No Questrade request or token is used/)).toBeVisible();
     expect(screen.queryByText(/balance|market value/i)).not.toBeInTheDocument();
   });
@@ -48,9 +51,24 @@ describe('QuestradeConnectedAccount', () => {
     const user = userEvent.setup();
     const connection = buildConnection();
     render(<QuestradeConnectedAccount connection={connection} />);
+    await user.click(screen.getByRole('button', { name: 'Preview Questrade connection states' }));
     await user.selectOptions(screen.getByLabelText('Simulated Questrade state'), 'token-expired');
     expect(connection.selectScenario).toHaveBeenCalledWith('token-expired');
     expect(screen.queryByRole('button', { name: /connect questrade/i })).not.toBeInTheDocument();
+  });
+
+  it('keeps the normal disconnected state concise and hides developer controls by default', () => {
+    render(<QuestradeConnectedAccount connection={buildConnection({
+      data: {
+        ...buildConnection().data,
+        state: 'disconnected',
+        statusLabel: 'Not connected',
+        scenario: 'disconnected',
+      },
+    })} />);
+    expect(screen.getByText('Questrade is not connected.')).toBeVisible();
+    expect(screen.getByText(/no token or portfolio data is saved/i)).toBeVisible();
+    expect(screen.getByLabelText('Simulated Questrade state')).not.toBeVisible();
   });
 
   it('preserves the last complete snapshot message during an outage', () => {

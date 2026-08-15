@@ -50,13 +50,15 @@ export default function SettingsAccountsSection({
         </div>
       </header>
 
-      <ConnectedAccountCard
-        icon={<GoogleLogo size={24} />}
-        providerName="Google"
-        providerDescription="Gmail & Calendar"
-        statusLabel={googleAuth.loading ? 'Checking...' : googleAuth.connected ? 'Connected' : 'Not connected'}
-        statusTone={googleAuth.loading ? 'loading' : googleAuth.connected ? 'connected' : 'disconnected'}
-      >
+      <div className="settings-accounts-grid">
+        <ConnectedAccountCard
+          className={googleAuth.connected ? 'google-account-card is-expanded' : 'google-account-card'}
+          icon={<GoogleLogo size={22} />}
+          providerName="Google"
+          providerDescription="Gmail & Calendar"
+          statusLabel={googleAuth.loading ? 'Checking...' : googleAuth.connected ? 'Connected' : 'Not connected'}
+          statusTone={googleAuth.loading ? 'loading' : googleAuth.connected ? 'connected' : 'disconnected'}
+        >
         <AnimatePresence mode="wait">
           {googleAuth.loading ? (
             <motion.div
@@ -239,8 +241,7 @@ export default function SettingsAccountsSection({
               transition={{ duration: 0.2 }}
             >
               <p className="settings-accounts-empty-msg">
-                Connect your Google account to access Gmail inbox, compose emails,
-                and manage your Google Calendar — all from within the workspace.
+                Connect Gmail and Calendar for inbox, email, and scheduling work in this app.
               </p>
 
               {!googleAuth.appConfigured && (
@@ -271,9 +272,10 @@ export default function SettingsAccountsSection({
             </motion.div>
           )}
         </AnimatePresence>
-      </ConnectedAccountCard>
+        </ConnectedAccountCard>
 
-      {additionalProviderCards.map((card) => card)}
+        {additionalProviderCards.map((card) => card)}
+      </div>
 
       <div className="settings-info-footer" style={{ marginTop: 'var(--sp-6)' }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -282,7 +284,7 @@ export default function SettingsAccountsSection({
           <line x1="12" y1="8" x2="12.01" y2="8" />
         </svg>
         <span>
-          Connected-account credentials stay local. Disconnecting a provider revokes its access.
+          Connection credentials are never shown here. Disconnecting a provider revokes its access.
         </span>
       </div>
     </div>

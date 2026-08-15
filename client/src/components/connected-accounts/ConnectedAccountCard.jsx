@@ -32,7 +32,7 @@ export default function ConnectedAccountCard({
           </div>
         </div>
         <span className={`settings-accounts-status ${STATUS_CLASS[statusTone] || STATUS_CLASS.disconnected}`}>
-          {statusTone === 'connected' && <span className="settings-accounts-status-dot" />}
+          <span className="settings-accounts-status-dot" aria-hidden="true" />
           {statusLabel}
         </span>
       </div>

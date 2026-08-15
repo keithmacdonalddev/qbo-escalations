@@ -1,6 +1,6 @@
 # Codex Agent Handoff
 
-Last verified: 2026-07-11. Use fresh Git state and current source instead of assuming this note remains current.
+Last verified: 2026-08-14. Use fresh Git state and current source instead of assuming this note remains current.
 
 ## Default Workflow
 
@@ -8,8 +8,9 @@ Last verified: 2026-07-11. Use fresh Git state and current source instead of ass
 2. Work in the main Codex conversation by default.
 3. Use the optional implementation reviewer or harness auditor only when isolation or independent challenge materially helps.
 4. Preserve concurrent work and do not control persistent services.
-5. Run focused verification proportional to risk.
-6. Commit and push completed requested work unless the user says not to.
+5. Classify design impact. For user-visible work, read `DESIGN.md`, define the interaction contract first, and complete rendered desktop/mobile acceptance.
+6. Run focused verification proportional to risk; never use tests or a build as proof of visual quality.
+7. Commit and push completed requested work unless the user says not to.
 
 ## Current Harness Notes
 

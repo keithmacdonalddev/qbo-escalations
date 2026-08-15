@@ -4,8 +4,8 @@ const SCENARIO_DEFINITIONS = Object.freeze({
   disconnected: {
     state: 'disconnected',
     statusLabel: 'Not connected',
-    summary: 'No Questrade token has been saved. Live access is still off.',
-    action: 'Stage 1 needs no token. Test the simulated states below.',
+    summary: 'Questrade is not connected.',
+    action: 'Live access is off, and no token or portfolio data is saved.',
     credentialState: 'not-stored',
   },
   'healthy-margin': {

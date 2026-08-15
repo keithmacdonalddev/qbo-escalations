@@ -36,6 +36,7 @@ describe('SettingsAccountsSection', () => {
     const { props } = renderSection();
     expect(screen.getByRole('region', { name: 'Google connection' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Questrade test card' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Google connection' }).parentElement).toHaveClass('settings-accounts-grid');
     await user.click(screen.getByRole('button', { name: 'Connect Google Account' }));
     expect(props.onGoogleConnect).toHaveBeenCalledOnce();
     expect(screen.getByText(/Disconnecting a provider revokes its access/)).toBeInTheDocument();

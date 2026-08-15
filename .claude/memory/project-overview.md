@@ -13,3 +13,5 @@ API response shape: `{ ok: true/false, ...}` with code and error on failures. Th
 
 **Why:** Build an operational-intelligence platform where expert agents work from shared evidence and human validation, with QBO escalation support as the first proving domain.
 **How to apply:** Verify claims and changed files with fresh evidence. Do not start or stop long-running services unless the user explicitly asks. Write and run focused tests in proportion to the change's risk. Deliver the complete practical outcome behind the request: use critical thinking to fill obvious gaps, but do not invent unrelated scope or make a materially different product decision without approval. Explain the practical result first and define technical terms in plain language.
+
+**Design priority:** Every task must classify whether it changes what the user sees or does. User-visible work must read `DESIGN.md`, use the local Apple research as a method source without copying its branding, and pass rendered desktop/mobile acceptance; tests and builds do not substitute for visual quality. Screenshots and direct criticism are acceptance evidence.

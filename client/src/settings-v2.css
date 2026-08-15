@@ -576,17 +576,71 @@
   line-height: 1.4 !important;
 }
 
+.settings-v2-layout .settings-accounts-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
 .settings-v2-layout .settings-accounts-card {
+  min-width: 0;
   max-width: none;
-  border: 1px solid var(--settings-border) !important;
+  border: 1px solid var(--settings-border-strong) !important;
   border-radius: 8px !important;
   background: var(--settings-panel) !important;
   box-shadow: none !important;
 }
-.settings-v2-layout .settings-accounts-card:hover { transform: none !important; box-shadow: none !important; }
-.settings-v2-layout .settings-accounts-card-header { padding: 12px 14px !important; border-bottom: 1px solid var(--settings-border) !important; background: var(--bg-elevated, #242a38) !important; }
-.settings-v2-layout .settings-accounts-body { padding: 12px 14px !important; }
+.settings-v2-layout .settings-accounts-card:hover {
+  transform: none !important;
+  border-color: color-mix(in srgb, var(--settings-accent) 28%, var(--settings-border-strong)) !important;
+  box-shadow: none !important;
+}
+.settings-v2-layout .settings-accounts-card-header {
+  min-height: 64px;
+  padding: 11px 13px !important;
+  border-bottom: 1px solid var(--settings-border) !important;
+  background: transparent !important;
+}
+.settings-v2-layout .settings-accounts-body { padding: 12px 13px !important; }
 .settings-v2-layout .settings-accounts-provider { padding: 0 !important; }
+.settings-v2-layout .settings-accounts-provider-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 8px;
+  border-color: color-mix(in srgb, var(--settings-border-strong) 78%, transparent);
+}
+.settings-v2-layout .settings-accounts-provider-name { font-size: 0.78rem; line-height: 1.2; }
+.settings-v2-layout .settings-accounts-provider-desc { color: var(--settings-muted); font-size: 0.66rem; line-height: 1.35; }
+.settings-v2-layout .settings-accounts-status {
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 0.61rem;
+  line-height: 1;
+}
+.settings-v2-layout .settings-accounts-status--disconnected,
+.settings-v2-layout .settings-accounts-status--loading {
+  color: var(--settings-muted);
+}
+.settings-v2-layout .settings-accounts-empty-msg {
+  max-width: 58ch;
+  margin: 0 0 11px;
+  color: var(--settings-muted);
+  font-size: 0.7rem;
+  line-height: 1.5;
+}
+.settings-v2-layout .settings-accounts-connect-btn {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 13px;
+  gap: 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  box-shadow: none;
+}
+.settings-v2-layout .settings-accounts-connect-btn:hover:not(:disabled) {
+  box-shadow: 0 0 0 2px var(--settings-accent-soft);
+  transform: none;
+}
 .settings-v2-layout .settings-accounts-defaults { margin-top: 10px !important; padding-top: 10px !important; }
 .settings-v2-layout .settings-accounts-default-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
 .settings-account-health-list { display: flex; flex-direction: column; gap: 5px; }
@@ -605,7 +659,15 @@
 .settings-v2-layout .settings-accounts-scopes-list li { margin: 0 !important; color: var(--success, #5cd08e); font-size: 0.6rem; }
 .settings-v2-layout .settings-accounts-scopes-list li.is-missing { color: var(--warning, #f0a940); }
 .settings-v2-layout .settings-accounts-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.settings-v2-layout .settings-info-footer { margin-top: 10px !important; padding: 9px 11px !important; border: 1px solid var(--settings-border) !important; border-radius: 7px !important; background: var(--settings-input) !important; color: var(--settings-muted) !important; }
+.settings-v2-layout .settings-info-footer {
+  margin-top: 10px !important;
+  padding: 5px 2px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--settings-muted) !important;
+  line-height: 1.4;
+}
 
 .settings-v2-content .agent-accordion-list { gap: 7px !important; }
 .settings-v2-content .agent-accordion-card {
@@ -630,6 +692,8 @@
 @media (max-width: 980px) {
   .settings-v2-layout { grid-template-columns: 205px minmax(0, 1fr); }
   .settings-v2-content { padding: 20px 18px 38px; }
+  .settings-v2-layout .settings-accounts-grid { grid-template-columns: 1fr; }
+  .settings-v2-layout .settings-accounts-grid > .is-expanded { grid-column: auto; }
   .ai-management-commandbar { display: block; }
   .ai-management-policy-card { border-top: 1px solid var(--settings-border); }
   .ai-management-workspace { grid-template-columns: 164px minmax(0, 1fr); }
