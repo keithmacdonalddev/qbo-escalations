@@ -1,167 +1,706 @@
-.settings-accounts-status--warning {
-  color: var(--warning);
-  background: color-mix(in srgb, var(--warning) 9%, transparent);
-  border: 1px solid color-mix(in srgb, var(--warning) 25%, transparent);
-}
-
-.settings-accounts-status--danger {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-  border: 1px solid color-mix(in srgb, var(--danger) 23%, transparent);
-}
-
 .questrade-account-card .settings-accounts-provider-icon {
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--line));
-  background: color-mix(in srgb, var(--accent) 9%, #fff);
-  color: #2f6fcf;
+  border-color: color-mix(in srgb, #5fd470 34%, var(--line));
+  background: #102217;
 }
 
-.questrade-account-body {
+.questrade-account-card .settings-accounts-provider-icon img {
+  display: block;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .questrade-connected-footer,
+  .questrade-settings-detail > .settings-account-detail-header,
+  .questrade-settings-detail > .settings-account-detail-surface,
+  .questrade-disconnect-confirmation-backdrop,
+  .questrade-disconnect-confirmation-dialog {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+.questrade-developer-preview {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 0.8fr);
+  gap: 16px;
+  align-items: center;
+  padding: 14px;
+  border: 1px dashed color-mix(in srgb, var(--warning) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 5%, var(--bg-raised));
+  margin-bottom: 12px;
+}
+
+.questrade-detail-logo {
+  border-color: color-mix(in srgb, #5fd470 34%, var(--line)) !important;
+  background: #102217 !important;
+}
+
+.questrade-detail-header-actions,
+.questrade-connected-status {
+  display: flex;
+  align-items: center;
+}
+
+.questrade-detail-header-actions {
   gap: 10px;
 }
 
-.questrade-state-message {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr);
-  align-items: start;
-  gap: 10px;
-  padding: 10px 11px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--bg-elevated) 46%, var(--bg-raised));
+.questrade-connected-byline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.questrade-state-icon {
+.questrade-connected-status {
+  gap: 4px;
+  color: color-mix(in srgb, var(--success) 82%, var(--ink));
+  font: inherit;
+  font-weight: 660;
+}
+
+.questrade-connected-status svg {
+  width: 12px;
+  height: 12px;
+}
+
+.settings-account-sheet:has(.questrade-connected-resting) {
+  width: min(620px, calc(100vw - 48px));
+}
+
+.settings-account-sheet:has(.questrade-connected-resting) .settings-account-sheet-content {
+  overflow: hidden;
+}
+
+.questrade-settings-detail {
+  position: relative;
+}
+
+.questrade-settings-detail:not(.is-confirming-disconnect) {
+  overflow: clip;
+}
+
+.questrade-settings-detail > .settings-account-detail-header {
+  margin-bottom: 0;
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+
+.questrade-connected-resting {
+  border-top: 0;
+}
+
+.questrade-settings-detail > .settings-account-detail-header,
+.questrade-settings-detail > .settings-account-detail-surface {
+  filter: none;
+  transition: filter 180ms ease;
+}
+
+.questrade-settings-detail.is-confirming-disconnect > .settings-account-detail-header,
+.questrade-settings-detail.is-confirming-disconnect > .settings-account-detail-surface {
+  filter: blur(2px) brightness(0.48) saturate(0.72);
+  pointer-events: none;
+  user-select: none;
+}
+
+.questrade-disconnect-confirmation-backdrop {
+  position: absolute;
+  inset: -24px;
+  z-index: 4;
   display: grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: color-mix(in srgb, currentColor 10%, transparent);
-  color: var(--ink-secondary);
+  padding: 14px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg) 10%, transparent);
+  backdrop-filter: blur(2px) saturate(0.88);
+  animation: questrade-confirmation-backdrop-reveal 170ms ease both;
 }
 
-.questrade-state-icon svg {
-  width: 17px;
-  height: 17px;
+.questrade-disconnect-confirmation-dialog {
+  display: grid;
+  width: min(430px, 100%);
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 70%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--bg-floating) 94%, var(--bg-raised));
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.34), 0 3px 12px rgba(0, 0, 0, 0.22);
+  transform-origin: 16% 100%;
+  animation: questrade-confirmation-dialog-reveal 190ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.questrade-state-message.is-connected .questrade-state-icon { color: var(--success); }
-.questrade-state-message.is-warning .questrade-state-icon { color: var(--warning); }
-.questrade-state-message.is-danger .questrade-state-icon { color: var(--danger); }
-
-.questrade-state-copy {
-  min-width: 0;
-}
-
-.questrade-state-copy strong {
-  display: block;
+.questrade-disconnect-confirmation-copy h3 {
+  margin: 0 0 5px;
   color: var(--ink);
-  font-size: 0.75rem;
-  font-weight: 680;
-  line-height: 1.4;
+  font-size: 0.82rem;
+  font-weight: 690;
+  line-height: 1.35;
 }
 
-.questrade-state-copy p {
-  margin: 3px 0 0;
-  color: var(--ink-secondary);
+.questrade-disconnect-confirmation-copy > p {
+  margin: 0;
+  color: color-mix(in srgb, var(--ink-secondary) 92%, var(--ink));
+  font-size: 0.69rem;
+  line-height: 1.45;
+}
+
+.questrade-disconnect-confirmation-copy .questrade-connection-error {
+  margin-top: 8px;
+}
+
+.settings-account-sheet .questrade-disconnect-confirmation-dialog button:focus-visible {
+  outline: none !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 18%, transparent) !important;
+}
+
+@keyframes questrade-confirmation-backdrop-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes questrade-confirmation-dialog-reveal {
+  from { opacity: 0; transform: translate(-18px, 12px) scale(0.9); }
+  to { opacity: 1; transform: translate(0, 0) scale(1); }
+}
+
+.questrade-connected-access-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 16px 18px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line-subtle) 72%, transparent);
+}
+
+.questrade-connected-access-summary h3 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 0.78rem;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.questrade-connected-access-summary p {
+  margin: 0;
+  max-width: 510px;
+  color: color-mix(in srgb, var(--ink-secondary) 90%, var(--ink));
   font-size: 0.68rem;
   line-height: 1.45;
 }
 
-.questrade-state-message > .btn {
-  grid-column: 2;
-  justify-self: start;
+.questrade-connected-access-summary .anchored-settings-trigger {
+  min-height: 30px;
+  padding-inline: 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
 }
 
-.questrade-safe-details {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
-  gap: 1px;
+.questrade-connected-access-summary .anchored-settings-trigger:hover {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  box-shadow: none !important;
+}
+
+.questrade-connected-access-summary .anchored-settings-trigger[aria-expanded='true'] {
+  border-color: transparent;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: none !important;
+  color: color-mix(in srgb, var(--accent) 88%, white);
+}
+
+.settings-account-sheet .questrade-connected-access-summary .anchored-settings-trigger:focus-visible {
+  outline: none !important;
+  border-color: transparent !important;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent) !important;
+}
+
+.questrade-access-flyout {
+  width: min(224px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-color: color-mix(in srgb, var(--line-strong) 58%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-floating) 72%, var(--bg-raised));
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.32), 0 2px 7px rgba(0, 0, 0, 0.18);
+}
+
+.questrade-access-boundaries {
   margin: 0;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--line);
 }
 
-.questrade-safe-details > div {
-  padding: 9px 10px;
-  background: var(--bg-raised);
+.questrade-access-boundaries > div {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line-subtle) 74%, transparent);
 }
 
-.questrade-safe-details dt {
-  margin-bottom: 3px;
-  color: var(--ink-secondary);
-  font-size: 0.58rem;
-  font-weight: 600;
+.questrade-access-boundaries dt,
+.questrade-access-boundaries dd {
+  margin: 0;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.questrade-access-boundaries dt {
+  color: color-mix(in srgb, var(--ink-secondary) 90%, var(--ink));
+}
+
+.questrade-access-boundaries dd {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.questrade-connected-footer {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 18px;
+}
+
+.questrade-disconnect-link {
+  display: flex;
+  width: auto;
+  min-height: 30px;
+  align-items: center;
+  justify-content: flex-start;
+  margin-left: -5px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: color-mix(in srgb, var(--danger) 76%, var(--ink-secondary));
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.questrade-disconnect-link:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+  color: var(--danger);
+}
+
+.questrade-disconnect-link:focus-visible {
+  outline: none !important;
+  background: color-mix(in srgb, var(--danger) 4%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent) !important;
+}
+
+.questrade-disconnect-link:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.questrade-settings-detail .settings-account-health-summary.is-danger {
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+}
+
+.questrade-settings-detail .is-danger .settings-account-health-symbol {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.questrade-preview-notice {
+  margin: -2px 0 14px;
+  color: color-mix(in srgb, var(--ink-secondary) 84%, var(--ink));
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
+.questrade-simulation-panel {
+  margin: 0;
+}
+
+.questrade-simulation-panel .settings-account-detail-header {
+  margin-bottom: 12px;
+}
+
+.questrade-simulation-panel .settings-account-detail-title h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.77rem;
   line-height: 1.3;
 }
 
-.questrade-safe-details dd {
+.questrade-account-facts,
+.questrade-capability-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
   margin: 0;
-  color: var(--ink);
-  font-size: 0.65rem;
-  font-weight: 650;
-  line-height: 1.4;
-}
-
-.questrade-preview-tools {
-  overflow: clip;
-  border: 1px solid var(--line-subtle);
-  border-radius: 7px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
-.questrade-preview-tools > summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 38px;
-  padding: 7px 9px;
-  color: var(--ink-secondary);
-  cursor: pointer;
-  list-style: none;
-  transition: background 180ms ease, color 180ms ease;
+.questrade-account-facts div,
+.questrade-capability-list div {
+  min-width: 0;
+  padding: 11px 12px;
 }
 
-.questrade-preview-tools > summary::-webkit-details-marker { display: none; }
-.questrade-preview-tools > summary:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); color: var(--ink); }
-.questrade-preview-tools > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.questrade-preview-tools > summary > span { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
-.questrade-preview-tools > summary strong { color: inherit; font-size: 0.68rem; font-weight: 650; }
-.questrade-preview-tools > summary small { color: var(--ink-secondary); font-size: 0.61rem; }
-.questrade-preview-tools > summary svg { width: 16px; height: 16px; flex: 0 0 auto; transition: transform 180ms ease; }
-.questrade-preview-tools[open] > summary svg { transform: rotate(180deg); }
+.questrade-account-facts div + div,
+.questrade-capability-list div + div {
+  border-left: 1px solid var(--line-subtle);
+}
 
-.questrade-preview-content {
+.questrade-account-facts dt,
+.questrade-capability-list dt {
+  color: color-mix(in srgb, var(--ink-secondary) 84%, var(--ink));
+  font-size: 0.63rem;
+  font-weight: 630;
+}
+
+.questrade-account-facts dd,
+.questrade-capability-list dd {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 0.69rem;
+  font-weight: 660;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.questrade-capabilities-section {
+  position: relative;
+}
+
+.questrade-connect-summary,
+.questrade-token-form > div:first-child {
   display: grid;
-  gap: 8px;
-  padding: 9px;
-  border-top: 1px solid var(--line-subtle);
-  background: color-mix(in srgb, var(--bg-sunken) 55%, transparent);
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: center;
 }
 
-.questrade-preview-content p {
+.questrade-connect-summary h3,
+.questrade-token-form h3,
+.questrade-account-choice h3 {
   margin: 0;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 690;
+  line-height: 1.25;
+}
+
+.questrade-connect-summary p,
+.questrade-token-form p,
+.questrade-account-choice p {
+  margin: 4px 0 0;
+  color: color-mix(in srgb, var(--ink-secondary) 88%, var(--ink));
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.questrade-connect-summary .questrade-connect-assurance {
+  display: block;
+  margin-top: 9px;
+  color: var(--ink-secondary);
+  font-size: 0.64rem;
+  line-height: 1.4;
+}
+
+.questrade-connect-section.is-first-connection {
+  padding-block: 22px;
+}
+
+.questrade-connect-section.is-first-connection .questrade-connect-summary {
+  align-items: end;
+}
+
+.questrade-token-form {
+  display: grid;
+  gap: 14px;
+}
+
+.questrade-token-form > div:first-child {
+  display: block;
+}
+
+.questrade-token-guide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 12px 0;
+  border-block: 1px solid var(--line-subtle);
+}
+
+.questrade-token-guide strong,
+.questrade-token-guide span {
+  display: block;
+}
+
+.questrade-token-guide strong {
+  color: var(--ink);
+  font-size: 0.69rem;
+  font-weight: 670;
+}
+
+.questrade-token-guide div > span {
+  margin-top: 3px;
   color: var(--ink-secondary);
   font-size: 0.63rem;
+  line-height: 1.4;
+}
+
+.questrade-token-guide a {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  color: var(--accent);
+  font-size: 0.66rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.questrade-token-guide a:hover {
+  background: color-mix(in srgb, var(--ink) 11%, transparent);
+}
+
+.questrade-token-guide a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.questrade-token-form label {
+  display: grid;
+  gap: 6px;
+}
+
+.questrade-token-form label > span {
+  color: var(--ink-secondary);
+  font-size: 0.65rem;
+  font-weight: 650;
+}
+
+.questrade-settings-detail .questrade-token-form input {
+  width: 100%;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  color: var(--ink);
+  font: inherit;
+  letter-spacing: 0.04em;
+}
+
+.questrade-token-form input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.questrade-token-form .questrade-token-help {
+  margin: -7px 0 0;
+  font-size: 0.63rem;
+}
+
+.questrade-token-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.questrade-completion-message {
+  margin: 0;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line-subtle);
+  color: color-mix(in srgb, var(--success) 78%, var(--ink));
+  font-size: 0.66rem;
+  font-weight: 640;
   line-height: 1.45;
+}
+
+.questrade-confirmation {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+  padding-block: 20px;
+}
+
+.questrade-confirmation-actions,
+.questrade-connection-action-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-account-danger-action {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 54%, var(--line-strong));
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--danger) 84%, white 8%);
+  font: inherit;
+  font-size: 0.66rem;
+  font-weight: 680;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.settings-account-danger-action:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.settings-account-danger-action:active:not(:disabled) { transform: translateY(1px); }
+.settings-account-danger-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-account-danger-action:disabled { cursor: wait; opacity: 0.55; }
+
+.questrade-connection-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 24px;
+}
+
+.questrade-account-choice {
+  display: grid;
+  gap: 12px;
+}
+
+.questrade-account-choice-list {
+  display: grid;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.questrade-account-choice-list button {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 2px;
+  border: 0;
+  border-bottom: 1px solid var(--line-subtle);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.questrade-account-choice-list button:hover {
+  color: var(--accent);
+}
+
+.questrade-account-choice-list button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.questrade-account-choice-list strong,
+.questrade-account-choice-list small {
+  display: block;
+}
+
+.questrade-account-choice-list strong {
+  font-size: 0.72rem;
+}
+
+.questrade-account-choice-list small {
+  margin-top: 3px;
+  color: var(--ink-secondary);
+  font-size: 0.63rem;
+}
+
+.questrade-connection-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 2px solid var(--danger);
+  color: color-mix(in srgb, var(--danger) 80%, var(--ink));
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.questrade-capability-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: center;
+}
+
+.questrade-capability-summary h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.8rem;
+  font-weight: 690;
+  line-height: 1.25;
+}
+
+.questrade-capability-summary p {
+  margin: 3px 0 0;
+  color: color-mix(in srgb, var(--ink-secondary) 84%, var(--ink));
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.anchored-settings-flyout .questrade-capability-list {
+  display: block;
+}
+
+.anchored-settings-flyout .questrade-capability-list div {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 14px;
+  padding: 9px 0;
+}
+
+.anchored-settings-flyout .questrade-capability-list div + div {
+  border-top: 1px solid var(--line-subtle);
+  border-left: 0;
+}
+
+.anchored-settings-flyout .questrade-capability-list dd {
+  margin: 0;
+}
+
+.questrade-developer-preview strong,
+.questrade-developer-preview span {
+  display: block;
+}
+
+.questrade-developer-preview strong {
+  color: var(--ink);
+  font-size: 0.72rem;
+}
+
+.questrade-developer-preview > div > span {
+  margin-top: 3px;
+  color: var(--ink-secondary);
+  font-size: 0.63rem;
+  line-height: 1.4;
 }
 
 .questrade-scenario-control {
   display: grid;
-  grid-template-columns: minmax(100px, 0.55fr) minmax(160px, 1fr);
-  align-items: center;
-  gap: 10px;
+  gap: 5px;
 }
 
 .questrade-scenario-control > span {
   color: var(--ink-secondary);
-  font-size: 0.62rem;
-  font-weight: 600;
+  font-size: 0.61rem;
+  font-weight: 650;
 }
 
 .questrade-scenario-control select {
@@ -176,23 +715,126 @@
   font-size: 0.66rem;
 }
 
-.questrade-scenario-control select:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 46%, var(--line-strong)); }
-.questrade-scenario-control select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.questrade-scenario-control select:disabled { cursor: wait; opacity: 0.6; }
-
-@media (max-width: 640px) {
-  .settings-accounts-card-header { align-items: center; }
-  .settings-accounts-status { max-width: 42%; white-space: normal; text-align: right; }
-  .questrade-scenario-control { grid-template-columns: 1fr; gap: 6px; }
-  .questrade-preview-tools > summary > span { align-items: flex-start; flex-direction: column; gap: 2px; }
+.questrade-scenario-control select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .settings-accounts-card,
-  .settings-accounts-connect-btn,
-  .questrade-preview-tools > summary,
-  .questrade-preview-tools > summary svg,
-  .questrade-scenario-control select {
-    transition: none;
+.questrade-scenario-control select:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+@media (max-width: 640px) {
+  .questrade-settings-detail {
+    overflow: clip;
   }
+
+  .settings-account-sheet:has(.questrade-connected-resting) {
+    width: 100vw;
+    max-height: 100dvh;
+  }
+
+  .questrade-detail-header-actions {
+    gap: 10px;
+  }
+
+  .questrade-connected-access-summary {
+    gap: 12px;
+    padding: 15px 14px;
+  }
+
+  .questrade-connected-footer {
+    padding: 0 14px;
+    transition: padding-top 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .questrade-connected-resting:has(.questrade-connected-access-summary .anchored-settings-trigger[aria-expanded='true']) .questrade-connected-footer {
+    padding-top: 108px;
+  }
+
+  .questrade-disconnect-link {
+    margin-left: -5px;
+    padding-inline: 5px;
+  }
+
+  .questrade-disconnect-confirmation-backdrop {
+    position: fixed;
+    inset: 0;
+    padding: 16px;
+    border-radius: 0;
+  }
+
+  .questrade-disconnect-confirmation-dialog {
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .questrade-disconnect-confirmation-dialog .questrade-confirmation-actions {
+    flex-direction: row;
+  }
+
+  .questrade-disconnect-confirmation-dialog .questrade-confirmation-actions button {
+    width: auto;
+  }
+
+  .questrade-confirmation,
+  .questrade-connection-actions {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .questrade-confirmation-actions,
+  .questrade-connection-action-buttons {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .questrade-confirmation-actions button,
+  .questrade-connection-action-buttons button {
+    width: 100%;
+  }
+
+  .questrade-developer-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .questrade-account-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .questrade-account-facts div + div {
+    border-top: 1px solid var(--line-subtle);
+    border-left: 0;
+  }
+
+  .questrade-capability-summary {
+    gap: 12px;
+  }
+
+  .questrade-connect-summary {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .questrade-token-guide {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .questrade-token-guide a {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .questrade-token-actions {
+    flex-direction: column-reverse;
+  }
+
+  .questrade-token-actions button,
+  .questrade-connect-summary button {
+    width: 100%;
+  }
+
 }

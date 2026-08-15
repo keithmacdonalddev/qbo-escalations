@@ -548,10 +548,47 @@
         { "type": "browser", "groupId": "investments-browser", "paths": ["scripts/investments-browser-acceptance.js"] }
       ],
       "knownGaps": [
-        "Gate 1 remains user-rejected until the corrected Connected Accounts desktop and mobile presentation is explicitly accepted.",
-        "No live Questrade request, token storage, account read, streaming connection, scheduler, or portfolio value exists in Stage 1 by design."
+        "Gate 1 was explicitly accepted by the user on 2026-08-15 after desktop, focused-sheet, interaction, and simulated-state review.",
+        "No streaming connection, scheduler, portfolio snapshot, or financial value exists in Stage 1 by design."
       ],
-      "lastHumanReviewDate": "2026-08-14"
+      "lastHumanReviewDate": "2026-08-15"
+    },
+    {
+      "id": "investments-questrade-stage-2",
+      "label": "Live read-only Questrade connection",
+      "userOutcome": "The user can enter a manually generated token only in local Questrade Settings, let the app protect the rotated credential, discover the available accounts, choose one when necessary, and see truthful read-only service verification without exposing account numbers or enabling trading.",
+      "risk": "high",
+      "owner": "Investments",
+      "sourcePaths": [
+        "server/src/routes/investments/index.js",
+        "server/src/models/QuestradeConnection.js",
+        "server/src/services/investments/questrade-connection-service.js",
+        "server/src/services/investments/questrade-connection-repository.js",
+        "server/src/services/investments/sensitive-action-intent-store.js",
+        "server/src/services/investments/providers/questrade/oauth-client.js",
+        "server/src/services/investments/providers/questrade/live-adapter.js",
+        "client/src/api/investments.js",
+        "client/src/hooks/useQuestradeConnection.js",
+        "client/src/hooks/useQuestradeSimulation.js",
+        "client/src/components/connected-accounts/ConnectedAccountsPreview.jsx",
+        "client/src/components/investments/QuestradeConnectedAccount.jsx",
+        "client/src/components/investments/questrade-connected-account.css",
+        "scripts/dev-launcher.js",
+        "scripts/investments-browser-acceptance.js"
+      ],
+      "requiredCheckTypes": ["unit", "component", "server", "browser", "human"],
+      "evidence": [
+        { "type": "unit", "groupId": "investments-boundary", "paths": ["server/test/investments/module-boundaries.test.js"] },
+        { "type": "component", "groupId": "investments-client", "paths": ["client/src/api/investments.test.js", "client/src/components/investments/QuestradeConnectedAccount.test.jsx", "client/src/components/SettingsAccountsSection.test.jsx"] },
+        { "type": "server", "groupId": "investments-server", "paths": ["server/test/investments/security-boundaries.test.js", "server/test/investments/connection-routes.test.js", "server/test/investments/stage2-connection.test.js"] },
+        { "type": "unit", "groupId": "dev-startup", "paths": ["scripts/dev-launcher.test.js"] },
+        { "type": "browser", "groupId": "investments-browser", "paths": ["scripts/investments-browser-acceptance.js"] }
+      ],
+      "knownGaps": [
+        "Gate 2 was accepted by the user on 2026-08-15 after the user-owned local Margin-account journey; the token was never handled by an agent or placed in chat/source.",
+        "Automated verification never submits a live token, changes a real Questrade connection, or makes a request to a questrade.com host."
+      ],
+      "lastHumanReviewDate": "2026-08-15"
     },
     {
       "id": "development-startup-safety",

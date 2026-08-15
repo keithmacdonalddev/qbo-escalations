@@ -65,6 +65,55 @@ test('credential key provider is lazy and can protect a newly created key withou
   assert.equal(writes[0][2].flag, 'wx');
 });
 
+test('credential key readiness proves protection works and shares concurrent initialization', async () => {
+  let protectionCalls = 0;
+  let protectedValue = '';
+  const provider = createCredentialKeyProvider({
+    env: {},
+    platform: 'win32',
+    keyPath: 'C:\\safe\\credential-key',
+    readFile: async () => {
+      if (protectedValue) return protectedValue;
+      const error = new Error('missing');
+      error.code = 'ENOENT';
+      throw error;
+    },
+    mkdir: async () => {},
+    writeFile: async (_path, value) => { protectedValue = value; },
+    randomBytes: () => Buffer.alloc(32, 9),
+    protect: async (value) => {
+      protectionCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return `protected:${value}`;
+    },
+    unprotect: async (value) => value.replace(/^protected:/, ''),
+  });
+
+  const [first, second] = await Promise.all([provider.checkReady(), provider.checkReady()]);
+  assert.equal(first.available, true);
+  assert.equal(first.verified, true);
+  assert.equal(second.available, true);
+  assert.equal(protectionCalls, 1);
+});
+
+test('credential key readiness reports unavailable when Windows protection fails', async () => {
+  const provider = createCredentialKeyProvider({
+    env: {},
+    platform: 'win32',
+    keyPath: 'C:\\safe\\credential-key',
+    readFile: async () => { const error = new Error('missing'); error.code = 'ENOENT'; throw error; },
+    mkdir: async () => {},
+    writeFile: async () => {},
+    protect: async () => { throw new Error('provider detail must remain private'); },
+  });
+
+  const status = await provider.checkReady();
+  assert.equal(status.available, false);
+  assert.equal(status.verified, false);
+  assert.equal(status.reason, 'Windows could not create or unlock the protected credential key.');
+  assert.doesNotMatch(JSON.stringify(status), /provider detail/);
+});
+
 test('Questrade API host allowlist fails closed', () => {
   assert.equal(validateQuestradeApiUrl('https://api01.iq.questrade.com/v1'), 'https://api01.iq.questrade.com/v1');
   for (const value of [
@@ -87,6 +136,7 @@ test('provider and persistence contracts remain read-only and secret-safe', () =
   for (const field of ['accessToken', 'refreshToken', 'tokenExpiresAt', 'apiServer']) {
     assert.equal(QuestradeConnection.schema.path(field).options.select, false, field);
   }
+  assert.equal(QuestradeConnection.schema.path('accounts.accountNumber').options.select, false);
 
   const serialized = serializeQuestradeConnection({
     provider: 'questrade',
@@ -96,8 +146,14 @@ test('provider and persistence contracts remain read-only and secret-safe', () =
     refreshToken: 'refresh-token-canary',
     apiServer: 'https://api01.iq.questrade.com',
     rawPayload: { balance: 999 },
+    accounts: [{ accountKey: 'opaque-1', label: 'Margin account', accountType: 'Margin', accountNumber: '12345678' }],
   });
   const text = JSON.stringify(serialized);
-  assert.deepEqual(serialized, { provider: 'questrade', safeAccountId: 'margin-demo-01', state: 'connected' });
-  assert.doesNotMatch(text, /token-canary|api01|balance|999/);
+  assert.deepEqual(serialized, {
+    provider: 'questrade',
+    safeAccountId: 'margin-demo-01',
+    state: 'connected',
+    accounts: [{ accountKey: 'opaque-1', label: 'Margin account', accountType: 'Margin', status: null, isPrimary: false }],
+  });
+  assert.doesNotMatch(text, /token-canary|api01|balance|999|12345678/);
 });

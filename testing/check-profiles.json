@@ -45,17 +45,17 @@
       "cwd": ".",
       "timeoutMs": 30000,
       "why": "Checks startup messaging, code identity, core-before-background ordering, safe transient retry, precise recovery guidance, quiet and browser-open modes, WebSocket and event-stream health, evidence-store reporting, and honest per-service shutdown without controlling persistent services.",
-      "capabilities": ["development-startup-safety", "investments-questrade-stage-1"]
+      "capabilities": ["development-startup-safety", "investments-questrade-stage-1", "investments-questrade-stage-2"]
     },
     "investments-server": {
       "label": "Investments server and security boundaries",
       "command": "node",
-      "args": ["server/scripts/run-tests.js", "--continue", "test/investments/security-boundaries.test.js", "test/investments/connection-routes.test.js", "test/realtime-websocket.test.js", "test/live-call-assist-websocket.test.js"],
+      "args": ["server/scripts/run-tests.js", "--continue", "test/investments/security-boundaries.test.js", "test/investments/connection-routes.test.js", "test/investments/stage2-connection.test.js", "test/realtime-websocket.test.js", "test/live-call-assist-websocket.test.js"],
       "resultContract": "server-tests",
       "cwd": ".",
       "timeoutMs": 120000,
-      "why": "Checks the isolated Investments module, safe simulated Questrade states, encryption, local Host policy, outbound host allowlist, and HTTP/WebSocket boundaries.",
-      "capabilities": ["investments-questrade-stage-1"]
+      "why": "Checks the isolated Investments module, safe simulated Questrade states, live read-only authorization transport, encrypted persistence, action intents, local Host policy, outbound host allowlist, and HTTP/WebSocket boundaries.",
+      "capabilities": ["investments-questrade-stage-1", "investments-questrade-stage-2"]
     },
     "investments-client": {
       "label": "Investments Connected Accounts UI",
@@ -64,7 +64,7 @@
       "cwd": ".",
       "timeoutMs": 120000,
       "why": "Checks the provider-neutral account frame and every safe simulated Questrade state without live services.",
-      "capabilities": ["investments-questrade-stage-1"]
+      "capabilities": ["investments-questrade-stage-1", "investments-questrade-stage-2"]
     },
     "investments-boundary": {
       "label": "Investments module ownership boundaries",
@@ -74,7 +74,7 @@
       "cwd": ".",
       "timeoutMs": 30000,
       "why": "Prevents Investments and QBO teams from importing each other's internals and proves module registration has no lifecycle side effects.",
-      "capabilities": ["investments-questrade-stage-1"]
+      "capabilities": ["investments-questrade-stage-1", "investments-questrade-stage-2"]
     },
     "investments-browser": {
       "label": "Rendered Investments desktop and mobile journey",
@@ -82,8 +82,8 @@
       "args": ["scripts/investments-browser-acceptance.js"],
       "cwd": ".",
       "timeoutMs": 120000,
-      "why": "Uses the already-running user-owned app for the required rendered gate; if it is unavailable, reports an explicit incomplete result without starting or stopping services.",
-      "capabilities": ["investments-questrade-stage-1"]
+      "why": "Uses the already-running user-owned app to check the live disconnected/token-entry boundary plus safe Stage 2 desktop, mobile, keyboard, reduced-motion, recovery, revocation, overflow, console, and no-live-Questrade-network states; if the app is unavailable, reports an explicit incomplete result without starting or stopping services.",
+      "capabilities": ["investments-questrade-stage-1", "investments-questrade-stage-2"]
     },
     "client-build": {
       "label": "Production client build and bundle canary",

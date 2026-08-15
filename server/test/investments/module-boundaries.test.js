@@ -59,6 +59,7 @@ const CLIENT_OWNED_FILES = new Set([
 ]);
 const CLIENT_SHARED_ALLOWLIST = new Set([
   path.join(CLIENT_SRC, 'api', 'http.js'),
+  path.join(CLIENT_SRC, 'components', 'connected-accounts', 'AnchoredSettingsControl.jsx'),
   path.join(CLIENT_SRC, 'components', 'connected-accounts', 'ConnectedAccountCard.jsx'),
 ]);
 

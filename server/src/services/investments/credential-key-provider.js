@@ -11,6 +11,7 @@ const KEY_FILE_NAME = 'questrade-credential-key.v1';
 
 const PROTECT_SCRIPT = `
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Security
 $plain = [Console]::In.ReadToEnd().Trim()
 $bytes = [Convert]::FromBase64String($plain)
 $protected = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
@@ -19,6 +20,7 @@ $protected = [Security.Cryptography.ProtectedData]::Protect($bytes, $null, [Secu
 
 const UNPROTECT_SCRIPT = `
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Security
 $protected = [Convert]::FromBase64String([Console]::In.ReadToEnd().Trim())
 $bytes = [Security.Cryptography.ProtectedData]::Unprotect($protected, $null, [Security.Cryptography.DataProtectionScope]::CurrentUser)
 [Console]::Out.Write([Convert]::ToBase64String($bytes))
@@ -67,6 +69,7 @@ function createCredentialKeyProvider(options = {}) {
   const randomBytes = options.randomBytes || crypto.randomBytes;
   const protect = options.protect || ((value) => invokePowerShell(PROTECT_SCRIPT, value, options));
   const unprotect = options.unprotect || ((value) => invokePowerShell(UNPROTECT_SCRIPT, value, options));
+  let ensureInFlight = null;
 
   function getStatus() {
     try {
@@ -90,7 +93,7 @@ function createCredentialKeyProvider(options = {}) {
     return decoded;
   }
 
-  async function ensureKey() {
+  async function ensureKeyInternal() {
     const environmentKey = readEnvironmentKey(env);
     if (environmentKey) return environmentKey;
     if (platform !== 'win32') throw new Error('No supported local credential key store is available.');
@@ -103,11 +106,39 @@ function createCredentialKeyProvider(options = {}) {
     const key = randomBytes(KEY_BYTES);
     const protectedValue = await protect(key.toString('base64'));
     await mkdir(path.dirname(keyPath), { recursive: true });
-    await writeFile(keyPath, protectedValue, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    try {
+      await writeFile(keyPath, protectedValue, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    } catch (error) {
+      if (error?.code === 'EEXIST') return loadKey();
+      throw error;
+    }
     return key;
   }
 
-  return { ensureKey, getStatus, keyPath, loadKey };
+  async function ensureKey() {
+    if (!ensureInFlight) {
+      ensureInFlight = ensureKeyInternal().finally(() => { ensureInFlight = null; });
+    }
+    return ensureInFlight;
+  }
+
+  async function checkReady() {
+    const status = getStatus();
+    if (!status.available) return status;
+    try {
+      await ensureKey();
+      return { ...status, verified: true };
+    } catch {
+      return {
+        available: false,
+        source: status.source,
+        verified: false,
+        reason: 'Windows could not create or unlock the protected credential key.',
+      };
+    }
+  }
+
+  return { checkReady, ensureKey, getStatus, keyPath, loadKey };
 }
 
 module.exports = { KEY_FILE_NAME, createCredentialKeyProvider, defaultKeyPath, readEnvironmentKey };

@@ -394,6 +394,39 @@ test('friendly service-health output distinguishes local sockets from external p
   assert.equal(summary.operational.notConfigured, 1);
 });
 
+test('startup describes local Questrade state without claiming a live broker check', () => {
+  const baseHealth = {
+    realtime: { ok: true, latencyMs: 1 },
+    eventStream: { ok: true, latencyMs: 1 },
+    liveCall: { ok: true, latencyMs: 1 },
+    runtime: { requests: { staleCount: 0 }, ai: { byKind: {} } },
+    workspaceStatus: { workspace: { staleCount: 0 }, background: { staleCount: 0, services: [] }, liveCall: { configured: false } },
+    packageStore: { packageStore: { ok: true } },
+    profile: { connections: { googleAccounts: [] }, background: {} },
+  };
+  const stored = captureOutput();
+  emitServiceHealth(stored.output, {
+    ...baseHealth,
+    investments: { mode: 'live', state: 'connected', credentialState: 'stored', accountType: 'Margin', liveAccessEnabled: true },
+  });
+  assert.match(stored.read(), /Questrade authorization stored.*broker check deferred at startup/);
+  assert.doesNotMatch(stored.read(), /connection ready/i);
+
+  const pending = captureOutput();
+  emitServiceHealth(pending.output, {
+    ...baseHealth,
+    investments: { mode: 'live', state: 'revocation-pending', credentialState: 'revocation-pending', liveAccessEnabled: false },
+  });
+  assert.match(pending.read(), /revocation pending.*local access is off/i);
+
+  const renewal = captureOutput();
+  emitServiceHealth(renewal.output, {
+    ...baseHealth,
+    investments: { mode: 'live', state: 'reauthorization-required', credentialState: 'renewal-required', liveAccessEnabled: false },
+  });
+  assert.match(renewal.read(), /authorization needs renewal/i);
+});
+
 test('health warnings distinguish unavailable from failed and include one fix each', () => {
   const capture = captureOutput();
   const now = new Date().toISOString();

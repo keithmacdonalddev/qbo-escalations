@@ -15,7 +15,9 @@ import {
 import AiAssistantSettingsPanel from './AiAssistantSettingsPanel.jsx';
 import AiManagementSettings from './AiManagementSettings.jsx';
 import SettingsAccountsSection from './SettingsAccountsSection.jsx';
-import { QuestradeConnectedAccount, useQuestradeConnection } from './investments/index.js';
+import ConnectedAccountsPreview, { QuestradeSimulation } from './connected-accounts/ConnectedAccountsPreview.jsx';
+import { googleRecoveryMessage } from './connected-accounts/googleRecoveryMessage.js';
+import { useQuestradeConnection } from './investments/index.js';
 
 function Icon({ name, size = 17 }) {
   const paths = {
@@ -36,7 +38,7 @@ function Icon({ name, size = 17 }) {
 
 const SETTINGS_SECTIONS = [
   { id: 'ai-management', label: 'AI Management', desc: 'Providers, models, keys, and releases', icon: 'cpu', keywords: 'api key model catalog enable disable dynamic discovery' },
-  { id: 'accounts', label: 'Connected Accounts', desc: 'Google and investments', icon: 'link', keywords: 'gmail email send oauth account calendar questrade investments margin portfolio' },
+  { id: 'accounts', label: 'Connected Accounts', desc: 'Google and Questrade', icon: 'link', keywords: 'gmail email send oauth account calendar questrade investments margin portfolio' },
   { id: 'ai-safety', label: 'AI Safety & Context', desc: 'Cost, context, memory, and diagnostics', icon: 'shield', keywords: 'budget token retrieval guardrail debug memory' },
   { id: 'display', label: 'Display & Navigation', desc: 'Readability, sidebar, and hints', icon: 'display', keywords: 'text size tooltip sidebar labels hover accessibility' },
   { id: 'advanced', label: 'Developer Tools', desc: 'Performance and network diagnostics', icon: 'tools', keywords: 'waterfall flame led speed intensity diagnostics' },
@@ -44,10 +46,14 @@ const SETTINGS_SECTIONS = [
 
 export default function Settings({ themeProps, aiProps, layoutProps }) {
   const toast = useToast();
-  const [activeSection, setActiveSection] = useState('ai-management');
+  const connectedAccountsPreview = import.meta.env.DEV
+    ? new URLSearchParams(window.location.search).get('connectedAccountsPreview')
+    : '';
+  const [activeSection, setActiveSection] = useState(connectedAccountsPreview ? 'accounts' : 'ai-management');
   const [searchQuery, setSearchQuery] = useState('');
   const [savedFlash, setSavedFlash] = useState(null);
   const [savingDefault, setSavingDefault] = useState('');
+  const [connectionFeedback, setConnectionFeedback] = useState('');
   const liveRegionRef = useRef(null);
   const { level: tooltipLevel, setLevel: setTooltipLevel } = useTooltipLevel();
   const questradeConnection = useQuestradeConnection();
@@ -66,9 +72,11 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
     missingPermissions: [],
     lastGmailAccessAt: null,
     lastCalendarAccessAt: null,
+    verificationError: '',
   });
   const [googleDisconnecting, setGoogleDisconnecting] = useState(false);
   const [googleConnecting, setGoogleConnecting] = useState(false);
+  const [googleRefreshing, setGoogleRefreshing] = useState(false);
   const [defaultEmailAccount, setDefaultEmailAccountState] = useState(() => getDefaultGmailAccount());
   const [defaultSendingAccount, setDefaultSendingAccountState] = useState(() => getDefaultSendingAccount());
   const [defaultCalendarAccount, setDefaultCalendarAccountState] = useState(() => getDefaultCalendarAccount());
@@ -90,9 +98,14 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
         missingPermissions: Array.isArray(data.missingPermissions) ? data.missingPermissions : [],
         lastGmailAccessAt: data.lastGmailAccessAt || null,
         lastCalendarAccessAt: data.lastCalendarAccessAt || null,
+        verificationError: '',
       });
     } catch {
-      setGoogleAuth((current) => ({ ...current, loading: false }));
+      setGoogleAuth((current) => ({
+        ...current,
+        loading: false,
+        verificationError: 'Google status could not be refreshed. Check your connection and try again.',
+      }));
     }
   }, []);
 
@@ -109,6 +122,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   useEffect(() => {
     if (!window.location.hash.includes('connected=true')) return;
     setActiveSection('accounts');
+    setConnectionFeedback('Google sign-in completed. Current Mail and Calendar status is shown below.');
     window.location.hash = '#/settings';
   }, []);
 
@@ -130,11 +144,15 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   const selectedDefaultEmailAccount = hasConnectedAccount(connectedAccounts, defaultEmailAccount) ? defaultEmailAccount : '';
   const selectedDefaultSendingAccount = hasConnectedAccount(connectedAccounts, defaultSendingAccount) ? defaultSendingAccount : '';
   const selectedDefaultCalendarAccount = hasConnectedAccount(connectedAccounts, defaultCalendarAccount) ? defaultCalendarAccount : '';
-  const defaultFallbackLabel = connectedAccounts.length > 0
-    ? `Use first connected (${connectedAccounts[0].email})`
-    : 'Use default account';
+
+  const handleGoogleRefresh = useCallback(async () => {
+    setGoogleRefreshing(true);
+    await fetchGoogleAuth();
+    setGoogleRefreshing(false);
+  }, [fetchGoogleAuth]);
 
   const handleGoogleConnect = useCallback(async () => {
+    setConnectionFeedback('');
     setGoogleConnecting(true);
     try {
       const response = await apiFetch('/api/gmail/auth/url?returnTo=/settings');
@@ -143,7 +161,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
       else throw new Error(data.error || 'Google authorization could not be started.');
     } catch (connectError) {
       setGoogleConnecting(false);
-      toast.error(connectError.message || 'Google authorization could not be started.', { duration: 5000 });
+      toast.error(googleRecoveryMessage(connectError, 'Google sign-in could not be opened.'), { duration: 5000 });
     }
   }, [toast]);
 
@@ -161,20 +179,22 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
       else throw new Error(data.error || 'Google reauthorization could not be started.');
     } catch (reauthorizeError) {
       setGoogleConnecting(false);
-      toast.error(reauthorizeError.message || 'Google reauthorization could not be started.', { duration: 5000 });
+      toast.error(googleRecoveryMessage(reauthorizeError, 'Google access repair could not be opened.'), { duration: 5000 });
     }
   }, [googleAuth.activeAccount, googleAuth.email, toast]);
 
   const handleGoogleDisconnect = useCallback(async () => {
-    if (!window.confirm('Disconnect this Google account from the application?')) return;
     setGoogleDisconnecting(true);
     try {
       const response = await apiFetch('/api/gmail/auth/disconnect', { method: 'POST' });
       const data = await response.json();
-      if (data.ok) await fetchGoogleAuth();
+      if (data.ok) {
+        await fetchGoogleAuth();
+        setConnectionFeedback('Google access was removed from this workspace. You can connect again at any time.');
+      }
       else throw new Error(data.error || 'Google could not be disconnected.');
     } catch (disconnectError) {
-      toast.error(disconnectError.message || 'Google could not be disconnected.', { duration: 5000 });
+      toast.error(googleRecoveryMessage(disconnectError, 'Google could not be disconnected.'), { duration: 5000 });
     } finally {
       setGoogleDisconnecting(false);
     }
@@ -182,7 +202,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
 
   const announceSaved = useCallback((kind, message) => {
     setSavedFlash(kind);
-    window.setTimeout(() => setSavedFlash((current) => current === kind ? null : current), 2000);
+    window.setTimeout(() => setSavedFlash((current) => current === kind ? null : current), 3200);
     if (liveRegionRef.current) liveRegionRef.current.textContent = message;
   }, []);
 
@@ -192,10 +212,12 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
       const value = await save(email);
       updateState(value);
       announceSaved(kind, successMessage(value));
+      return true;
     } catch (saveError) {
-      const message = saveError.message || 'The account default could not be saved.';
+      const message = googleRecoveryMessage(saveError, 'The account choice could not be saved.');
       toast.error(message, { duration: 5000 });
       if (liveRegionRef.current) liveRegionRef.current.textContent = message;
+      return false;
     } finally {
       setSavingDefault((current) => current === kind ? '' : current);
     }
@@ -278,10 +300,48 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
               <label className="settings-v2-range"><span>Waterfall view</span><select disabled={!layoutProps.devToolsEnabled} value={layoutProps.waterfallView} onChange={(event) => layoutProps.setWaterfallView(event.target.value)}><option value="timeline">Timeline</option><option value="grouped">Grouped by request</option></select></label>
             </div>
           </div>
+          {import.meta.env.DEV && <QuestradeSimulation />}
         </section>
       </div>
     );
   }
+
+  const connectedAccountsProps = {
+    googleAuth,
+    connectedAccounts,
+    selectedDefaultEmailAccount,
+    selectedDefaultSendingAccount,
+    selectedDefaultCalendarAccount,
+    missingDefaultEmailAccount: Boolean(defaultEmailAccount) && !selectedDefaultEmailAccount,
+    missingDefaultSendingAccount: Boolean(defaultSendingAccount) && !selectedDefaultSendingAccount,
+    missingDefaultCalendarAccount: Boolean(defaultCalendarAccount) && !selectedDefaultCalendarAccount,
+    savedFlash,
+    savingDefault,
+    connectionFeedback,
+    onGoogleConnect: handleGoogleConnect,
+    onGoogleReauthorize: handleGoogleReauthorize,
+    onGoogleDisconnect: handleGoogleDisconnect,
+    onGoogleRefresh: handleGoogleRefresh,
+    googleConnecting,
+    googleDisconnecting,
+    googleRefreshing,
+    questradeConnection,
+    onDefaultEmailAccountChange: (event) => saveDefaultSelection({
+      kind: 'email', email: event.target.value, save: setDefaultGmailAccount,
+      updateState: setDefaultEmailAccountState,
+      successMessage: (value) => value ? `Default inbox set to ${value}` : 'Default inbox reset.',
+    }),
+    onDefaultSendingAccountChange: (event) => saveDefaultSelection({
+      kind: 'sending', email: event.target.value, save: setDefaultSendingAccount,
+      updateState: setDefaultSendingAccountState,
+      successMessage: (value) => value ? `Default sending account set to ${value}` : 'Default sending account reset.',
+    }),
+    onDefaultCalendarAccountChange: (event) => saveDefaultSelection({
+      kind: 'calendar', email: event.target.value, save: setDefaultCalendarAccount,
+      updateState: setDefaultCalendarAccountState,
+      successMessage: (value) => value ? `Default calendar set to ${value}` : 'Default calendar reset.',
+    }),
+  };
 
   return (
     <div className="settings-v2-layout">
@@ -309,48 +369,13 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
         {activeSection === 'ai-management' && <AiManagementSettings onOpenAgents={() => { window.location.hash = '#/agents'; }} />}
         {activeSection === 'accounts' && (
           <div className="settings-v2-panel settings-v2-legacy-panel">
-            <SettingsAccountsSection
-              googleAuth={googleAuth}
-              connectedAccounts={connectedAccounts}
-              selectedDefaultEmailAccount={selectedDefaultEmailAccount}
-              selectedDefaultSendingAccount={selectedDefaultSendingAccount}
-              selectedDefaultCalendarAccount={selectedDefaultCalendarAccount}
-              defaultFallbackLabel={defaultFallbackLabel}
-              missingDefaultEmailAccount={Boolean(defaultEmailAccount) && !selectedDefaultEmailAccount}
-              missingDefaultSendingAccount={Boolean(defaultSendingAccount) && !selectedDefaultSendingAccount}
-              missingDefaultCalendarAccount={Boolean(defaultCalendarAccount) && !selectedDefaultCalendarAccount}
-              savedFlash={savedFlash}
-              savingDefault={savingDefault}
-              onGoogleConnect={handleGoogleConnect}
-              onGoogleReauthorize={handleGoogleReauthorize}
-              onGoogleDisconnect={handleGoogleDisconnect}
-              googleConnecting={googleConnecting}
-              googleDisconnecting={googleDisconnecting}
-              onDefaultEmailAccountChange={(event) => {
-                void saveDefaultSelection({
-                  kind: 'email', email: event.target.value, save: setDefaultGmailAccount,
-                  updateState: setDefaultEmailAccountState,
-                  successMessage: (value) => value ? `Default inbox set to ${value}` : 'Default inbox reset.',
-                });
-              }}
-              onDefaultSendingAccountChange={(event) => {
-                void saveDefaultSelection({
-                  kind: 'sending', email: event.target.value, save: setDefaultSendingAccount,
-                  updateState: setDefaultSendingAccountState,
-                  successMessage: (value) => value ? `Default sending account set to ${value}` : 'Default sending account reset.',
-                });
-              }}
-              onDefaultCalendarAccountChange={(event) => {
-                void saveDefaultSelection({
-                  kind: 'calendar', email: event.target.value, save: setDefaultCalendarAccount,
-                  updateState: setDefaultCalendarAccountState,
-                  successMessage: (value) => value ? `Default calendar set to ${value}` : 'Default calendar reset.',
-                });
-              }}
-              additionalProviderCards={[
-                <QuestradeConnectedAccount key="questrade" connection={questradeConnection} />,
-              ]}
-            />
+            {import.meta.env.DEV ? (
+              <ConnectedAccountsPreview
+                key={connectedAccountsPreview || 'live'}
+                scenario={connectedAccountsPreview || 'live'}
+                googleProps={connectedAccountsProps}
+              />
+            ) : <SettingsAccountsSection {...connectedAccountsProps} />}
           </div>
         )}
         {activeSection === 'ai-safety' && aiProps?.aiSettings && <AiAssistantSettingsPanel aiProps={aiProps} liveRegionRef={liveRegionRef} />}

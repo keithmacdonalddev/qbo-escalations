@@ -64,7 +64,7 @@ Normal startup uses checks that are fast and do not call paid AI models:
 - requests, AI work, Workspace sessions, and background tasks are checked for stale work;
 - the provider evidence store performs an ephemeral write/read/delete check; and
 - saved Gmail/Calendar access times and background-agent results are summarized without printing account addresses.
-- the `INVEST` lane reports whether the Questrade module has simulated Stage 1 test states available or whether live access is not configured. This local status check never contacts Questrade and never prints a token, account number, portfolio value, or raw provider response.
+- the `INVEST` lane reports whether safe Stage 2 test states are available, authorization is stored locally, renewal is required, secure storage is locked, revocation is pending, or Questrade is not connected. This local status check never contacts Questrade and never prints a token, account number, portfolio value, or raw provider response. “Authorization stored” deliberately does not claim that the broker is reachable; the live broker check is deferred until the user requests it in Connected Accounts.
 
 `npm run dev:check -- --deep` is deliberately opt-in. It contacts Gmail, Calendar, the Workspace Agent's assigned AI provider, ElevenLabs, LLM Gateway, and LM Studio. It also performs temporary write/read/delete checks in `server/data` and `server/uploads` and reports available disk space. Successful Google reads update the saved last-access times. The AI canary sends one tiny `CANARY_OK` request, so it may use a small number of tokens and creates a saved provider-health record.
 
@@ -80,7 +80,7 @@ The shared WebSocket and event-stream checks run through `localhost:5174`, which
 - During an intentional API restart, expected Vite proxy failures are collapsed into one plain-English retry message. Unexpected errors remain visible.
 - Provider startup checks use version commands only; they do not spend tokens on a warm-up prompt.
 - A transport or optional-service warning does not kill an otherwise usable app. It remains visible so the owner knows which live capability is degraded.
-- Questrade connectivity is optional for core-app startup during Stage 1. This is a readiness classification, not a statement about the Investments feature's importance. “Test states ready” means only that the local simulated acceptance states are available; it does not mean a brokerage account is connected.
+- Questrade connectivity is optional for core-app startup. This is a readiness classification, not a statement about the Investments feature's importance. “Test states ready” means only that the local simulated connection and recovery states are available; it does not mean a brokerage account is connected.
 
 This output is temporary terminal information. It helps with the current development run but is not a durable incident history.
 

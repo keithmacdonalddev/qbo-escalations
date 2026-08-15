@@ -1,16 +1,16 @@
 # Questrade Investments Integration Implementation Plan
 
-**Status:** Gate 0 user-accepted; Gate 1 user-rejected on visual quality; Stage 1 design correction implemented and awaiting renewed user testing
+**Status:** Gates 0, 1, and 2 are user-accepted. On 2026-08-15 the user accepted the complete Connected Accounts experience and then confirmed readiness to begin Stage 3A after the user-owned local Margin-account connection journey. The Stage 2 read-only connection, refresh, repair, reauthorization, disconnect/revoke, revocation-retry, and explicit local-removal lifecycle is implemented and safe-state verified. No token was handled by an agent or placed in chat/source, and automated verification makes no Questrade request. Stage 3A is now in progress; Stage 3B remains blocked until Gate 3A acceptance.
 
 **Created:** 2026-08-14
 
-**Revised:** 2026-08-14 after independent critical review, socket-hardening review, product-owner clarification, a fresh Gate 0 check of Questrade's official documentation, completion of the simulated Stage 1 foundation, and the owner's rejection of the first Connected Accounts rendering; no live token was created and no live Questrade request was made
+**Revised:** 2026-08-15 after the user completed the focused visual correction loop, accepted the Stage 2 connection journey, and explicitly stated readiness for Stage 3A. Historical rejected designs remain evidence of what not to restore, not the current product state.
 
 **Primary decision:** Add Questrade as a separate Investments domain whose first implementation is read-only. This plan contains no trade placement, modification, cancellation, or autonomous financial action. Questrade currently limits API trade execution to approved partner developers, so any future trading capability would require both Questrade partner approval and a separately planned, explicitly accepted high-risk project.
 
-**Stage rule:** Every implementation stage ends in a working, testable increment in the user's development app. No later stage may begin until the user completes the stage's hands-on acceptance script and explicitly accepts that gate.
+**Stage rule:** Every implementation stage ends in a working, testable increment in the user's development app. For every material or major user-visible increment, the order is: Product/UX brief, build and focused deterministic checks, complete sanitized rendered evidence, one independent cold design review, then direct user release review and explicit acceptance. Tests, builds, automated screenshots, and the cold review remain supporting evidence; none substitutes for the user's visual decision. No later stage may begin until the user explicitly accepts the gate.
 
-**Review disposition:** The revision accepts the local-server, encryption, identity-lifecycle, snapshot-publication, browser-evidence, provider-card, stage-sizing, dependency, token-recovery, and deletion findings. It does not carry forward the proposed `getSymbol` scope ambiguity because Questrade's current official scope table explicitly assigns `GET symbols/:id` to `read_acc`; Activities remains the one documented account endpoint whose published scope mapping is unclear. The socket-hardening revision adds a minimal browser event channel, server-only Questrade streams, REST gap reconciliation, deduplication/generation fencing, TLS and destination controls, session maintenance, bounded backoff/circuit breaking, quote staleness, and snapshot-before-alert rules. The platform-surface revision keeps a full Investments workspace, adds a separately gated cross-domain Main Chat redesign, prevents QBO and portfolio context from leaking into each other, and makes the friendly development launcher report Investments capability without contacting Questrade or printing financial data during normal startup.
+**Review disposition:** Gate 0's API, security, storage, privacy, module-isolation, socket, stage-order, and read-only decisions remain unchanged. Gate 1's original large-card/in-card-scenario implementations remain rejected. The accepted replacement is a compact provider index with focused layered details, development simulation isolated under Developer Tools, truthful statuses, and anchored secondary disclosures. Direct user acceptance is the visual baseline. Stage 2 may add a production Questrade setup journey without materially changing that accepted frame.
 
 ## 1. Practical outcome
 
@@ -76,13 +76,16 @@ Help the user understand a real investment account and make better-informed deci
 - It does not remove or weaken the accepted QBO escalation workflow. That workflow becomes one explicit domain within the broader platform rather than the identity of the whole Chat surface.
 - These are boundaries for the implementation covered by this plan, not claims that the personal application can never add trading, remote access, different storage, or broader AI use through later separately approved work.
 
-## 3. Current starting point verified on 2026-08-14
+## 3. Current starting point verified on 2026-08-15
 
 These claims must be rechecked immediately before each implementation stage because concurrent sessions can change the worktree.
 
-### Existing pieces to reuse
+### Existing pieces and current in-progress evidence
 
-- `client/src/components/SettingsAccountsSection.jsx` provides a useful visual reference, but its implementation is Google-specific. Stage 1 must extract only a provider-neutral card frame and re-verify the existing Google flow rather than treating the current component as directly reusable.
+- Gate 1 establishes the user-accepted provider-neutral compact Connected Accounts overview and focused provider-detail sheets. This is the visual baseline Stage 2 must preserve.
+- The normal production-like direction focuses the existing Google journey. Provider rows/cards act as an index into focused details rather than expanding into sprawling inline forms.
+- Sanitized Questrade state exploration is isolated in Developer Tools and an explicit development preview. Normal production Connected Accounts contains no scenario selector, simulation banner, or unavailable-provider dead end.
+- `client/src/components/SettingsAccountsSection.jsx` and the current Connected Accounts work provide the provider-neutral index/detail seam. Google keeps its own identity, status, account-default, permission, save, repair, add-account, and disconnect behavior inside focused details.
 - `client/src/components/Settings.jsx` already loads connected-account status and owns the Settings account workflow.
 - `server/src/models/GmailAuth.js` demonstrates `select: false` for token fields so ordinary queries do not return them. This is not encryption and is insufficient by itself for brokerage credentials.
 - `server/src/services/gmail.js` demonstrates token refresh, permission projection, account health, and connection repair patterns.
@@ -92,20 +95,22 @@ These claims must be rechecked immediately before each implementation stage beca
 - `testing/app-capabilities.json`, `testing/check-profiles.json`, and `scripts/run-app-checks.js` provide honest `passed`, `failed`, and `incomplete` verification contracts.
 - `server/src/services/agent-tool-capabilities.js` provides server-owned maximum tool permissions for agents. Prompt text alone is not authority.
 - `server/src/services/provider-capture-policy.js` defaults normal provider calls to manifest capture, which omits raw request and response bodies.
-- `DESIGN.md` requires a compact operational UI and rendered desktop/mobile verification.
+- `DESIGN.md` and `docs/agent-harness/DESIGN_RELEASE_GATE.md` require a compact operational UI, explicit production/development separation, and complete sanitized rendered evidence. For this integration, the user is the final release reviewer and has declined an additional review agent.
 - `client/src/components/chat-v5/ChatV5Container.jsx` currently mounts an explicitly named `QBO Escalation Workflow`, preserves a QBO-specific four-stage workbench, and owns substantial unsaved-work/recovery behavior that must remain intact when it is placed behind a domain choice.
 - `client/src/components/chat-v5/Widget4MainChat.jsx` currently identifies the analyst as `QBO Assistant`, and `PipelineSidebar.jsx` is built around QBO parser, prior-INV, triage, and analyst stages. These are evidence that Main Chat needs a platform shell around domain work, not superficial investment copy inserted into the existing escalation pipeline.
 - `scripts/dev-launcher.js` already has the concise tagged startup grammar shown by `npm run dev`, including early core readiness, late background checks, and core/operational/optional totals. Investments should extend this grammar rather than creating raw provider log noise.
 
-### Current gaps
+### Current gaps and acceptance blockers
 
-- No Questrade service, route, model, test fixture, client screen, or agent tool exists.
+- Gate 1 is accepted. Its focused tests pass, and the user accepted the rendered desktop interactions and simulated Questrade states after the visual correction loop.
+- Stage 2 must preserve the accepted compact provider index and layered-sheet composition while making Questrade genuinely actionable. A `Not available` dead end, in-card simulation selector, or production simulator banner remains a regression.
+- Unverified credential/service state must not use success styling; essential health evidence must retain readable contrast and non-color meaning; production diagnostics must not displace the user's task.
 - No Investments route exists in `client/src/lib/appRoute.js`, `client/src/App.jsx`, or `client/src/components/Sidebar.jsx`.
 - Main Chat currently defaults directly into the QBO-specific workflow; it has no explicit domain selection, Investments summary, investment-agent entry point, or isolation boundary preventing one domain's evidence from being supplied to another.
 - User-facing identity is inconsistent with the app's expanding role: the sidebar says `QBO Assist`, the startup banner says `QBO Operations Platform`, and the boot overlay still names a QBO Escalation Assistant. The owner clarified on 2026-08-14 that this is a personal application that will grow with tools built for them, not a commercial product that needs a corporate platform name. Visible personal-workspace wording may be reconsidered during Stage 3C, but naming is not a Gate 0 or Stage 1 dependency. `Operational Intelligence Platform` was explicitly rejected as visible copy and must not be used provisionally.
 - The app has no general login layer protecting all APIs. CORS, which is the browser's cross-origin request control, is not authentication and currently does not validate the incoming `Host` name. Stage 1 must harden the entire local HTTP and WebSocket boundary before adding the first Questrade route. The first Questrade release must remain loopback-only unless a separate authentication project is approved.
 - Stored Gmail tokens are excluded from normal reads but are not an acceptable encryption precedent for brokerage tokens.
-- The current testing capability map has no investments capability or focused Investments verification profile.
+- Stage 1 testing/capability-map evidence supports—but does not replace—the direct user acceptance recorded above.
 - No server-owned Questrade notification or Level 1 quote-stream supervisor exists.
 
 ### Concurrent-work boundary
@@ -219,8 +224,59 @@ If live Questrade behavior disagrees with the documentation:
 | AI portfolio access | Disabled through Stage 5; Stage 6 may enable approved agents/providers through explicit consent | Portfolio values sent to a model are a separate privacy decision from connecting Questrade, but the plan does not require AI access to remain disabled forever. |
 | Trade tools | No route, adapter method, handler, prompt tool, or UI control in this plan | A missing code path is a stronger first-release safety boundary than a disabled button; Section 26 preserves a separately approved future expansion path. |
 | Stage progress | User acceptance is a blocking dependency | Tests and builds cannot substitute for the user's rendered dev-app judgment. |
+| Connected Accounts overview | A compact provider index; provider work opens focused details | The overview answers what is connected and what needs action without turning every provider into an inline settings form. |
+| Provider detail shape | One focused provider journey with stable subviews and progressive disclosure | Save, repair, permissions, add-account, and disconnect work need room and continuity without sprawling the overview. |
+| Production dead ends | Do not show unavailable providers until they have a real next action | An inert `Not available` Questrade peer misrepresents capability and wastes attention. |
+| Gate 1 Questrade visibility | Keep one compact Questrade provider row in the accepted Connected Accounts index; keep every scenario selector and simulation diagnostic in Developer Tools | The provider index establishes the destination without mixing test machinery into the product task. Stage 2 replaces the safe preview behind that row with the actionable live setup, recovery, and removal journey. |
+| Credential versus health truth | A stored or freshly exchanged token is credential evidence, not proof that every required Questrade service is healthy | Each in-scope service must be verified and classified separately before the UI can describe the connection as healthy. |
+| Major UI release path | Brief -> build/checks -> complete sanitized evidence -> direct user release review -> explicit user acceptance | Builder judgment, tests, builds, or screenshots alone do not release a user-visible stage. |
 
 ## 6. User-interface contract
+
+### Connected Accounts primary task and complete journey
+
+Understand which external accounts are usable, open one focused provider journey, make the next safe change, and return to a truthful resting state without losing context.
+
+The complete journey is:
+
+1. Open the compact Connected Accounts overview and identify connected providers or action-required providers from readable text, not color alone.
+2. Open one provider's focused details. Keep the Settings shell, provider identity, back path, and primary action stable while internal content changes.
+3. See the current credential state, separately verified service health, selected account, and next action. A token or saved credential alone never earns a healthy/connected presentation.
+4. For Google, manage the existing account/defaults and save changes with explicit saving, saved, and save-failed feedback. Show permissions on demand, repair only when required, and add/disconnect actions at the point they become relevant.
+5. For Questrade beginning in Stage 2, confirm secure-storage readiness, enter the one-time token, wait through exchange and durable rotation, discover accounts, select one when required, verify each in-scope service, then reach a truthful resting state.
+6. Confirm destructive disconnect/revoke/forget consequences, preserve relevant prior evidence, and return to an honest disconnected or revocation-pending state.
+
+### Connected Accounts stable frame and initial content
+
+- The overview is an index, not a dashboard grid or collection of expanding forms. It shows only providers with a real production journey and a concise truthful state/next action.
+- Focused details own provider-specific work. A provider row/card does not grow into account selectors, permission matrices, diagnostics, repair forms, and destructive confirmations inline.
+- The Settings shell, Connected Accounts location, provider header, return control, and main content width stay stable. Internal state changes use natural scrolling and reachable content rather than clipping or outer-shell jumps.
+- Initially show provider identity, plain-language credential state, separately classified service health, selected account summary when applicable, last trustworthy evidence, and one next action. Technical scopes, diagnostics, raw IDs, and rare consequences remain behind purposeful disclosures.
+- A single discovered Questrade account is selected automatically. Multiple discovered accounts require an explicit user selection before synchronization. Provider `isPrimary`/`isBilling` flags are provider facts, not a substitute for that user choice.
+- Multiple accounts under one Questrade authorization remain one owner/credential journey. Do not offer a misleading `Add another owner` or second-credential control.
+
+### Connected Accounts state matrix
+
+Each applicable state must have direct wording, non-color meaning, visible focus behavior, continuity, and a next action or honest resting state:
+
+| State | Required experience |
+| --- | --- |
+| `initial` | Stable overview/detail frame with no invented health claim. |
+| `loading` | Preserve provider identity and layout; announce the wait without flicker or false success. |
+| `empty` | Explain that no provider/account is available and give the next real action; never show fake zeroes. |
+| `disconnected` | State that no usable authorization exists and offer connection only when the stage implements it. |
+| `healthy` | Use only after credentials, required service checks, and account choice all support the claim. |
+| `partial` | Name which services are usable, which are not, what evidence is preserved, and the safe next action. |
+| `unverified` | Separate stored/accepted credentials from service health; never style as success. |
+| `offline` | Preserve prior evidence, state that current verification is unavailable, and avoid credential blame. |
+| `recovery` | Show the bounded repair/retry/reauthorization action and what remains safe. |
+| `saving` | Keep the edited control stable, disable duplicate submission, announce progress, and preserve focus context. |
+| `saved` | Give concise success feedback, then settle into the durable updated state rather than a permanent banner. |
+| `save-failed` | Preserve the user's choices where safe, explain what was not saved, and offer retry or correction. |
+| `confirmation` | Name the exact disconnect/revoke/forget consequence, retained data, and escape path. |
+| `disconnecting` | Prevent duplicate destructive action and keep consequences visible while waiting. |
+| `revocation-pending` | State that local use stopped but remote revocation is unconfirmed; offer retry or explicit local-forget guidance. |
+| `completed` | Land on the stable post-action state with focus moved deliberately to the next useful control. |
 
 ### Investments workspace primary task
 
@@ -291,8 +347,10 @@ On Main Chat after Stage 6:
 
 ### Progressive disclosure
 
-- Connection setup reveals the refresh-token field only after the user chooses personal-app connection.
+- Connection setup reveals the refresh-token field only after secure-storage readiness is proven and the user chooses personal-app connection.
 - Technical permission identifiers stay behind a disclosure; plain-English permissions remain visible.
+- Account choice appears only when discovery returns multiple eligible accounts; a single eligible account is selected automatically and identified plainly.
+- Permissions, repair, reauthorization, add-account, disconnect, remote-revocation, and local-forget controls appear only when the current state makes them relevant.
 - Detailed calculation definitions stay behind `How this is calculated` disclosures.
 - Agent provider/privacy consent appears only when the user first enables an investment agent or changes its provider.
 - The Level 1 IQ Platform interference warning appears immediately before each session Start, not as a permanent large card. Stream diagnostics remain behind a health disclosure unless action is required.
@@ -301,7 +359,15 @@ On Main Chat after Stage 6:
 
 ### Required interaction states
 
-Every relevant control must have deliberate default, hover, focus-visible, active, selected, disabled, loading, success, warning, and error behavior. All nonessential motion must respect `prefers-reduced-motion`.
+Every relevant control must have deliberate default, hover, focus-visible, active, selected, disabled, loading, success, warning, and error behavior. Every material/major stage must prove desktop and exactly 390px mobile layout, a complete keyboard path and deliberate post-action focus, non-color meaning, readable contrast, expanded-state reachability, no horizontal overflow/clipping, clean console output, and reduced-motion behavior. All nonessential motion must respect `prefers-reduced-motion`.
+
+### Production, development, and evidence boundary
+
+- Normal production surfaces contain user tasks, trustworthy state, and safe recovery only. Simulation selectors, scenario IDs, fixture diagnostics, raw request/service detail, and implementation explanations belong in one dedicated development-only preview destination.
+- Development preview requires strict explicit opt-in and an unmistakable persistent `Simulated Questrade data` identity. It is absent—not merely disabled or hidden—from production registration, navigation, and provider cards.
+- Gate 1 Connected Accounts includes the accepted compact Questrade provider row. Stage 2 preserves that row and replaces its safe development preview with the real connection, account-choice, verification, recovery, and removal journey as those actions become complete.
+- Reviewer screenshots and permanent baselines use sanitized fixture identities and values. Never include real email addresses, tokens, account numbers, portfolio values, raw provider payloads, secrets, or personal account data. Private live evidence may be temporary and local only; the reviewer receives a sanitized copy.
+- Required rendered evidence includes the full applicable state matrix, desktop, exactly 390px mobile, keyboard focus/path, expanded overflow, reduced motion, clean console, and destructive/completed outcomes. Missing evidence is `NO — REJECTED`.
 
 ### Development startup representation
 
@@ -419,12 +485,24 @@ sequenceDiagram
     Questrade-->>Server: Access token, new refresh token, API server, expiry
     Server->>Server: Validate token response and API host
     Server->>DB: Encrypt and persist rotated credentials
-    Server->>Questrade: GET time and accounts
-    Questrade-->>Server: Verified account metadata
-    Server->>DB: Save masked account health
-    Server-->>Client: Connected status only; no secret fields
-    Client-->>User: Connected, permissions, masked account, last access
+    Server-->>Client: Credentials stored; service health unverified
+    Server->>Questrade: GET time and discover accounts
+    Questrade-->>Server: Account metadata or truthful failure
+    alt one eligible account
+        Server->>DB: Select discovered account automatically
+    else multiple eligible accounts
+        Server-->>Client: Require explicit masked account selection
+        User->>Client: Select account for synchronization
+        Client->>Server: Save explicit selection
+    end
+    Server->>Questrade: Verify each Stage 2 in-scope read service
+    Questrade-->>Server: Per-service success, permission, or outage evidence
+    Server->>DB: Save credential state, service health, account choice, and next action
+    Server-->>Client: Secret-free truthful health projection
+    Client-->>User: Healthy, partial, unverified, offline, or recovery state
 ```
+
+Token exchange, encryption, and durable rotation prove only that the app has stored a credential. They do not by themselves prove that account discovery, server time, balances, positions, or any later service works. The server verifies only the services in scope for the current stage, records their evidence separately, and returns one safe projection that distinguishes credential state, service health, account choice, and next action. Invalid, expired, or missing-permission credentials are not described as a transient outage; timeouts, rate limits, and provider unavailability are not described as invalid credentials.
 
 ### Snapshot sequence
 
@@ -458,6 +536,8 @@ flowchart TD
 ```
 
 For the browser socket, a missed event causes a normal API refetch. For the upstream Questrade socket, any interruption is treated as a possible data gap; the app does not call the stream healthy again until REST reconciliation succeeds.
+
+Healthy socket transport stays visually quiet. During reconnect or recovery, the UI preserves the last trustworthy evidence and surfaces staleness, reconciliation, or fallback only when trust changed or an active operation needs explanation. Socket uptime never upgrades partial or unverified service health to Connected.
 
 ### Browser investment event allowlist
 
@@ -622,7 +702,9 @@ Key fields:
 - `schemaVersion`
 - `ownerKey` with initial value `local-owner`
 - `provider` fixed to `questrade`
-- `status`: `disconnected`, `connecting`, `connected`, `degraded`, `reauthorization-required`, `revocation-pending`, or `locked`
+- `credentialState`: `absent`, `exchanging`, `stored`, `expired`, `invalid`, `locked`, or `revocation-pending`
+- safe `serviceHealth` projection for only the services implemented by the current stage: `unverified`, `healthy`, `partial`, `offline`, `permission-missing`, or `recovery-required`, plus bounded per-service evidence timestamps/codes
+- `nextAction`: an allowlisted plain-language action key such as `connect`, `choose-account`, `wait`, `retry`, `reauthorize`, `continue`, `disconnect`, or `resolve-revocation`
 - encrypted access token fields: ciphertext, IV, tag, key version
 - encrypted refresh token fields: ciphertext, IV, tag, key version
 - `accessTokenExpiresAt`
@@ -636,13 +718,14 @@ Key fields:
 Indexes:
 
 - unique `{ ownerKey, provider }`
-- status and last-success index only if a future health monitor needs it
+- credential/service-health and last-success indexes only if a future health monitor needs them
 
 Rules:
 
 - secret fields are never returned by default;
 - connection serializers are allowlists, not object spreads;
 - a credential update writes access token, refresh token, expiry, API host, and version together;
+- credential state, service health, account selection, and next action remain separate facts; no stored token or single successful service check sets an undifferentiated Connected status;
 - no token history is retained.
 
 ### `InvestmentAccount`
@@ -669,6 +752,13 @@ Indexes:
 
 - unique `{ provider, ownerKey, accountKey }`
 - `{ ownerKey, selectedForSync }`
+
+Selection rules:
+
+- one eligible discovered account is selected automatically and identified plainly;
+- multiple eligible discovered accounts require an explicit user choice before synchronization can begin;
+- `isPrimary` and `isBilling` are provider-reported facts, not user selection and not permission to choose on the user's behalf;
+- every discovered account belongs to the one approved local owner and one Questrade authorization. Adding a second owner or credential requires renewed user approval.
 
 ### `InvestmentSyncRun`
 
@@ -999,14 +1089,26 @@ Use CommonJS throughout the server.
 
 | Method and path | Purpose | Important response fields |
 | --- | --- | --- |
-| `GET /api/investments/providers/questrade/connection` | Connection and permission health | Status, configured, permissions, masked accounts, last success/failure; never tokens |
-| `POST /api/investments/providers/questrade/connection/intent` | Create short-lived intent for a sensitive action | Intent ID, action, expiry |
-| `POST /api/investments/providers/questrade/connection` | Redeem a newly generated personal refresh token and verify accounts | Connected status and masked accounts |
-| `POST /api/investments/providers/questrade/connection/reauthorize` | Replace a revoked/broken credential without deleting history | Repaired status and masked accounts |
-| `POST /api/investments/providers/questrade/connection/disconnect` | Revoke Questrade authorization and disable local use | Revocation-confirmed or truthful revocation-pending result |
-| `POST /api/investments/providers/questrade/connection/forget-local` | Remove local credentials after explicit warning when remote revocation cannot be confirmed | Local removal result plus manual Questrade revocation instruction |
+| `GET /api/investments/providers/questrade/connection` | Safe credential, service-health, account-selection, and next-action projection | Credential state, per-service health summary, configured flag, plain-language permissions, masked accounts, explicit selection requirement, last trustworthy access/failure, and next action; never tokens |
+| `POST /api/investments/providers/questrade/action-intents` | Create a short-lived, one-use intent bound to one sensitive action | Intent ID, action, expiry |
+| `POST /api/investments/providers/questrade/connect` | Redeem a newly generated personal refresh token, store the rotated credential, discover accounts, and verify current-stage services | Credential state, truthful service health, masked accounts, selection requirement, permissions, and next action; never a success claim based on token exchange alone |
+| `POST /api/investments/providers/questrade/reauthorize` | Replace an invalid/expired or permission-inadequate credential without deleting history, then re-run discovery/verification | Updated credential/service health, stable masked accounts, selection state, and next action |
+| `POST /api/investments/providers/questrade/select-account` | Save an explicit opaque account choice when more than one eligible account exists, then verify it | Stable opaque account key, per-service health, and next action |
+| `POST /api/investments/providers/questrade/retry-verification` | Retry temporary read-only service checks without replacing the saved credential or prior evidence | Updated per-service health, preserved prior evidence, and next action |
+| `POST /api/investments/providers/questrade/disconnect` | Stop local use first, request Questrade revocation, and clear protected credentials after confirmed revocation | Revocation-confirmed or truthful revocation-pending result |
+| `POST /api/investments/providers/questrade/retry-revocation` | Retry a previously unconfirmed remote revocation while local access remains off | Revocation-confirmed or still-pending result |
+| `POST /api/investments/providers/questrade/forget-local` | After exact explicit confirmation, remove the protected local connection when remote revocation cannot be confirmed | Local removal result plus manual Questrade revocation instruction |
 
 Do not use a generic `/proxy` endpoint.
+
+All Stage 2 mutation routes consume an action-specific, one-use intent. Account selection accepts only an opaque `accountKey` and preserves the single-owner/single-credential boundary. Forget-local additionally requires the exact confirmation value `FORGET_LOCAL_QUESTRADE` so an unconfirmed remote authorization cannot be silently abandoned.
+
+The response contract must never collapse these concepts into one `connected` boolean:
+
+- credential state: absent, stored, expired/invalid, locked, or revocation-pending;
+- verified service health: healthy, partial, unverified, offline/transiently unavailable, permission-missing, or recovery-required;
+- account choice: none discovered, one auto-selected, or multiple awaiting explicit selection;
+- next action: connect, choose account, wait, retry, grant permission/reauthorize, continue, disconnect, or resolve revocation.
 
 ### Investment endpoints
 
@@ -1055,6 +1157,8 @@ Token redemption and revocation are the only Questrade-hosted POST operations pe
 - `QUESTRADE_CREDENTIAL_STORAGE_UNAVAILABLE`
 - `QUESTRADE_NOT_CONNECTED`
 - `QUESTRADE_CONNECTION_LOCKED`
+- `QUESTRADE_CREDENTIAL_INVALID`
+- `QUESTRADE_CREDENTIAL_EXPIRED`
 - `QUESTRADE_REAUTHORIZATION_REQUIRED`
 - `QUESTRADE_PERMISSION_MISSING`
 - `QUESTRADE_INVALID_API_SERVER`
@@ -1142,15 +1246,17 @@ The user must be able to test dangerous and rare states without manipulating the
 ### Isolation
 
 - Extend the existing connected-services harness gate instead of creating an unrelated stub framework.
-- Fixture mode requires all of:
+- Fixture mode is strict opt-in and requires all of:
   - non-production environment;
   - `ENABLE_DEV_MODE=true`;
   - explicit `QUESTRADE_DEV_FIXTURES=1`;
   - registered harness fixture adapter.
 - Production startup must refuse fixture mode.
-- Fixture controls are rendered only in Developer Tools when the server reports fixture availability.
-- A visible `Simulated Questrade data` label appears on every Investments screen in fixture mode.
+- Register one dedicated Questrade preview destination only when all opt-ins are true. The destination, its route/navigation entry, and its fixture APIs are absent from production.
+- No production provider card or focused provider detail contains a fixture/scenario selector. Current code that leaves simulation controls or an inert unavailable Questrade entry in normal Connected Accounts is a Gate 1 blocker, not accepted behavior.
+- A persistent visible `Simulated Questrade data` label and unmistakable fixture identity appear throughout the preview and any fixture-driven Investments surface.
 - Fixture records use unmistakable account masks and symbols and can never coexist with live credentials in one connection record.
+- Reviewer screenshots and permanent fixture baselines are sanitized and versioned; no real email address, token, account number, portfolio value, raw provider payload, or personal account data enters them.
 
 ### Required fixture scenarios
 
@@ -1190,7 +1296,7 @@ The user must be able to test dangerous and rare states without manipulating the
 34. `quote-stream-read-md-missing`
 35. `credential-key-store-unavailable`
 
-Each fixture has a version, expected normalized counts, expected socket/reconciliation state where applicable, and a safe secret canary used by leakage tests. Socket fixtures use an isolated fake WebSocket server and fake clock; they never contact Questrade. Relevant fixtures may carry hand-calculated risk expectations from the beginning as test-first reference data, but those expectations are marked `pending-stage-5` and do not count as passing evidence for Stages 1 through 4B. Stage 5 reviews, versions, and activates them against the approved formula contract.
+Each fixture has a version, sanitized simulation identity, expected normalized counts, expected state/evidence baseline, expected socket/reconciliation state where applicable, and a safe secret canary used by leakage tests. Socket fixtures use an isolated fake WebSocket server and fake clock; they never contact Questrade. Relevant fixtures may carry hand-calculated risk expectations from the beginning as test-first reference data, but those expectations are marked `pending-stage-5` and do not count as passing evidence for Stages 1 through 4B. Stage 5 reviews, versions, and activates them against the approved formula contract.
 
 ## 13. Testing and verification strategy
 
@@ -1287,49 +1393,37 @@ Expected final groups:
 - domain switching, transcript isolation, evidence strip, consent renewal, explicit Stop, and exact investment deep links in Stage 6;
 - keyboard, focus-visible, accessible names, and reduced-motion behavior.
 
-### Rendered acceptance and automated browser evidence
+### User-visible verification contract
 
-Every user-facing stage has two separate evidence lanes.
+Every material or major user-visible stage uses three separate lanes in this order:
 
-#### Manual rendered acceptance — always gating
+1. **Focused deterministic checks.** Run the smallest behavior, accessibility, overflow, console, capability-map, build, and regression checks that support the affected contract. A failure stops the handoff. Passing source/tests/build evidence is not visual approval.
+2. **Complete sanitized rendered evidence.** Capture the entry and first action, important disclosure, loading/waiting, success feedback, completed resting state, partial/error/recovery, destructive confirmation when applicable, desktop, exactly 390px mobile, visible keyboard focus and full keyboard path, expanded-state overflow/clipping, clean console, and reduced-motion behavior. Use only sanitized fixture data in reviewer artifacts and permanent baselines.
+3. **Direct user release review and acceptance.** Give the user the numbered dev-app script and the rendered state evidence. The release question remains: **Would Apple release this complete experience as part of one of its products?** Any hesitation or unresolved concern is rejection. Only the user's explicit acceptance passes the gate.
 
-The user completes the numbered dev-app script and:
+The user asked not to spend time or tokens on a separate review agent for this integration. The builder must still self-audit against the complete experience before presenting it, but cannot declare visual acceptance on the user's behalf. User rejection invalidates the prior visual baseline until the issue is corrected and the user accepts it again.
 
-- checks a typical laptop viewport;
-- checks a 390px mobile viewport;
-- keyboard-navigates the changed flow;
-- checks horizontal overflow and clipped content;
-- checks the browser console;
-- checks Network response previews for secret-free responses;
-- records the exact fixture scenario or masked live account state;
-- explicitly accepts or rejects the rendered result.
+Browser automation may be `incomplete` only when the exact environment/transport limit is recorded honestly. It may help create deterministic or rendered evidence, but an automated screenshot, source review, component test, or build cannot substitute for trained visual judgment. A browser run that reaches the changed UI and finds a defect is a failure, not an inherited gap.
 
-This is the required product gate. Source review, component tests, a production build, or an automated browser failure cannot substitute for it.
-
-#### Automated browser evidence — attempted and reported separately
-
-- Recheck `agent-browser` availability and a static known-good page at Gate 1 instead of copying the existing repository gap forward without a fresh attempt.
-- When available, capture laptop/mobile screenshots and run the automated Investments journey.
-- If the existing transport problem recurs, record the exact `incomplete` result in the capability map and stage handoff as an inherited automation gap.
-- An inherited transport gap may be covered for stage progression by the user's completed equivalent manual script. A failure that reaches the Questrade UI and finds incorrect behavior is a stage failure, not an inherited gap.
-- Final release still requires accepted manual desktop/mobile rendering even if automated browser evidence remains incomplete.
+The Design Release Record uses `docs/agent-harness/DESIGN_RELEASE_RECORD_TEMPLATE.md` where useful and records the approved direction, checks, evidence checklist/privacy status, user verdict, baseline decision, open feedback, and completion decision. An accepted sanitized baseline remains the visual regression reference until an approved direction replaces it.
 
 ## 14. Blocking stage protocol
 
 ### Statuses
 
-Each implementation stage uses exactly these statuses:
+Each implementation stage uses these progress states:
 
 1. `not-started`
 2. `implementation-in-progress`
-3. `technical-verification-passed`
-4. `ready-for-user-test`
-5. `user-rejected`
-6. `user-accepted`
+3. `deterministic-verification-passed`
+4. `sanitized-evidence-ready`
+5. `ready-for-user-test`
+6. `user-rejected`
+7. `user-accepted`
 
 Only `user-accepted` unlocks the next stage.
 
-`technical-verification-passed` means every deterministic and required automated-browser check owned by that stage passed. An unavailable user-owned app makes the browser group and stage `incomplete`; any Questrade-specific browser failure keeps the stage in progress or rejected. The separate user acceptance script is still required before the stage becomes `user-accepted`.
+`ready-for-user-test` requires all prior applicable technical and rendered-evidence lanes to be complete. An unavailable browser may make automation `incomplete`, but missing rendered evidence prevents a visual handoff. Only `user-accepted` unlocks the next stage.
 
 ### Visible stage ledger
 
@@ -1338,9 +1432,9 @@ This table is updated immediately when a gate changes state so the plan never ap
 | Gate | Increment | Current status | Acceptance evidence |
 | --- | --- | --- | --- |
 | 0 | Account, scope, retention, privacy, and no-trade decisions | `user-accepted` | Official documentation rechecked; owner instructed implementation to proceed; no live secret captured |
-| 1 | Development fixtures and Connected Accounts shell | `user-rejected` | Automation passed, but the owner rejected the 2026-08-14 rendering because oversized containers, weak hierarchy, low-contrast metadata, and an always-visible developer selector made the account experience unacceptable. A compact peer-card redesign is implemented and requires renewed desktop/mobile acceptance. |
-| 2 | Live connection, token refresh, repair, and revoke | `not-started` | Live connect/reload/reauthorize/revoke/reconnect script |
-| 3A | Snapshot engine and visible reconciliation workbench | `not-started` | Fixture/partial-failure reconciliation, live comparison, and local-data deletion in the dev app |
+| 1 | Development fixtures and Connected Accounts shell | `user-accepted` | On 2026-08-15 the user accepted the compact overview, focused provider sheets, fluid transitions, anchored disclosures, and disconnected/healthy/locked Questrade simulations shown in the development app. Focused Investments server, client, and module-boundary checks pass. |
+| 2 | Live connection, token refresh, repair, and revoke | `user-accepted` | Complete read-only lifecycle and focused checks passed; on 2026-08-15 the user confirmed readiness for Stage 3A after the user-owned local Margin-account acceptance journey. No token was handled by an agent or placed in chat/source. |
+| 3A | Snapshot engine and visible reconciliation workbench | `implementation-in-progress` | Product/UX brief, fixture/partial-failure reconciliation, live comparison, realtime recovery, and local-data deletion in the dev app |
 | 3B | Investments workspace | `not-started` | Accepted desktop/mobile portfolio workspace using the Stage 3A snapshot contract |
 | 3C | Cross-domain Main Chat and personal-workspace shell | `not-started` | Equal QBO/Investments entry, summary/sync/deep-link behavior, domain isolation, QBO regression, optional whole-app wording decision, and desktop/mobile acceptance |
 | 4A | Activities, orders, executions, and REST history import | `not-started` | Duplicate/resume fixtures plus live activity comparison |
@@ -1356,18 +1450,20 @@ This table is updated immediately when a gate changes state so the plan never ap
 Before asking the user to test, the implementation agent supplies:
 
 - the stage goal in one sentence;
+- the approved compact Product/UX brief and direction identifier for major work;
 - the exact commit and branch;
 - Investments-owned files and shared integration files listed separately, with the integration owner named when shared files changed;
 - the current `docs/investments/module-contract.md` change and module-boundary result when the stage adds or changes an interface;
 - changed user-visible behavior;
-- automated commands and outcomes;
+- focused deterministic commands and outcomes;
 - the exact dev-app route;
 - any user-owned restart or environment change required;
 - a numbered manual test script;
 - expected result after every action;
-- desktop and mobile screenshots when browser automation is available, or the user's manual rendered observations when it is not;
-- deterministic verification and automated-browser status reported as separate evidence lanes;
+- the complete sanitized rendered evidence set at desktop and exactly 390px mobile, including applicable states, waiting, focus/path, expanded overflow, reduced motion, clean console, and completed destructive outcomes;
+- deterministic verification, browser automation status, rendered evidence, and direct user acceptance reported as separate lanes;
 - browser console result;
+- the Design Release Record, direct user verdict, correction-round count, privacy status, and baseline decision;
 - known limitations that remain intentionally deferred;
 - a clear statement that no later stage work has started.
 
@@ -1378,7 +1474,7 @@ The user responds with either:
 - `Gate N accepted`, or
 - `Gate N rejected: <what failed or felt wrong>`.
 
-A rejection keeps work inside the same stage. Fixes are tested and the same gate is presented again. The visible plan status is updated immediately after every accepted gate.
+A user rejection invalidates the proposed baseline and keeps work inside the same stage. More than two rejected correction rounds, or a materially different direction, requires renewed user approval. The visible plan status and Design Release Record are updated after every user decision.
 
 ### Git boundary
 
@@ -1452,7 +1548,7 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 
 ### User-visible outcome
 
-The dev app can show and safely exercise all Questrade connection states using simulated data. It cannot contact live Questrade yet, and a simulated Questrade failure leaves the existing QBO and Google-connected-account experiences usable.
+The app presents the user-accepted compact provider index and complete focused Google and Questrade sheets. Questrade is reachable as a normal provider destination, while its scenario selector and simulation diagnostics remain isolated in an explicitly enabled Developer Tools destination. The safe preview contacts no broker, and a simulated Questrade failure leaves QBO and Google usable.
 
 ### Implementation
 
@@ -1463,15 +1559,18 @@ The dev app can show and safely exercise all Questrade connection states using s
 5. Add the minimal `QuestradeConnection` model and safe serializer.
 6. Add the provider-adapter contract and extend connected-service harness stubs with Questrade fixtures inside the Investments-owned provider path.
 7. Add `GET /api/investments/providers/questrade/connection` using the fixture adapter only.
-8. Add dev-only scenario selection inside the Questrade Connected Accounts card, where the simulated status is visible and testable without mixing it into general performance diagnostics.
-9. Extract a small provider-neutral connected-account card frame from `SettingsAccountsSection.jsx`. Keep Google and Questrade bodies provider-specific and re-verify Google behavior and rendering.
-10. Add the Investments-owned Questrade card body and show disconnected, connected Margin, reauthorization-required, unsafe-server-blocked, degraded, locked, key-store-unavailable, last-complete-save, and simulated-data states.
-11. Add secret-leak canaries and a forbidden-production-fixture test.
-12. Add the deterministic import/route/side-effect/module-ownership boundary suite defined in Section 9A.
-13. Add `investments-questrade-stage-1` to the testing capability map with unit, component, server, and browser evidence lanes.
-14. Introduce `verify:investments` with Stage 1 deterministic checks plus a separately reported required automated-browser lane. The browser lane uses an already-running user-owned stack and reports `incomplete` without starting services when that stack is unavailable.
-15. Add the `INVEST` launcher source tag and a local-only Investments readiness summary without changing the current startup banner. At this stage the truthful states are `not configured — optional`, `fixture mode available — live provider disabled`, or a safe local configuration error; the launcher must not contact Questrade.
-16. Update focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` together. Preserve early core readiness, late checks, final core/operational/optional totals, color/no-color/quiet behavior, and one-stop shutdown wording.
+8. Implement the approved Connected Accounts information architecture: compact provider-neutral overview as an index, focused Google details/subviews for real work, stable Settings frame, and no sprawling inline provider form.
+9. Render Questrade as one compact, equal provider row in the normal overview, with a truthful status and focused destination. Do not render an inert `Not available` row/card or any simulation selector/diagnostic notice in the normal account-management task.
+10. Register one dedicated Questrade fixture-preview destination only under the strict Section 12 opt-in. Put every scenario selector and simulation diagnostic there, with persistent sanitized simulation identity; leave it absent from production.
+11. In that preview, cover disconnected, healthy Margin, partial/unverified, offline/service unavailable, reauthorization-required, unsafe-server-blocked, locked, key-store-unavailable, saving, completed, and preserved-prior-evidence states without claiming live health.
+12. Complete the focused Google journey required by Section 6: account selection/defaults, save-waiting/saved/save-failed feedback, permissions on demand, conditional repair, add account, disconnect confirmation, disconnecting, and post-disconnect completed state with deliberate focus.
+13. Add secret-leak canaries, strict opt-in/production-absence tests, and a no-production-provider-selector/no-dead-end assertion.
+14. Add the deterministic import/route/side-effect/module-ownership boundary suite defined in Section 9A.
+15. Add `investments-questrade-stage-1` to the testing capability map with focused deterministic, sanitized rendered evidence, and explicit user-acceptance lanes.
+16. Introduce `verify:investments` with Stage 1 deterministic checks plus separately reported browser automation. An unavailable user-owned stack is recorded as `incomplete`; it never promotes the visual gate.
+17. Add the `INVEST` launcher source tag and a local-only Investments readiness summary without changing the current startup banner. At this stage the truthful states are `not configured — optional`, `fixture preview available — live provider disabled`, or a safe local configuration error; the launcher must not contact Questrade.
+18. Update focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` together. Preserve early core readiness, late checks, final core/operational/optional totals, color/no-color/quiet behavior, and one-stop shutdown wording.
+19. Use the approved replacement Product/UX direction and preserve the user-accepted visual baseline. Do not treat technical checks as visual acceptance.
 
 ### Automated verification
 
@@ -1483,103 +1582,129 @@ The dev app can show and safely exercise all Questrade connection states using s
 - the provider fixture satisfies the same read-only adapter contract planned for the live Questrade adapter;
 - module-boundary checks reject QBO/Investments internal cross-imports and any Questrade route outside `/api/investments/*`;
 - serializers exclude all fixture secret canaries;
-- fixture route contract passes;
-- Questrade settings component tests pass;
-- existing Google Connected Accounts component tests pass after the shared-frame extraction;
+- fixture route contract passes only with every explicit development opt-in and is absent/refused in production;
+- normal Connected Accounts contains the accepted compact Questrade provider row and contains no `Not available` dead end, scenario selector, simulator banner, or development diagnostic;
+- Questrade preview component tests cover the sanitized states in the dedicated development-only destination;
+- existing Google Connected Accounts component tests pass through overview -> focused details -> edit -> saving -> saved/save-failed -> permissions/repair -> add/disconnect -> completed resting state;
 - existing core HTTP, realtime WebSocket, and Live Call Assist WebSocket tests pass with explicit accepted local hosts because the incoming-host policy changes an app-wide boundary;
 - testing-map validation passes;
 - client build passes;
-- `npm run verify:investments` reaches a truthful verdict and requires the separately reported automated-browser lane to pass;
+- `npm run verify:investments` reaches a truthful deterministic/browser-automation verdict without claiming visual acceptance;
 - focused launcher tests prove the unchanged banner plus new `INVEST` tag/status wording, optional classification, no-Questrade-call behavior, secret/value redaction, and existing output modes;
 - `npm run dev:preview` shows the same privacy-safe Investments grammar without starting a service;
 - Questrade absent and provider-failure fixtures leave core/QBO health and deterministic behavior unchanged;
-- `npm run verify:core` passes before Gate 1 is offered to the user.
+- the focused Investments checks pass before user review;
+- sanitized evidence covers the normal Google/Questrade provider index and focused sheets plus the separate development-only Questrade fixture journey at desktop and exactly 390px mobile, including save waiting, visible focus/path, expanded overflow, reduced motion, clean console, disconnect confirmation, disconnecting, and post-disconnect completion;
+- the user reviews the rendered evidence directly. Missing evidence or anything short of the user's explicit acceptance keeps Gate 1 rejected.
 
-### Current implementation evidence — 2026-08-14
+### Accepted implementation and review evidence — 2026-08-15
 
 - The Investments module is mounted only at `/api/investments` and its public contract is documented in `docs/investments/module-contract.md`.
 - The server includes AES-256-GCM field encryption, a lazy Windows current-user credential-key provider, a loopback Host policy shared by HTTP and both WebSocket upgrade paths, and a separate HTTPS Questrade API-host allowlist.
 - Questrade remains read-only by contract: the fixture adapter exposes account reads and has no place, replace, or cancel order methods.
-- Settings shows Questrade as a peer to Google using a provider-neutral frame, while each provider keeps its own body and actions.
-- Seven simulated states are available directly in the Questrade card: `disconnected`, `healthy-margin`, `token-expired`, `malicious-api-server`, `locked`, `key-store-unavailable`, and `service-unavailable`.
-- The dedicated `npm run verify:investments` profile passes its server/security, client/Google-regression, friendly-startup, rendered-browser, and testing-map lanes against the current already-running user-owned stack.
-- The final passing Investments evidence is recorded at `test-results/app-check/2026-08-15T00-48-00-082Z-e720c8ed/summary.json`; all six groups passed, including the required browser lane and the separately reported module-ownership boundary.
-- Automated rendered checks passed at desktop and 390px mobile widths, including reduced motion, all seven simulated states, card viewport bounds, an empty browser-error list, and zero requests to a `questrade.com` host.
-- The owner then rejected the rendered Gate 1 result. This overrides the earlier automated visual pass: the stacked full-width panels, low-contrast metadata, heavy nested status surface, decorative pills, and dominant fixture selector did not meet the product's design standard.
-- The correction places compact providers in an equal desktop grid, gives each card a calmer identity/status hierarchy, keeps readable secondary text, and moves Stage 1 simulation controls behind a labelled disclosure. This correction remains `user-rejected` until the owner accepts fresh desktop/mobile rendering.
-- The corrected `npm run verify:investments` profile passed all six required groups at `test-results/app-check/2026-08-15T01-46-19-417Z-637361c0/summary.json`, including all seven disclosed simulated states, the desktop two-column/mobile one-column contract, reduced motion, no horizontal overflow, no browser errors, and no `questrade.com` request. The production client build also passed.
-- The complete `npm run verify:core` profile then passed all seven groups at `test-results/app-check/2026-08-15T01-54-50-618Z-df2e89d3/summary.json`, including 36 client test files, 132 server test files, stress-harness infrastructure, runner contracts, startup contracts, Investments ownership boundaries, and the testing map.
-- The manual review evidence is saved as `review-screenshots/connected-accounts-before-2026-08-14.png`, `review-screenshots/connected-accounts-after-desktop-2026-08-14.png`, `review-screenshots/connected-accounts-after-desktop-expanded-2026-08-14.png`, and `review-screenshots/connected-accounts-after-mobile-2026-08-14.png`. These screenshots support renewed owner review; they do not self-accept Gate 1.
-- The production client build passed, and the complete whole-app `npm run verify:core` profile passed all seven groups at `test-results/app-check/2026-08-15T00-42-37-174Z-ab3c651a/summary.json`, including the same module-ownership boundary required by the Investments profile.
+- Historical Stage 1 deterministic/browser runs passed for the earlier peer-card implementations. Those runs remain technical evidence only and do not approve the replacement direction.
+- The owner rejected the original rendered result. That direct rejection invalidated any earlier automated visual implication and any baseline derived from the rejected layout.
+- The user then approved a replacement direction: a compact provider overview that opens focused Google and Questrade details, with Questrade scenario controls isolated in Developer Tools rather than mixed into account management.
+- The corrected Gate 1 implementation is user-accepted. Its compact provider index, layered provider sheets, motion behavior, and isolated simulator are the baseline Stage 2 must preserve.
+- Historical review failures identified missing waiting/focus/reduced-motion/completion evidence, false-success styling, production diagnostics, low contrast, and an inert Questrade dead end. Those rejected implementations are not the accepted baseline.
+- The user then directed and reviewed a focused issue-by-issue correction loop. The accepted result keeps Questrade simulation in Developer Tools, uses a compact equal provider index, opens focused layered sheets with fluid motion, and uses anchored secondary disclosures.
+- The user explicitly stated that Connected Accounts is good and immediately asked for the next stage. This is Gate 1 acceptance; tests and screenshots support but do not replace that decision.
 - `server/test/investments/module-boundaries.test.js` proves that Investments imports only owned code and reviewed shared seams, shared registration uses only public server/client entry points, Questrade provider routes remain Investments-owned, and creating the module performs no network, storage, child-process, or repeating-timer work.
 - `npm run dev:preview -- --no-color` shows the aligned `INVEST` line and optional total without starting a service or printing a token, account number, financial value, or provider destination.
 - The browser scenario is left at `disconnected`. No later-stage live connection, portfolio page, main-chat redesign, socket stream, monitoring job, or agent access has started.
 
 ### User dev-app acceptance script — Gate 1
 
-Prerequisite: use the already-running development app. Stage 1 fixtures are available by default outside production unless `QUESTRADE_DEV_FIXTURES=0` was deliberately set; no token or environment change is required.
+Completed: the user exercised and visually reviewed the normal overview, focused Google/Questrade sheets, motion, capabilities disclosure, and multiple simulated Questrade states, then accepted the result on 2026-08-15.
 
-1. Open **Settings > Connected Accounts** and review Google before testing Questrade.
-   - Expected: disconnected/compact Google and Questrade accounts appear as equal peers on a wide desktop and one column on a narrow screen. Google retains its prior identity, connection state, account defaults, permission health, and actions; Questrade does not duplicate Google-specific controls.
-2. In the Questrade card, open **Preview connection states**, then select `Not connected` (`disconnected`).
-   - Expected: the simulation selector is available but does not dominate the normal card. Questrade says it is not connected, live access is off, no token or portfolio data is saved, and the header clearly identifies a Margin-account simulated preview.
-3. Select `Connected` (`healthy-margin`).
-   - Expected: status becomes Connected, the non-sensitive label `margin-demo-01` appears, and a last-complete-save time is visible. No balances, positions, account number, or live permission claim appears in Stage 1.
-4. Select `Reauthorization required` (`token-expired`).
-   - Expected: status says reauthorization is required; it does not claim the account is disconnected or erase prior health metadata.
-5. Select `Unsafe server blocked` (`malicious-api-server`).
-   - Expected: connection is blocked with a safe error and no outbound request to the supplied host.
-6. Select `Credential locked` (`locked`).
-   - Expected: credentials are described as locked; the UI does not delete them or expose decryption details.
-7. Select `Credential protection unavailable` (`key-store-unavailable`).
-   - Expected: the app explains that secure credential storage is unavailable, blocks Connect, and does not ask the user to encrypt anything, paste an encryption key, or enter a token.
-8. Select `Questrade unavailable` (`service-unavailable`), then open the existing QBO Chat workflow and review the Google connected-account card.
-   - Expected: Questrade is safely degraded, while QBO and Google remain usable and contain no Investments error, account context, or controls.
-9. Reload the page after a selected state.
-   - Expected: the process-local selected fixture remains stable while the server is running and never flickers through a false Connected claim. A server restart intentionally resets it to Not connected.
-10. Repeat at 390px width and keyboard-navigate all Questrade controls.
-   - Expected: no horizontal overflow, clipped controls, hover dependency, or missing focus indicator.
-11. Open browser console and Network response previews.
-   - Expected: no console errors, token canary, raw account number, or authorization header.
-12. Run `npm run dev:preview -- --no-color` in another terminal; it is safe while the app is running and does not start another service.
-    - Expected: the existing banner remains unchanged; an aligned `INVEST` line describes Questrade as optional/fixture-only; core and optional totals remain distinct; no server starts and no live Questrade request occurs.
-13. When convenient, stop only the user-owned development stack with its normal `Ctrl+C`, then start it with `npm run dev` and capture the early-ready and background-check sections in the terminal.
-    - Expected: output follows the supplied screenshot grammar, the core app becomes ready without waiting on Investments, no balance/account/symbol/provider destination is printed, and `Ctrl+C` still stops only launcher-owned API and web processes cleanly.
+**Normal production-like Google journey**
 
-### Gate 1 blocks Stage 2 until
+1. Open **Settings > Connected Accounts** at desktop width.
+   - Expected: the compact overview acts as an index. Google and Questrade are reachable and show concise truthful states; fixture controls, scenario labels, simulator banners, and development diagnostics are absent.
+2. Open Google focused details, inspect initially visible account/default state, then open the permissions disclosure.
+   - Expected: the Settings frame and provider identity stay stable; essential health text is readable and non-color; permissions appear on demand without clipping.
+3. Change a safe Google default and save it using a controlled delayed response.
+   - Expected: the UI shows a stable waiting state, prevents duplicate save, announces progress, preserves focus context, then gives concise saved feedback and settles into the durable updated state.
+4. Exercise save failure and conditional repair.
+   - Expected: the prior safe state remains, the error explains what was not saved, repair appears only when relevant, and retry is reachable by keyboard.
+5. Exercise Add account, then open Disconnect and cancel once.
+   - Expected: the consequence is specific, focus is trapped/returned correctly, and cancel changes nothing.
+6. Confirm Disconnect using a controlled delayed response.
+   - Expected: the UI shows disconnecting, prevents duplication, then reaches the completed disconnected resting state with deliberate focus on the next useful action.
 
-- the user accepts every connection state and the desktop/mobile presentation;
+**Dedicated development-only Questrade fixture journey**
+
+7. Enable every required development fixture opt-in and open the dedicated Questrade preview destination.
+   - Expected: persistent `Simulated Questrade data` identity is unmistakable; the preview is separate from Connected Accounts and makes no `questrade.com` request.
+8. Exercise `disconnected`, `healthy-margin`, `token-expired`, `malicious-api-server`, `locked`, `key-store-unavailable`, and `service-unavailable`.
+   - Expected: credential evidence and service health remain distinct; unverified is not styled as success; prior evidence survives transient outage; every state has a truthful next action or resting state.
+9. Disable one required opt-in and test production configuration.
+   - Expected: the preview route/navigation/API is absent or refused, normal Connected Accounts remains free of Questrade simulation controls, and QBO/Google remain usable.
+
+**Complete-experience evidence**
+
+10. Repeat both journeys at exactly 390px and by keyboard only, including visible focus, expanded disclosures, save waiting, disconnect confirmation/completion, and return navigation.
+    - Expected: no horizontal overflow, clipping, unreachable content, color-only meaning, hover dependency, or lost focus.
+11. Repeat with reduced motion and inspect the browser console, Network previews, and rendered text contrast.
+    - Expected: state changes remain understandable without nonessential motion; console is clean; responses contain no token canary, raw account number, authorization header, or raw payload; essential health evidence is readable.
+12. Run `npm run dev:preview -- --no-color`, then inspect one user-owned normal start/stop when convenient.
+    - Expected: the existing banner and privacy-safe `INVEST` optional/fixture grammar remain accurate, core readiness does not wait on Investments, no Questrade call/value/destination occurs, and only launcher-owned processes stop.
+
+### Gate 1 completion record
+
 - all Stage 1 deterministic checks pass;
-- the required automated desktop/mobile browser journey has passed against the already-running user-owned app;
+- the complete sanitized normal-Google and development-only-Questrade evidence set covers every applicable Section 6 state plus desktop, exactly 390px mobile, keyboard/focus, overflow, reduced motion, and clean console;
+- the approved overview contains the compact Questrade destination but no dead end or fixture control, and the simulator is proven isolated from the product account-management task;
 - Google Connected Accounts behavior is proven unchanged;
-- fixture mode is proven unavailable in production;
 - the user accepts that the app owns automatic local key management and that secure-storage failure blocks connection without asking them to handle encryption;
 - the module contract and boundary suite prove that Investments can be developed without importing QBO internals and that provider failure does not change core/QBO readiness;
-- the user accepts the privacy-safe `INVEST` status in both preview and real user-owned startup output; whole-app naming remains deferred.
+- the user accepted the corrected normal and development-only experience and authorized Stage 2;
+- whole-app naming remains deferred.
 
 ## 17. Stage 2 — Live personal-app connection, refresh, repair, and revoke
 
 ### User-visible outcome
 
-The user can connect the real Questrade personal application, verify the Margin account, survive token refresh, reauthorize, and disconnect without exposing credentials.
+The normal production Questrade journey becomes actionable end to end: secure-storage readiness, one-time token entry, exchange and durable rotation, account discovery/choice, separate in-scope service verification, truthful health, repair, and disconnect/revoke/forget outcomes without exposing credentials or implying that a token alone proves health.
 
 ### Implementation
 
-1. Add the live token and revoke transport with fixed endpoints.
-2. Add single-flight token refresh and atomic credential rotation.
-3. Add short-lived sensitive-action intents.
-4. Add live connect, reauthorize, disconnect, retry-revocation, and forget-local routes.
-5. Add one-time refresh-token entry with progressive disclosure under **Settings > Connected Accounts > Questrade**. Reveal the masked field only after the server reports that app-managed secure credential storage is ready.
-6. Load or create the local operating-system-protected key through the Stage 1 key provider, with the optional server environment override available only for deployment/recovery. If neither source is usable, refuse connection or reauthorization before any provider call or database write; there is no plaintext fallback and no prompt asking the user to encrypt or manage a key.
-7. Clear the client input immediately after submission.
-8. Fetch Questrade time and accounts after durable token storage.
-9. Generate a random stable `accountKey` for each newly discovered account, then save the full account number encrypted and expose only masked metadata. Reauthorization and reconnect must reuse the existing stable key.
-10. Translate returned scopes into plain-English permissions without hard-coding a successful grant.
-11. Handle 401/403, locked credentials, invalid server, invalid response, timeout, revocation-pending, and refresh-accepted-before-save crash-recovery states.
-12. Add secret-safe connection audit summaries.
-13. Document `QUESTRADE_TOKEN_ENCRYPTION_KEY` in `server/.env.example` without a real value as an optional headless/deployment/recovery override. State explicitly that normal local Windows setup creates/loads its protected key automatically and needs no user-managed environment value.
-14. Document the single-use refresh-token crash window in the Stage 2 user handoff, with exact manual reauthorization steps.
-15. Extend the local startup summary to distinguish `not configured`, `connection stored — live broker check deferred`, `locked`, and `reauthorization required` from local database state only. Normal startup and `dev:check` still make no Questrade call, refresh no token, and claim no live broker health.
+1. Before building, record the compact Product/UX brief from Section 6 for the entire real Questrade journey. Preserve the user-accepted Connected Accounts frame and reserve final visual acceptance for the user.
+2. Add the live token and revoke transport with fixed endpoints, single-flight refresh, atomic credential rotation, and short-lived sensitive-action intents.
+3. Add live connect, account-selection continuation as a Stage 2 endpoint detail, reauthorize, disconnect, retry-revocation, and forget-local routes under `/api/investments/*`.
+4. Add focused Questrade details from the production overview only now that they have a real next action. Reveal the one-time masked refresh-token field only after app-managed secure storage reports ready.
+5. Load or create the local operating-system-protected key through the Stage 1 provider, with the optional server override only for deployment/recovery. If no source is usable, refuse before token entry where possible and always before provider traffic/database writes; never request a user-managed key or use plaintext fallback.
+6. Clear the client token input immediately after submission. Show exchange, durable-rotation, account-discovery, account-choice, per-service-verification, saving, recovery, and completed states inside the stable focused frame.
+7. After durable token storage, discover accounts. Generate/reuse stable random `accountKey` values and keep external numbers encrypted/masked.
+8. Automatically select exactly one eligible discovered account. When multiple are eligible, require explicit masked account selection before any synchronization; do not treat provider primary/billing flags as user choice.
+9. Keep every discovered Questrade account under the one approved authorization/owner. Do not show `Add another owner`, request a second credential, or imply each account needs a separate authorization.
+10. Verify each Stage 2 in-scope service separately and return the safe projection defined in Section 10. A successful token exchange remains `unverified` until service checks and account choice justify a stronger state.
+11. Translate returned scopes into plain-language permissions with technical identifiers on demand. Distinguish invalid/expired credentials and missing permission from transient outage, timeout, rate limit, and offline verification.
+12. Implement initial, loading, disconnected, unverified, healthy, partial, offline, recovery, saving, completed, confirmation, disconnecting, revocation-pending, and save-failed states with preserved prior evidence and one truthful next action.
+13. Make reauthorization conditional on credential evidence; make Retry appropriate for transient failures. Never prescribe reauthorization as the generic response to an outage.
+14. Disconnect confirmation states whether remote authorization will be revoked and which local history remains. If revocation cannot be confirmed, stop local use, show `revocation-pending`, and offer Retry or explicit Forget locally with manual Questrade guidance.
+15. Add secret-safe connection audit summaries and document the single-use refresh-token crash window with exact reauthorization recovery.
+16. Document `QUESTRADE_TOKEN_ENCRYPTION_KEY` in `server/.env.example` without a real value as an optional headless/deployment/recovery override; normal local setup needs no user-managed value.
+17. Extend startup summary to distinguish `not configured`, `connection stored — live broker check deferred`, `locked`, and `reauthorization required` from local state only. Startup and `dev:check` make no Questrade call and claim no live health.
+
+### Current Stage 2 checkpoint — 2026-08-15
+
+Implemented and focused-verified without using a live token or contacting Questrade:
+
+- separate real and development-simulator connection endpoints;
+- one-time, action-bound intents for sensitive connection mutations;
+- fixed Questrade token/revoke hosts with redirects refused, bounded requests, and validated returned API hosts;
+- app-managed encrypted storage for the rotating access/refresh credentials and the external account number;
+- read-only account discovery, automatic single-account selection, explicit opaque-key multiple-account selection, and separate balances/positions/orders/executions verification;
+- safe client projections that exclude tokens, raw account numbers, provider hosts, authorization headers, and raw payloads;
+- a masked in-app token step revealed only after the user chooses Connect and secure storage reports ready;
+- stable account identity across reauthorization, single-flight token refresh, and safe recovery when Questrade accepted a refresh but the replacement could not be durably saved;
+- conditional reauthorization, temporary verification retry, remote revoke/disconnect, truthful revocation-pending recovery, retry-revocation, and explicit local removal with manual-revocation guidance;
+- secret-safe local audit summaries and privacy-safe startup projection that never decrypts credentials or contacts Questrade;
+- twelve isolated development fixtures covering disconnected, healthy, account choice, partial, offline, rate-limited, reauthorization-required, revocation-pending, unsafe-host-blocked, locked, protected-storage-unavailable, and service-unavailable states;
+- focused server, client, launcher, production-build, and rendered browser checks, including desktop, exactly 390px, keyboard, reduced motion, zero horizontal overflow, clean console, and no live `questrade.com` network request.
+
+Gate 2 was accepted on 2026-08-15 when the user confirmed readiness for Stage 3A after the user-owned local Margin-account acceptance journey. The implementation agent did not receive or inspect the token. The script below remains the durable regression checklist; Stage 3A has begun and Stage 3B remains blocked.
 
 ### Automated verification
 
@@ -1588,50 +1713,46 @@ The user can connect the real Questrade personal application, verify the Margin 
 - an unavailable or invalid key source returns `QUESTRADE_CREDENTIAL_STORAGE_UNAVAILABLE` before any token exchange, provider request, or database write and never asks the user for an encryption key;
 - simultaneous access requests cause one refresh;
 - rotated tokens are written together;
+- token exchange/storage without completed in-scope service checks never returns or styles the connection as healthy/Connected;
 - persistence failure never returns Connected;
 - the crash-after-remote-acceptance fixture requires reauthorization and never claims the old refresh token remains valid;
 - reauthorization and encryption-key rotation preparation preserve the random `accountKey` and existing account references;
 - every connection endpoint passes secret-scanning tests;
 - disconnect truthfully distinguishes confirmed, already revoked, and unconfirmed revocation;
 - no account number appears in URLs or API responses;
-- fixture and live adapters cannot be active simultaneously.
-- launcher tests prove that stored/locked/repair states are classified truthfully without decrypting or printing secrets and without a network call to Questrade.
+- one discovered account auto-selects; multiple discovered accounts block synchronization until explicit opaque-key selection; provider primary/billing flags do not choose for the user;
+- credential-invalid/expired, permission-missing, transient outage, timeout, rate-limit, partial service health, and offline verification map to distinct safe state/next-action responses;
+- fixture and live adapters cannot be active simultaneously;
+- focused client checks cover the complete Section 6 journey, waiting/saving, account choice, service-health truth, conditional repair, permissions disclosure, disconnect/revocation/forget consequences, focus, reduced motion, and post-action completion;
+- launcher tests prove stored/locked/repair states are classified truthfully without decrypting/printing secrets or making a Questrade call;
+- complete sanitized rendered evidence follows Section 13 before Gate 2 is offered to the user for direct review.
 
 ### User dev-app acceptance script — Gate 2
 
-The user performs all live Questrade actions. The implementation agent never asks for or handles the token.
+The safe fixture, desktop, exactly 390px, keyboard, reduced-motion, recovery, revocation-pending, overflow, console, and no-live-network checks are automated and already pass. The user only needs to perform the real account actions below. The implementation agent never asks for or handles the token; it is entered only in the local app.
 
-1. Generate a new personal-application refresh token in Questrade API Centre.
-2. Open **Settings > Connected Accounts > Questrade > Connect personal app**.
-3. Paste the token into the masked field and choose Connect.
-   - Expected: the app handles encryption automatically, never asks for an encryption key, clears the token field immediately, and moves through Connecting to Connected.
-4. Verify the displayed account type is Margin and the last four digits match the intended account.
-5. Verify the permissions shown are read-only.
-6. Reload Settings and then restart the user-owned server.
-   - Expected: the app loads the same operating-system-protected key automatically and the connection persists without re-entering either the token or an encryption key.
-7. Trigger multiple read-status requests using the provided dev test action after token expiry is simulated.
-   - Expected: one refresh occurs and all requests recover.
-8. Exercise `refresh-accepted-crash-before-save`.
-   - Expected: the UI explains that Questrade accepted the one-time token but the replacement was not safely stored, and instructs the user to generate a new token; it does not retry the invalid old token or call the connection healthy.
-9. Reauthorize using a newly generated token without disconnecting first.
-   - Expected: account identity remains stable and connection health updates.
-10. Exercise fixture `revocation-unavailable`.
-   - Expected: the UI says revocation is unconfirmed and offers Retry or Forget locally; it does not claim Questrade access was revoked.
-11. Perform one real Disconnect, verify revocation in Questrade API Centre, generate a new token, and reconnect.
-    - Expected: remote authorization is revoked, local history is preserved, and reconnect restores account access.
-12. Inspect browser console and Network responses throughout.
-    - Expected: no token, raw account number, or raw Questrade payload appears in responses or console output.
-13. Repeat the repair and warning states at mobile width.
-14. During the user-owned restart in step 6, inspect the `INVEST` startup line.
-    - Expected: it says the connection is stored and that a live broker check was deferred; it does not print account identity, financial values, host/port, token state detail, or claim that Questrade answered during startup.
+1. Open **Settings → Connected Accounts → Questrade**.
+   - Expected: the accepted compact overview and focused sheet are unchanged; Questrade says it is ready to connect and explains read-only access before token entry appears.
+2. Choose **Connect Questrade…**, open the personal application in Questrade API Centre, generate a new authorization token, paste it into the masked local field, and choose **Connect account**.
+   - Expected: the field clears immediately; the stable sheet shows the operation without jumping; one Margin account selects automatically, while multiple eligible accounts require an explicit choice; balances, positions, orders, and executions are checked separately before the UI claims success.
+3. Confirm the selected live account is the intended Margin account and open **Capabilities…**.
+   - Expected: the identity is masked, service truth is understandable, Market data remains off for this stage, and Trading says **Not allowed**. No token, full account number, provider host, or raw payload appears in the browser.
+4. Reload Settings. If you want to prove restart persistence too, restart the user-owned app yourself and return to Questrade.
+   - Expected: the protected credential and stable account choice restore without re-entering the token. Startup says only that authorization is stored and the live broker check was deferred; it does not claim current broker health.
+5. Open **Disconnect…**, read the consequence, choose **Cancel**, then open it again and confirm **Disconnect**.
+   - Expected: Cancel safely returns to the account view. Confirm immediately stops local use, asks Questrade to revoke authorization, preserves prior local evidence, and lands on either a truthful disconnected state or `revocation-pending` if Questrade could not confirm the revoke.
+6. In Questrade API Centre, confirm the authorization was revoked. Then generate a new token and reconnect once.
+   - Expected: reconnect reuses the stable local account identity and repeats truthful per-service verification. If remote revocation was pending instead, use **Retry revocation**; use **Remove locally…** only after manually revoking in Questrade.
+7. Tell the implementation agent whether Gate 2 is accepted and report any wording, motion, account-selection, service-health, disconnect, or recovery issue you observed.
 
 ### Gate 2 blocks Stage 3A until
 
 - the user confirms the real intended Margin account connected;
-- persistence, reauthorization, and one live revoke/reconnect pass;
+- single-account automatic selection, multiple-account explicit choice, per-service verification, persistence, conditional reauthorization, and one live revoke/reconnect pass;
 - the user confirms that token entry occurred only in the in-app Questrade settings and that the app-managed encryption lifecycle required no manual key setup;
 - live access is proven read-only;
-- secret-safe deterministic checks pass and the user accepts the manual rendered browser checks; automated browser status remains separately reported.
+- secret-safe focused checks and the complete sanitized Section 6 evidence set pass;
+- the user explicitly accepts the complete desktop/mobile/keyboard journey; browser automation status remains separately reported;
 - the user accepts the truthful local-only startup wording for a real saved connection.
 
 ## 18A. Stage 3A — Complete snapshot engine and visible reconciliation workbench
@@ -1639,6 +1760,8 @@ The user performs all live Questrade actions. The implementation agent never ask
 ### User-visible outcome
 
 The user can trigger and inspect a complete simulated or live portfolio synchronization inside a development-only reconciliation workbench before the production Investments workspace is built.
+
+**Design release requirement:** Treat the workbench as material user-visible work while keeping it strictly development-only and absent from production navigation. Before build, approve a brief for no-snapshot, ready, running/progress, reconnecting, replay-gap/polling recovery, complete, partial/incomplete, failed-with-prior-evidence, deletion confirmation, deleting, and completed states. After focused checks, capture sanitized desktop/390px/keyboard/focus/overflow/reduced-motion/console evidence, complete the Design Release Record, then obtain the user's direct visual acceptance.
 
 ### Implementation
 
@@ -1731,6 +1854,8 @@ The user can trigger and inspect a complete simulated or live portfolio synchron
 
 The user can review the accepted Stage 3A snapshot contract in a polished, responsive Investments workspace with trustworthy balances, positions, and freshness.
 
+**Design release requirement:** Treat the new primary workspace as major. The pre-build brief and sanitized evidence cover disconnected, never-synced, loading, empty, healthy, delayed/non-real-time, stale, partial/incomplete refresh with preserved evidence, error/recovery, synchronization success/completed resting state, multi-tab/socket recovery, and local-data deletion consequences. A completed record/baseline and the user's explicit visual acceptance are separate blockers.
+
 ### Implementation
 
 1. Add the `#/investments` route, sidebar item, lazy-loaded workspace, and responsive view navigation.
@@ -1790,6 +1915,8 @@ The user can review the accepted Stage 3A snapshot contract in a polished, respo
 ### User-visible outcome
 
 The main Chat page becomes the starting point for the user's personal workspace, where QBO escalations and Investments have equal prominence. The user can select Investments, see the latest trustworthy portfolio context, synchronize it, and open the full Investments workspace without entering an AI conversation or mixing it with QBO evidence.
+
+**Design release requirement:** Treat the cross-domain Main Chat shell as major. The pre-build brief and sanitized evidence cover neutral first visit, each domain selected, saved preference, deep link, domain switching with unsaved work, active-run continuity, disconnected/never-synced/syncing/healthy/empty/partial/stale/recovery Investments context, QBO regression, and the explicit pre-Stage-6 no-agent state. Desktop, 390px, keyboard/focus, reduced motion, overflow, console, completed record/baseline, and the user's explicit visual acceptance are all required.
 
 ### Stable interaction design
 
@@ -1887,6 +2014,8 @@ The main Chat page becomes the starting point for the user's personal workspace,
 
 The user can import and inspect account changes without duplicates and can distinguish an order from an actual execution.
 
+**Design release requirement:** Treat the import/history journey as material. The approved brief and sanitized evidence cover range selection, initial/empty, importing/progress, cancellation confirmation, cancelling, cancelled, resume/recovery, complete, duplicate rerun, partial/incomplete, failed-with-preserved-records, filters, deletion preview, and completed resting state. Focused checks precede direct user release review and explicit acceptance.
+
 ### Implementation
 
 1. Add activity, order, and execution models and safe serializers.
@@ -1952,6 +2081,8 @@ The user can import and inspect account changes without duplicates and can disti
 ### User-visible outcome
 
 The user can explicitly enable live order/execution notifications, see actions taken in Questrade or another authorized app appear promptly, and see whether the stream is live, reconciling, stale, rate-limited, or stopped. The app still cannot place or change an order.
+
+**Design release requirement:** Treat stream enable/recovery/disable as material. The brief and sanitized evidence cover Off, enable confirmation, connecting, authenticating, reconciling, Live/quiet, stale, cooldown/rate-limited, circuit-open, unsupported, reauthorization-required, manual repair, disabling/final reconciliation, disabled/completed, restart restoration, and prior-evidence preservation. The user's direct review judges the full trust/recovery journey—not a Live screenshot—and must explicitly accept it before the record and gate can complete.
 
 ### Defaults and authority
 
@@ -2046,6 +2177,8 @@ The user can explicitly enable live order/execution notifications, see actions t
 
 The app calculates reproducible exposure and margin indicators from one exact snapshot, with formulas and limitations visible. No AI is involved.
 
+**Design release requirement:** Treat deterministic risk as material. The brief and sanitized evidence cover no usable snapshot, calculating, completed assessment, warnings/exclusions, multi-currency and zero/negative cases, stale input, formula disclosure expanded, recalculation required, calculation failure with prior assessment preserved, scenario editing, deletion confirmation, and completed resting state. Direct user release review and explicit acceptance remain distinct from arithmetic/test success.
+
 ### Calculation contract
 
 For each currency independently unless Questrade provides a labelled combined value:
@@ -2126,6 +2259,8 @@ For each currency independently unless Questrade provides a labelled combined va
 ### User-visible outcome
 
 The user can ask for portfolio analysis, see which specialist did what, and verify the exact snapshot and deterministic calculations behind the response.
+
+**Design release requirement:** Treat the investment-agent conversation as major. The brief and sanitized evidence cover no consent, consent review/decline/accepted, provider/privacy disclosure, no usable snapshot, composer ready, queued/running, partial output, completed evidence-bound answer, stale input, consent expired/changed, failure/recovery, reconnect/resume, explicit Stop and stopped resting state, domain switching, `Open in Investments`, privacy deletion, and renewed consent. Only a complete sanitized evidence set and explicit user release acceptance can pass Gate 6.
 
 ### Agent roles
 
@@ -2285,6 +2420,8 @@ The output validator rejects or marks incomplete a response that lacks input evi
 
 The app can refresh on a user-approved schedule and open durable Attention items for connection failures or user-defined risk thresholds.
 
+**Design release requirement:** Treat monitoring lifecycle and Attention integration as material. The brief and sanitized evidence cover Off, initial policy setup, saving/saved/save-failed, enabled waiting, due/running, successful no-alert result, alert opened/updated/resolved, partial/outage/rate-limit recovery, pause/resume/disable, restart restoration, deletion cleanup, and completed resting states. Focused checks and sanitized desktop/mobile evidence come first; the record and the user's direct visual acceptance follow.
+
 ### Defaults
 
 - Monitoring is off when Stage 7A first arrives and remains off until the user explicitly saves and enables a policy.
@@ -2381,6 +2518,8 @@ The app can refresh on a user-approved schedule and open durable Attention items
 
 The user can explicitly start a Level 1 quote-streaming session for symbols in the selected portfolio, see current quote freshness, and use fast quote changes to request a fully verified monitoring check. The app never treats a streamed tick as a complete portfolio or risk assessment.
 
+**Design release requirement:** Treat quote permission/warning/live-state control as material. The brief and sanitized evidence cover Off, missing `read_md`, warning/confirmation/cancel, starting/authenticating/reconciling, Live real-time, Live delayed, closed market, stale, reconnect/recovery, rate limit/circuit-open/unsupported, threshold verification waiting/failed/completed, Stop/stopping/Off, permission loss, and restart remaining Off. Complete the rendered evidence, then obtain explicit user release acceptance.
+
 ### Defaults, warning, and evidence boundary
 
 - Level 1 streaming is off by default and never starts automatically when the app, Questrade connection, or monitoring scheduler starts.
@@ -2469,6 +2608,8 @@ The user can explicitly start a Level 1 quote-streaming session for symbols in t
 
 The integration can be recovered, audited, exported, and removed safely, and the complete workflow has final rendered acceptance.
 
+**Design release requirement:** Treat final end-to-end release as major. The brief and sanitized evidence cover the complete normal journey plus connection/key/socket/rate-limit recovery, export preparing/success/failure, disconnect versus delete choices, destructive confirmation, stopping background owners, deletion progress/partial failure/completed, post-deletion/disconnected resting states, desktop, exactly 390px, keyboard/focus, overflow, reduced motion, and clean console. Gate 8 requires the user's direct release acceptance plus confirmation that every earlier material/major stage retains an accepted baseline and explicit user acceptance.
+
 ### Implementation
 
 1. Add a bounded connection/sync/stream history view with secret-free evidence, including socket status transitions and the last successful REST reconciliation—not raw frames or destinations.
@@ -2546,6 +2687,7 @@ The integration is releasable only when:
 - every required deterministic automated group completed rather than merely passing the subset that ran;
 - automated browser evidence either passed or remains explicitly `incomplete` only for the reproduced repository-level transport gap;
 - desktop and mobile rendered acceptance passed;
+- every material/major stage has a complete Design Release Record, accepted sanitized regression baseline, and explicit user acceptance; a source/test/build result never substitutes for the user's visual decision;
 - Main Chat gives QBO and Investments equal first-class entry, and cross-domain evidence/tool isolation passed visibly and in durable run evidence;
 - startup gives Investments the agreed privacy-safe platform representation without turning startup into a broker health probe;
 - known limitations remain visible and accurate.
@@ -2554,48 +2696,51 @@ The integration is releasable only when:
 
 ```mermaid
 flowchart TD
-    G0[Preflight Gate 0 accepted] --> S1[Stage 1 fixture and settings shell]
-    S1 --> G1{User Gate 1}
-    G1 -->|accepted| S2[Stage 2 live connection]
-    G1 -->|rejected| S1
-    S2 --> G2{User Gate 2}
-    G2 -->|accepted| S3A[Stage 3A snapshot engine and reconciliation workbench]
-    G2 -->|rejected| S2
-    S3A --> G3A{User Gate 3A}
-    G3A -->|accepted| S3B[Stage 3B Investments workspace]
-    G3A -->|rejected| S3A
-    S3B --> G3B{User Gate 3B}
-    G3B -->|accepted| S3C[Stage 3C cross-domain Main Chat]
-    G3B -->|rejected| S3B
-    S3C --> G3C{User Gate 3C}
-    G3C -->|accepted| S4A[Stage 4A REST history]
-    G3C -->|rejected| S3C
-    S4A --> G4A{User Gate 4A}
-    G4A -->|accepted| S4B[Stage 4B order and execution notifications]
-    G4A -->|rejected| S4A
-    S4B --> G4B{User Gate 4B}
-    G4B -->|accepted| S5[Stage 5 deterministic risk]
-    G4B -->|rejected| S4B
-    S5 --> G5{User Gate 5}
-    G5 -->|accepted| S6[Stage 6 investment agents]
-    G5 -->|rejected| S5
-    S6 --> G6{User Gate 6}
-    G6 -->|accepted| S7A[Stage 7A scheduled monitoring]
-    G6 -->|rejected| S6
-    S7A --> G7A{User Gate 7A}
-    G7A -->|accepted| S7B[Stage 7B Level 1 quote streaming]
-    G7A -->|rejected| S7A
-    S7B --> G7B{User Gate 7B}
-    G7B -->|accepted| S8[Stage 8 release hardening]
-    G7B -->|rejected| S7B
-    S8 --> G8{User Gate 8}
-    G8 -->|accepted| R[Read-only Investments integration released]
-    G8 -->|rejected| S8
+    subgraph DG[Canonical design-release gate for every material or major stage]
+        PB[Approved Product/UX brief] --> BC[Build plus focused checks]
+        BC --> SE[Complete sanitized rendered evidence]
+        SE --> CR{Direct user release review}
+        CR -->|NO — REJECTED; max two focused rounds| BC
+        CR -->|YES — RELEASE QUALITY| DR[Complete Design Release Record and baseline]
+        DR --> UG{Explicit user gate}
+        UG -->|rejected; invalidate prior acceptance| PB
+    end
+
+    G0[Preflight Gate 0 accepted] --> S1[1 Settings shell and DEV preview]
+    S1 --> D1[Design gate plus User Gate 1]
+    D1 -->|accepted| S2[2 Live connection]
+    S2 --> D2[Design gate plus User Gate 2]
+    D2 -->|accepted| S3A[3A DEV reconciliation workbench]
+    S3A --> D3A[Design gate plus User Gate 3A]
+    D3A -->|accepted| S3B[3B Investments workspace]
+    S3B --> D3B[Design gate plus User Gate 3B]
+    D3B -->|accepted| S3C[3C Main Chat]
+    S3C --> D3C[Design gate plus User Gate 3C]
+    D3C -->|accepted| S4A[4A REST history]
+    S4A --> D4A[Design gate plus User Gate 4A]
+    D4A -->|accepted| S4B[4B Notifications]
+    S4B --> D4B[Design gate plus User Gate 4B]
+    D4B -->|accepted| S5[5 Deterministic risk]
+    S5 --> D5[Design gate plus User Gate 5]
+    D5 -->|accepted| S6[6 Investment agents]
+    S6 --> D6[Design gate plus User Gate 6]
+    D6 -->|accepted| S7A[7A Monitoring]
+    S7A --> D7A[Design gate plus User Gate 7A]
+    D7A -->|accepted| S7B[7B Level 1 quotes]
+    S7B --> D7B[Design gate plus User Gate 7B]
+    D7B -->|accepted| S8[8 Release hardening]
+    S8 --> D8[Design gate plus User Gate 8]
+    D8 -->|accepted| R[Read-only Investments integration released]
+
+    DG -. applies at each D node .-> D1
+    DG -. applies at each D node .-> D8
 ```
+
+Every rejected stage returns to that stage's approved correction boundary; it never skips forward. The compact design-gate subgraph is canonical for all `D*` nodes, so later summaries do not duplicate the full rubric.
 
 ## 25. Planned file map by stage
 
-Every stage keeps new implementation inside the Investments-owned paths from Section 9A, updates `docs/investments/module-contract.md`, and runs the module-boundary group. Shared integration files are listed separately in the stage handoff and changed by the designated integration owner.
+Every stage keeps new implementation inside the Investments-owned paths from Section 9A, updates `docs/investments/module-contract.md`, and runs the module-boundary group. Shared integration files are listed separately in the stage handoff and changed by the designated integration owner. Material/major stages also create or update one compact Product/UX brief, a sanitized rendered-evidence manifest/baseline, and a Design Release Record; those artifacts follow Section 13 and are not duplicated below.
 
 ### Stage 1
 
@@ -2605,19 +2750,22 @@ Every stage keeps new implementation inside the Investments-owned paths from Sec
 - Questrade connection model/serializer
 - provider-adapter contract, Investments-owned fixture adapter, and connected-service harness additions
 - namespaced Questrade status route under `/api/investments/providers/questrade/*`
-- provider-neutral Connected Accounts frame, Questrade provider UI, and Google regression tests
+- provider-neutral Connected Accounts index with focused Google/Questrade details and a dedicated strict-opt-in DEV-only Questrade simulator
 - dependency/import, route-namespace, registration-side-effect, provider-failure, and QBO-isolation boundary tests
 - unchanged existing launcher banner, `INVEST` status lane, local-only optional readiness, focused launcher tests, preview, and startup documentation
 - testing capability/profile updates
+- approved replacement brief, sanitized Gate 1 evidence manifest/baseline, and Design Release Record
 
 ### Stage 2
 
 - live transport and token service
 - sensitive-action intent protection
-- connect/reauthorize/revoke routes and tests
+- connect/account-selection/reauthorize/revoke routes and tests, with the exact account-selection endpoint finalized as a Stage 2 implementation detail
 - random stable account identity plus encryption/masking
+- focused Questrade journey, per-service health projection, single-account automatic selection, explicit multiple-account chooser, conditional repair, permissions, and disconnect/revocation/forget states
 - normal automatic key-management documentation plus optional deployment/recovery environment override documentation
 - local-only launcher connection-state projection with no Questrade startup probe
+- Stage 2 Product/UX brief, sanitized evidence manifest/baseline, and Design Release Record
 
 ### Stage 3A
 
@@ -2702,6 +2850,10 @@ Every stage keeps new implementation inside the Investments-owned paths from Sec
 Implementation stops and asks before any of these changes:
 
 - adding trade placement, impact preview, modification, or cancellation;
+- materially changing the approved Connected Accounts provider-index/focused-details direction or any later approved Product/UX brief;
+- placing development fixture controls, scenario identity, or diagnostics in a normal production surface;
+- releasing or presenting a material/major stage as complete without complete sanitized evidence, a completed Design Release Record, and the user's explicit visual acceptance;
+- continuing after more than two rejected focused correction rounds for one approved direction;
 - demoting Investments beneath QBO on Main Chat, hard-coding QBO as the first-visit domain, or removing the dedicated Investments workspace;
 - enabling investment-agent messages in Main Chat before Stage 6's consent, tool-authority, and exact-evidence checks pass;
 - allowing one Chat conversation, agent run, or tool context to cross the QBO/Investments domain boundary;
@@ -2711,7 +2863,7 @@ Implementation stops and asks before any of these changes:
 - exposing the app beyond loopback;
 - extracting Investments into a separate repository, server process, port, deployment, database, or security identity;
 - weakening the Investments/QBO import, data, conversation, evidence, or agent-tool boundary;
-- adding another human user or Questrade account owner;
+- adding another human user, Questrade account owner, or second Questrade credential/authorization;
 - changing local financial-data retention or deleting history automatically;
 - storing unrestricted raw Questrade HTTP payloads, WebSocket frames, or tick history;
 - allowing a browser to connect directly to Questrade, accepting plaintext `ws:`, or weakening certificate/host/port validation;
@@ -2724,8 +2876,10 @@ Implementation stops and asks before any of these changes:
 
 ## 27. Definition of done
 
-The complete plan is done only when the user can say, from the dev app:
+The complete plan is done only when there are no production dead ends; every user task is reachable in a stable desktop and exactly 390px mobile frame by keyboard with visible focus, non-color meaning, reduced-motion support, and no clipping/overflow; development simulation remains isolated and absent from production; evidence and baselines are sanitized; every material/major stage has a complete Design Release Record; and the user has explicitly accepted every gate after direct visual review.
+
+The user can then say, from the dev app:
 
 > The main Chat page treats QBO escalations and Investments as equally important domains, keeps their conversations and evidence separate, and gives me a concise trustworthy investment context plus a direct path to the full workspace. Investments is a clearly owned module that another coding-agent group can work on without importing or rewriting QBO internals, and Questrade failure does not prevent the rest of my personal app from being ready. I connected the intended read-only Questrade Margin account for this release, without closing off a separately designed future trading project. I entered the token only in the app's Questrade settings, and the app handled protected-key management and encryption without asking me to do it. I can see when the data was retrieved and whether it is real-time. The balances, positions, activity, orders, and executions reconcile with Questrade. Browser and Questrade socket interruptions recover through authoritative REST state instead of hiding gaps. Order/execution notifications are optional and their explicit enabled/disabled choice survives restart; Level 1 streaming is session-scoped, warns about its IQ Platform effect, and never restarts automatically; no streamed tick becomes a risk conclusion by itself. Failed refreshes preserve the prior snapshot. The risk calculations show their formulas and limitations. Any agent analysis names the exact snapshot, respects my privacy choice, cannot trade in this release, and cannot obtain QBO-only tools or evidence. Monitoring is opt-in, its saved policy resumes only on the approved schedule after core readiness, alerts are evidence-backed, exports are secret-safe, and I can revoke or delete local data intentionally. Development preview/check never contacts Questrade; normal startup performs no hidden brokerage-readiness probe and may resume only the background capabilities I explicitly enabled after the core app is ready. Startup never prints my account, holdings, balances, orders, quotes, alerts, or connection destination.
 
-Passing tests without that hands-on acceptance is not completion.
+Passing tests, a successful build, source review, or automated screenshots without the explicit user gate is not completion.

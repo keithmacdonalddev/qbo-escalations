@@ -545,6 +545,8 @@
 
 /* Bring legacy settings sections into the live Slate system. */
 .settings-v2-legacy-panel > .settings-panel,
+.settings-v2-legacy-panel .settings-account-overview-underlay > .settings-panel,
+.settings-v2-legacy-panel [data-development-only='connected-accounts-preview'] > .settings-panel,
 .settings-v2-content > .agent-settings-shell {
   width: 100%;
   max-width: none;
@@ -577,50 +579,101 @@
 }
 
 .settings-v2-layout .settings-accounts-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  align-items: start;
+  display: block;
+  width: min(100%, 680px);
+  overflow: hidden;
+  border: 1px solid var(--settings-border-strong);
+  border-radius: 10px;
+  background: var(--settings-panel);
+}
+.settings-v2-layout .settings-accounts-stage[data-account-view='overview'] {
+  width: min(100%, 680px);
+  max-width: 680px;
+  margin-inline: auto;
 }
 .settings-v2-layout .settings-accounts-card {
   min-width: 0;
   max-width: none;
-  border: 1px solid var(--settings-border-strong) !important;
-  border-radius: 8px !important;
-  background: var(--settings-panel) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
   box-shadow: none !important;
 }
+.settings-v2-layout .settings-accounts-card + .settings-accounts-card { border-top: 1px solid var(--settings-border) !important; }
 .settings-v2-layout .settings-accounts-card:hover {
   transform: none !important;
-  border-color: color-mix(in srgb, var(--settings-accent) 28%, var(--settings-border-strong)) !important;
+  border-color: transparent !important;
+  background: transparent !important;
   box-shadow: none !important;
 }
 .settings-v2-layout .settings-accounts-card-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   min-height: 64px;
-  padding: 11px 13px !important;
-  border-bottom: 1px solid var(--settings-border) !important;
+  padding: 10px 14px !important;
+  gap: 14px;
+  border-bottom: 0 !important;
   background: transparent !important;
 }
-.settings-v2-layout .settings-accounts-body { padding: 12px 13px !important; }
+.settings-v2-layout .settings-accounts-card-header .settings-accounts-provider { align-items: center; }
+.settings-v2-layout .settings-accounts-card-controls { display: flex; align-items: center; gap: 10px; min-width: max-content; }
+.settings-v2-layout .settings-accounts-card-row {
+  transform: none !important;
+  transition: background-color 120ms ease !important;
+}
+.settings-v2-layout .settings-accounts-card-row::after {
+  display: none !important;
+  content: none !important;
+}
+.settings-v2-layout .settings-accounts-card-row:hover {
+  background: color-mix(in srgb, var(--ink) 2.5%, transparent) !important;
+}
+.settings-v2-layout .settings-accounts-card-row:active {
+  transform: none !important;
+  background: color-mix(in srgb, var(--ink) 5%, transparent) !important;
+  box-shadow: none !important;
+  animation: none !important;
+  transition-duration: 60ms !important;
+}
+.settings-v2-layout .settings-accounts-card-row:focus:not(:focus-visible) {
+  outline: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+}
+.settings-v2-layout .settings-accounts-card-row:focus-visible {
+  outline: none !important;
+  border-radius: 0 !important;
+  background: color-mix(in srgb, var(--accent) 4%, transparent) !important;
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 82%, white) !important;
+  animation: none !important;
+}
+.settings-v2-layout .settings-accounts-body { padding: 14px 16px !important; }
 .settings-v2-layout .settings-accounts-provider { padding: 0 !important; }
 .settings-v2-layout .settings-accounts-provider-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 8px;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
   border-color: color-mix(in srgb, var(--settings-border-strong) 78%, transparent);
 }
-.settings-v2-layout .settings-accounts-provider-name { font-size: 0.78rem; line-height: 1.2; }
-.settings-v2-layout .settings-accounts-provider-desc { color: var(--settings-muted); font-size: 0.66rem; line-height: 1.35; }
+.settings-v2-layout .settings-accounts-provider-name { font-size: 0.82rem; font-weight: 730; line-height: 1.2; }
+.settings-v2-layout .settings-accounts-provider-desc { color: var(--ink-secondary); font-size: 0.69rem; font-weight: 520; line-height: 1.35; }
 .settings-v2-layout .settings-accounts-status {
   min-height: 24px;
-  padding: 0 9px;
-  border-radius: 6px;
-  font-size: 0.61rem;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 0.64rem;
+  font-weight: 670;
   line-height: 1;
 }
 .settings-v2-layout .settings-accounts-status--disconnected,
-.settings-v2-layout .settings-accounts-status--loading {
-  color: var(--settings-muted);
+.settings-v2-layout .settings-accounts-status--loading,
+.settings-v2-layout .settings-accounts-status--unavailable {
+  color: var(--ink-secondary);
 }
+.settings-v2-layout .settings-accounts-details { border-color: var(--settings-border); background: color-mix(in srgb, var(--settings-input) 45%, transparent); }
 .settings-v2-layout .settings-accounts-empty-msg {
   max-width: 58ch;
   margin: 0 0 11px;
@@ -714,6 +767,10 @@
   .settings-v2-nav-icon { width: 25px; height: 25px; }
   .settings-v2-sidebar nav small { display: none; }
   .settings-v2-sidebar nav strong { font-size: 0.69rem; }
+  .settings-v2-layout .settings-accounts-card-header { grid-template-columns: minmax(0, 1fr) auto; min-height: 64px; padding: 10px 12px !important; gap: 10px; }
+  .settings-v2-layout .settings-accounts-provider-icon { width: 34px; height: 34px; border-radius: 8px; }
+  .settings-v2-layout .settings-accounts-card-controls { gap: 7px; min-width: max-content; }
+  .settings-v2-layout .settings-accounts-provider-desc { white-space: nowrap; }
   .settings-v2-content { padding: 16px 12px 34px; }
   .settings-v2-heading { display: flex; }
   .settings-v2-heading .btn { margin: 0; }

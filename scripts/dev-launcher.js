@@ -941,10 +941,19 @@ function emitServiceHealth(output, health) {
       );
       mark('attention', 'optional');
     } else if (health.investments.mode === 'simulated') {
-      output.success('✅ Questrade test states ready — simulated Margin account only; live access off', 'invest');
+      output.success('✅ Questrade test states ready — safe Stage 2 connection and recovery states; live access off', 'invest');
       mark('healthy', 'optional');
-    } else if (health.investments.liveAccessEnabled === true) {
-      output.success(`✅ Questrade connection ready — ${health.investments.accountType || 'investment'} account`, 'invest');
+    } else if (health.investments.state === 'revocation-pending') {
+      output.warning('⚠️ Questrade revocation pending — local access is off; finish from Connected Accounts', 'invest');
+      mark('attention', 'optional');
+    } else if (health.investments.state === 'reauthorization-required') {
+      output.warning('⚠️ Questrade authorization needs renewal — reconnect from Connected Accounts', 'invest');
+      mark('attention', 'optional');
+    } else if (health.investments.state === 'locked' || health.investments.credentialState === 'locked') {
+      output.warning('⚠️ Questrade credential is locked for this Windows user — local access is off', 'invest');
+      mark('attention', 'optional');
+    } else if (health.investments.credentialState === 'stored') {
+      output.success(`✅ Questrade authorization stored — ${health.investments.accountType || 'investment'} account; broker check deferred at startup`, 'invest');
       mark('healthy', 'optional');
     } else {
       output.info('ℹ️ Questrade not connected — optional; live access is off', 'invest');
@@ -1303,7 +1312,7 @@ function renderPreview(output, ports = { api: DEFAULT_API_PORT, client: DEFAULT_
   output.success('✅ No stuck requests, AI operations, Workspace sessions, or background tasks', 'jobs');
   output.success('✅ Provider evidence storage is writable and readable (12 ms)', 'data');
   output.success('✅ Connected services: Gmail just now · Calendar 2m ago', 'work');
-  output.success('✅ Questrade test states ready — simulated Margin account only; live access off', 'invest');
+  output.success('✅ Questrade test states ready — safe Stage 2 connection and recovery states; live access off', 'invest');
   output.success('✅ Background systems: monitor healthy · briefing healthy · knowledge review-needed · AI catalog scheduled · agents checked just now', 'jobs');
   output.blank();
   output.always(formatReadySummary({
