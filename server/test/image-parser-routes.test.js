@@ -867,6 +867,20 @@ test('Kimi test config uses GET /v1/models without a completion body', () => {
   );
 });
 
+test('Gemini heartbeat uses authenticated model metadata without generating content', () => {
+  const serviceSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'services', 'image-parser.js'),
+    'utf8'
+  );
+
+  const geminiSection = serviceSource.match(/gemini:\s*\{[\s\S]*?buildHeaders:[\s\S]*?\n\s*\},/);
+  assert.ok(geminiSection, 'Gemini section exists in REMOTE_PROVIDER_TEST_CONFIGS');
+  assert.ok(geminiSection[0].includes("path: '/v1beta/models/gemini-3.6-flash'"));
+  assert.ok(geminiSection[0].includes("method: 'GET'"));
+  assert.ok(geminiSection[0].includes('buildBody: () => null'));
+  assert.ok(!geminiSection[0].includes(':generateContent'));
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 // POST /parse — timeout override via setResponseTimeout
 // ═══════════════════════════════════════════════════════════════════════════

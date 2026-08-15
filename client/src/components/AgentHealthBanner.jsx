@@ -1,197 +1,327 @@
-// AgentHealthBanner
-//
-// A second status strip that lives at the very top of the app, immediately
-// below the existing HealthBanner. Where HealthBanner reads HTTP request
-// failures, this banner reads the AgentRegistry — it announces when one or
-// more AI agents are unreachable and stays mounted until every agent has
-// come back to "online" (or been disabled).
-//
-// Why this exists:
-//   The agent profile is the single source of truth for which AI provider
-//   each role talks to. If a provider goes down mid-session (the local AI
-//   server gets bounced, an API key expires, a network rule blocks the
-//   call), the operator needs LOUD, persistent feedback — not a quiet dot
-//   change buried in a sidebar. The user's "reliability is paramount"
-//   memory rule plus their choice of the "loudest" mid-session offline UX
-//   (red dot + toast + persistent banner) drove the three-pronged design:
-//     1) Persistent banner (this file) for as long as anyone is offline.
-//     2) One-shot toast (via HealthToast) on each online → offline edge.
-//     3) Recovery toast on each offline → online edge so operators get
-//        positive confirmation that their fix worked.
-//
-// Acceptance criteria honored:
-//   AC#9   On online → offline transition: HealthToast fires once AND
-//          this banner appears. The banner stays until ALL agents recover.
-//   AC#10  Banner carries the per-agent diagnostic string from the health
-//          service — never the bare word "offline".
-//   (AC#12 — the 15s recovery polling — lives in AgentRegistryContext.jsx,
-//    not here. The banner only reads state; it does not drive polling.)
-
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useAgentRegistry } from '../context/AgentRegistryContext.jsx';
 import { showHealthToast } from './HealthToast.jsx';
-import { buildDotTooltip } from '../lib/agentStatus.js';
 import './AgentHealthBanner.css';
 
-// Plain-English fallback for a bare-offline agent so the banner is never
-// content-less. Per AC#10, every line must convey *something* specific.
-const FALLBACK_DIAGNOSTIC = 'no diagnostic available';
+const SETTINGS_CODES = new Set([
+  'NO_PROVIDER',
+  'NO_KEY',
+  'INVALID_KEY',
+  'MODEL_NOT_FOUND',
+  'INVALID_REQUEST',
+  'AI_PROVIDER_DISABLED',
+  'AI_MODEL_DISABLED',
+  'AI_MODEL_NOT_APPROVED',
+  'CLI_UNAVAILABLE',
+]);
 
-function pickDisplayName(entry, agentId) {
-  // The registry's `profile` slot holds the full agent record. The actual
-  // display name lives at `profile.profile.displayName`. We fall back
-  // through a few sensible alternatives so a misshapen record never renders
-  // a blank banner line.
-  return (
-    entry?.profile?.profile?.displayName
+const TRANSIENT_CODES = new Set([
+  'TIMEOUT',
+  'OUTER_TIMEOUT',
+  'NETWORK_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'PROVIDER_VALIDATION_THREW',
+  'RATE_LIMITED',
+  'CLIENT_HEALTH_REQUEST_FAILED',
+  'AGENT_HEALTH_REFRESH_TIMEOUT',
+]);
+
+function displayName(entry, agentId) {
+  return entry?.profile?.profile?.displayName
     || entry?.profile?.displayName
-    || entry?.profile?.agentId
+    || entry?.health?.label
     || agentId
-    || 'Agent'
-  );
+    || 'Agent';
+}
+
+function formatCheckedAt(value) {
+  if (!value) return 'Not recorded';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'Not recorded';
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function guidanceFor(row) {
+  const code = String(row.code || '').toUpperCase();
+  if (code === 'NO_PROVIDER' || code === 'NO_KEY') return 'Choose and configure an image provider in AI Management.';
+  if (code === 'INVALID_KEY') return 'Review or replace the saved provider key. Repeated retries will not repair a rejected key.';
+  if (code === 'RATE_LIMITED') return 'Wait for the provider limit to reset, review usage, or select an approved fallback.';
+  if (code === 'MODEL_NOT_FOUND') return 'Select a currently supported model in AI Management.';
+  if (code === 'INVALID_REQUEST') return 'The selected provider and model need a compatibility update before retrying.';
+  if (code.startsWith('AI_')) return 'Open AI Management to review the provider or model permission.';
+  if (code === 'CLI_UNAVAILABLE') return 'Open the agent profile to review the required command-line provider.';
+  if (code === 'NETWORK_ERROR') return 'Check the local internet, DNS, proxy, or firewall path, then retry.';
+  if (code === 'TIMEOUT' || code === 'OUTER_TIMEOUT' || code === 'AGENT_HEALTH_REFRESH_TIMEOUT') {
+    if (row.status === 'offline') {
+      return 'Repeated checks exceeded their response window. The provider is currently unavailable; retry or check its status.';
+    }
+    return 'The check exceeded its response window. The app will retry automatically; one timeout does not prove an outage.';
+  }
+  if (code === 'PROVIDER_UNAVAILABLE' || code === 'PROVIDER_VALIDATION_THREW') {
+    return 'The provider may be temporarily unavailable. Retry or check the provider status page.';
+  }
+  if (code === 'CLIENT_HEALTH_REQUEST_FAILED') return 'The app could not complete the health request. It will retry automatically.';
+  return row.diagnostic || 'Retry the health check or review the provider settings.';
+}
+
+function summarize(rows) {
+  const one = rows.length === 1 ? rows[0] : null;
+  const hasOffline = rows.some((row) => row.status === 'offline');
+  const imageParserAffected = rows.some((row) => row.agentId === 'escalation-template-parser');
+  const hasRateLimit = rows.some((row) => String(row.code || '').toUpperCase() === 'RATE_LIMITED');
+  const requiresSettings = hasRateLimit
+    || rows.some((row) => SETTINGS_CODES.has(String(row.code || '').toUpperCase()));
+
+  const headline = one
+    ? String(one.code || '').toUpperCase() === 'RATE_LIMITED'
+      ? `${one.displayName} reached its provider limit`
+      : one.status === 'degraded'
+      ? `${one.displayName} is responding slowly`
+      : `${one.displayName} is unavailable`
+    : `${rows.length} agents need attention`;
+
+  if (hasRateLimit) {
+    return {
+      headline,
+      summary: imageParserAffected
+        ? 'New screenshots may be paused until the limit resets or an approved fallback is selected.'
+        : 'One or more agents may be paused until the provider limit resets or a fallback is selected.',
+      primaryLabel: 'Review usage',
+      requiresSettings,
+      hasOffline,
+    };
+  }
+
+  if (requiresSettings) {
+    return {
+      headline,
+      summary: imageParserAffected
+        ? 'Image parsing needs a settings change before new screenshots can be processed.'
+        : 'One or more agents need a settings change before they can recover.',
+      primaryLabel: 'Open settings',
+      requiresSettings,
+      hasOffline,
+    };
+  }
+
+  return {
+    headline,
+    summary: hasOffline
+      ? imageParserAffected
+        ? 'Repeated checks failed. New screenshots may not be parsed until the connection recovers.'
+        : 'Repeated checks failed. The affected agents may be unavailable until the connection recovers.'
+      : imageParserAffected
+        ? 'The latest provider check did not finish. New screenshots may still work while the app retries automatically.'
+        : 'The latest provider check did not finish. Availability is not yet confirmed; retrying automatically.',
+    primaryLabel: 'Retry now',
+    requiresSettings,
+    hasOffline,
+  };
 }
 
 export default function AgentHealthBanner() {
   const registry = useAgentRegistry();
   const agents = registry?.agents || {};
+  const detailsId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [dismissedSignature, setDismissedSignature] = useState('');
+  const [retrying, setRetrying] = useState(false);
+  const [retryFeedback, setRetryFeedback] = useState('');
+  const previousStatusesRef = useRef({});
+  const detailsButtonRef = useRef(null);
 
-  // Snapshot of the previous render's per-agent status. We keep it in a ref
-  // so the transition-detection effect can compare current vs. previous
-  // without putting `agents` into a state setter and triggering a loop.
-  // First-render value is the empty object — the effect below treats any
-  // status with no prior entry as "no transition," so a first-load offline
-  // agent does NOT fire a toast (the boot overlay owns first-load surface).
-  const prevStatusRef = useRef({});
-
-  // Derive the list of currently-offline agents (sorted by display name so
-  // the banner doesn't reshuffle on each tick). Each row carries its own
-  // checkedAt so per-row tooltips can report freshness alongside the
-  // diagnostic (AC#13).
-  const offlineAgents = useMemo(() => {
-    const rows = [];
-    for (const agentId of Object.keys(agents)) {
+  const affected = useMemo(() => Object.keys(agents)
+    .map((agentId) => {
       const entry = agents[agentId];
-      if (entry?.health?.status === 'offline') {
-        rows.push({
-          agentId,
-          displayName: pickDisplayName(entry, agentId),
-          diagnostic:
-            (entry?.health?.diagnostic && String(entry.health.diagnostic).trim())
-            || FALLBACK_DIAGNOSTIC,
-          checkedAt: entry?.health?.checkedAt || null,
-        });
-      }
-    }
-    rows.sort((a, b) => a.displayName.localeCompare(b.displayName));
-    return rows;
-  }, [agents]);
+      const health = entry?.health || {};
+      if (!['degraded', 'offline'].includes(health.status)) return null;
+      return {
+        agentId,
+        displayName: displayName(entry, agentId),
+        status: health.status,
+        code: health.code || '',
+        diagnostic: String(health.diagnostic || health.message || 'Health check incomplete').trim(),
+        provider: health.provider || '',
+        providerLabel: health.providerLabel || health.provider || 'Provider',
+        model: health.model || '',
+        checkedAt: health.checkedAt || null,
+        lastSuccessAt: health.lastSuccessAt || null,
+        consecutiveFailures: Number(health.consecutiveFailures) || 0,
+        confirmationThreshold: Number(health.confirmationThreshold) || 1,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'offline' ? -1 : 1;
+      return a.displayName.localeCompare(b.displayName);
+    }), [agents]);
 
-  // Tooltip for the banner-level dot. Uses the most-recently-checked offline
-  // agent's checkedAt so the user sees how fresh the worst signal is. We
-  // already know the status is 'offline' here (the banner only renders when
-  // offlineAgents.length > 0) so buildDotTooltip will produce
-  // "Offline · last checked Ns ago".
-  const bannerDotTooltip = useMemo(() => {
-    let latest = null;
-    for (const row of offlineAgents) {
-      const t = row.checkedAt ? new Date(row.checkedAt).getTime() : 0;
-      if (!latest || t > latest.ms) latest = { ms: t, iso: row.checkedAt };
-    }
-    return buildDotTooltip('offline', latest?.iso || null);
-  }, [offlineAgents]);
+  const signature = affected
+    .map((row) => `${row.agentId}:${row.status}:${row.code}`)
+    .join('|');
+  const presentation = useMemo(() => summarize(affected), [affected]);
+  const collapsed = Boolean(signature && dismissedSignature === signature);
 
-  // Transition detection: compare current statuses against the previous
-  // snapshot and fire one HealthToast per online↔offline edge.
-  //   online → offline ............. "Agent offline: <name> · <diagnostic>"
-  //   offline → online ............. "Agent recovered: <name>"
-  // We deliberately do NOT toast on:
-  //   unknown → offline ............ first-load discovery; boot overlay owns it.
-  //   anything → disabled .......... an intentional state, not a failure.
-  //   anything → unknown ........... transient between polls; not actionable.
-  // HealthToast's own 10-second per-message debounce handles flapping —
-  // we do not add a second layer of debouncing here.
   useEffect(() => {
-    const prev = prevStatusRef.current || {};
-    const nextSnapshot = {};
+    if (!signature) {
+      setDismissedSignature('');
+      setDetailsOpen(false);
+      setRetryFeedback('');
+      return;
+    }
+    setDetailsOpen(false);
+    setRetryFeedback('');
+  }, [signature]);
 
+  useEffect(() => {
+    if (!detailsOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      setDetailsOpen(false);
+      detailsButtonRef.current?.focus();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [detailsOpen]);
+
+  useEffect(() => {
+    const previous = previousStatusesRef.current;
+    const next = {};
     for (const agentId of Object.keys(agents)) {
       const entry = agents[agentId];
-      const currStatus = entry?.health?.status || 'unknown';
-      nextSnapshot[agentId] = currStatus;
-
-      const prevStatus = prev[agentId];
-      if (prevStatus === undefined) continue; // first observation — skip
-
-      if (prevStatus === 'online' && currStatus === 'offline') {
-        const name = pickDisplayName(entry, agentId);
-        const diagnostic =
-          (entry?.health?.diagnostic && String(entry.health.diagnostic).trim())
-          || FALLBACK_DIAGNOSTIC;
-        showHealthToast({
-          message: `Agent offline: ${name} · ${diagnostic}`,
-        });
-        continue;
-      }
-
-      if (prevStatus === 'offline' && currStatus === 'online') {
-        const name = pickDisplayName(entry, agentId);
-        showHealthToast({
-          message: `Agent recovered: ${name}`,
-        });
+      const current = entry?.health?.status || 'unknown';
+      next[agentId] = current;
+      const prior = previous[agentId];
+      if (prior === undefined) continue;
+      const name = displayName(entry, agentId);
+      if (current === 'offline' && prior !== 'offline') {
+        showHealthToast({ message: `${name} is unavailable` });
+      } else if (current === 'online' && ['offline', 'degraded'].includes(prior)) {
+        showHealthToast({ message: `${name} recovered`, tone: 'success' });
       }
     }
-
-    // Carry forward statuses for any agents that disappeared from the
-    // registry this render (rare, but defensive — we don't want a removed
-    // and re-added agent to spuriously re-fire a toast).
-    for (const agentId of Object.keys(prev)) {
-      if (!(agentId in nextSnapshot)) nextSnapshot[agentId] = prev[agentId];
-    }
-
-    prevStatusRef.current = nextSnapshot;
+    previousStatusesRef.current = next;
   }, [agents]);
 
-  if (offlineAgents.length === 0) return null;
+  if (affected.length === 0) return null;
 
-  // Banner content. For a single offline agent we keep the line tight on a
-  // single row. For two or more we list each on its own row (the existing
-  // HealthBanner pattern stays on one row by design; here we deliberately
-  // surface every offline agent so the operator can see which providers
-  // need attention without having to expand anything).
-  const headline =
-    offlineAgents.length === 1
-      ? `${offlineAgents[0].displayName} offline: ${offlineAgents[0].diagnostic}`
-      : `${offlineAgents.length} agents offline`;
+  const handleRetry = async () => {
+    if (retrying) return;
+    setRetrying(true);
+    setRetryFeedback('Checking now…');
+    try {
+      await registry?.refreshAll?.();
+      setRetryFeedback('Check completed. The latest result is shown above.');
+    } catch {
+      setRetryFeedback('The check could not be completed. Automatic retries will continue.');
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const openSettings = () => {
+    window.location.hash = '#/settings';
+  };
+
+  if (collapsed) {
+    return (
+      <div className="agent-health-banner-collapsed" data-status={presentation.hasOffline ? 'offline' : 'degraded'}>
+        <button
+          type="button"
+          className="agent-health-banner-restore"
+          onClick={() => setDismissedSignature('')}
+          aria-label={`Show warning: ${presentation.headline}`}
+        >
+          <span className="agent-health-banner-dot" aria-hidden="true" />
+          <span>{presentation.headline}</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="m9 18 6-6-6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
 
   return (
-    <div
+    <section
       className="agent-health-banner"
-      role="status"
-      aria-live="polite"
+      data-status={presentation.hasOffline ? 'offline' : 'degraded'}
+      aria-labelledby={`${detailsId}-heading`}
     >
-      <span
-        className="agent-health-banner-dot status-dot-degraded"
-        aria-hidden="true"
-        title={bannerDotTooltip}
-      />
-      <div className="agent-health-banner-content">
-        <span className="agent-health-banner-headline">{headline}</span>
-        {offlineAgents.length > 1 && (
-          <ul className="agent-health-banner-list">
-            {offlineAgents.map((row) => (
-              <li
-                key={row.agentId}
-                className="agent-health-banner-row"
-                title={buildDotTooltip('offline', row.checkedAt)}
-              >
-                <span className="agent-health-banner-name">{row.displayName}</span>
-                <span className="agent-health-banner-sep">·</span>
-                <span className="agent-health-banner-diag">{row.diagnostic}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="agent-health-banner-live sr-only" role="status" aria-live="polite">
+        {presentation.headline}. {presentation.summary}
       </div>
-    </div>
+
+      <span className="agent-health-banner-dot" aria-hidden="true" />
+      <div className="agent-health-banner-main">
+        <div className="agent-health-banner-copy">
+          <h2 id={`${detailsId}-heading`}>{presentation.headline}</h2>
+          <p>{presentation.summary}</p>
+          {retryFeedback && <p className="agent-health-banner-feedback" role="status">{retryFeedback}</p>}
+        </div>
+
+        <div className="agent-health-banner-actions">
+          {presentation.requiresSettings ? (
+            <button type="button" className="agent-health-banner-primary" onClick={openSettings}>
+              {presentation.primaryLabel}
+            </button>
+          ) : (
+            <button type="button" className="agent-health-banner-primary" onClick={handleRetry} disabled={retrying}>
+              {retrying ? 'Checking…' : 'Retry now'}
+            </button>
+          )}
+          <button
+            type="button"
+            className="agent-health-banner-secondary"
+            ref={detailsButtonRef}
+            aria-expanded={detailsOpen}
+            aria-controls={detailsId}
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            {detailsOpen ? 'Hide details' : 'Details'}
+          </button>
+          <button
+            type="button"
+            className="agent-health-banner-dismiss"
+            onClick={() => setDismissedSignature(signature)}
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+
+      {detailsOpen && (
+        <div className="agent-health-banner-details" id={detailsId} tabIndex="-1">
+          {affected.map((row) => (
+            <article className="agent-health-banner-detail" key={row.agentId}>
+              <div className="agent-health-banner-detail-head">
+                <strong>{row.displayName}</strong>
+                <span>{row.status === 'degraded' ? 'Availability uncertain' : 'Unavailable'}</span>
+              </div>
+              <p>{row.diagnostic}</p>
+              <dl>
+                <div><dt>Provider</dt><dd>{row.providerLabel}{row.model ? ` · ${row.model}` : ''}</dd></div>
+                <div><dt>Last check</dt><dd>{formatCheckedAt(row.checkedAt)}</dd></div>
+                <div><dt>Last success</dt><dd>{formatCheckedAt(row.lastSuccessAt)}</dd></div>
+                {TRANSIENT_CODES.has(String(row.code).toUpperCase()) && (
+                  <div><dt>Confirmation</dt><dd>{row.consecutiveFailures} of {row.confirmationThreshold} failed checks</dd></div>
+                )}
+              </dl>
+              <p className="agent-health-banner-guidance">{guidanceFor(row)}</p>
+              {row.provider === 'gemini' && TRANSIENT_CODES.has(String(row.code).toUpperCase()) && (
+                <a href="https://aistudio.google.com/status" target="_blank" rel="noreferrer">
+                  Check Google status
+                </a>
+              )}
+            </article>
+          ))}
+          {!presentation.requiresSettings && (
+            <button type="button" className="agent-health-banner-settings-link" onClick={openSettings}>
+              Open AI Management
+            </button>
+          )}
+        </div>
+      )}
+    </section>
   );
 }

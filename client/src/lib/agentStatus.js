@@ -1,7 +1,7 @@
 // agentStatus.js
 //
 // Shared utilities for translating the agent registry's `health.status` token
-// (online / offline / disabled / unknown) into the legacy "operational" token
+// (online / degraded / offline / disabled / unknown) into the legacy "operational" token
 // (active / degraded / disabled / idle) that drives the existing CSS classes
 // declared in `components/AgentsView.css` (imported globally in main.jsx).
 //
@@ -14,6 +14,7 @@
 //
 // Mapping rationale:
 //   online   → active   (green dot, the only "all good" state)
+//   degraded → degraded (orange dot, availability is not yet confirmed)
 //   offline  → degraded (orange dot, matches the existing "broken/attention"
 //                        CSS class — this CSS palette has no red; orange is
 //                        the strongest attention color present)
@@ -22,6 +23,7 @@
 
 const HEALTH_TO_OPERATIONAL = Object.freeze({
   online: 'active',
+  degraded: 'degraded',
   offline: 'degraded',
   disabled: 'disabled',
   unknown: 'idle',
@@ -47,6 +49,7 @@ export function healthStatusToOperationalToken(healthStatus) {
  */
 export const HEALTH_STATUS_LABELS = Object.freeze({
   online: 'Online',
+  degraded: 'Availability uncertain',
   offline: 'Offline',
   disabled: 'Disabled',
   unknown: 'Checking...',

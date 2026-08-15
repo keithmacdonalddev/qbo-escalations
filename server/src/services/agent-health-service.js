@@ -38,6 +38,15 @@ const AGENT_HEALTH_REFRESH_CEILING_MS = 5_000;
 // the /api/agent-identities/health response past the slow-request threshold.
 const DEFAULT_READINESS_TIMEOUT_MS = 8_000;
 const PROVIDER_HEALTH_LEVELS = new Set(['heartbeat', 'readiness', 'canary']);
+const TRANSIENT_PROVIDER_CODES = new Set([
+  'TIMEOUT',
+  'OUTER_TIMEOUT',
+  'NETWORK_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'PROVIDER_VALIDATION_THREW',
+  'RATE_LIMITED',
+]);
+const TRANSIENT_FAILURE_CONFIRMATION_THRESHOLD = 2;
 const IMAGE_AGENT_IDS = new Set([
   'escalation-template-parser',
   'follow-up-chat-parser',
@@ -261,9 +270,26 @@ function sharpenProviderDiagnostic({
       : `${label} API key rejected`;
   }
   if (normalizedCode === 'TIMEOUT') {
+    return `${label} health check did not respond before the timeout`;
+  }
+  if (normalizedCode === 'OUTER_TIMEOUT') {
+    return `${label} health check did not finish in time`;
+  }
+  if (normalizedCode === 'NETWORK_ERROR') {
     return host
-      ? `${label} timed out connecting to ${host}`
-      : `${label} timed out`;
+      ? `${label} could not be reached at ${host}`
+      : `${label} could not be reached`;
+  }
+  if (normalizedCode === 'RATE_LIMITED') {
+    return `${label} usage limit reached`;
+  }
+  if (normalizedCode === 'MODEL_NOT_FOUND') {
+    return model
+      ? `${label} model ${model} is unavailable`
+      : `${label} model is unavailable`;
+  }
+  if (normalizedCode === 'INVALID_REQUEST') {
+    return `${label} rejected the health-check request`;
   }
   if (normalizedCode === 'PROVIDER_UNAVAILABLE') {
     return upstream && !isVagueReason(upstream)
@@ -398,6 +424,9 @@ async function checkRuntimeProvider(runtime, availabilityByProvider, trace = nul
     model: sharedModel,
     available: sharedAvailable,
     code: sharedCode,
+    statusCode: Number(status?.statusCode) || 0,
+    nodeErrorCode: safeText(status?.nodeErrorCode),
+    detail: safeText(status?.detail),
     reason: sharedAvailable
       ? sharedReason
       : sharpenProviderDiagnostic({
@@ -867,6 +896,25 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
 
   const providerStatus = await checkRuntimeProvider(runtime, availabilityByProvider, trace);
   const online = Boolean(providerStatus.available);
+  const previous = healthByAgentId.get(agentId) || null;
+  const transientFailure = !online
+    && TRANSIENT_PROVIDER_CODES.has(safeText(providerStatus.code).toUpperCase());
+  const previousTransientFailures = previous?.provider === providerStatus.provider
+    && TRANSIENT_PROVIDER_CODES.has(safeText(previous?.code).toUpperCase())
+    ? Number(previous?.consecutiveFailures) || 0
+    : 0;
+  const consecutiveFailures = online
+    ? 0
+    : transientFailure
+      ? previousTransientFailures + 1
+      : 1;
+  const healthStatus = online
+    ? 'online'
+    : transientFailure && consecutiveFailures < TRANSIENT_FAILURE_CONFIRMATION_THRESHOLD
+      ? 'degraded'
+      : 'offline';
+  const lastSuccessAt = online ? checkedAt : previous?.lastSuccessAt || null;
+  const lastFailureAt = online ? previous?.lastFailureAt || null : checkedAt;
   emitTrace(trace, {
     name: 'Build active provider health entry',
     functionName: 'buildAgentHealth',
@@ -874,12 +922,16 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
     status: online ? 'success' : 'warning',
     summary: online
       ? `${agentId} provider health is online.`
-      : `${agentId} provider health is offline.`,
+      : healthStatus === 'degraded'
+        ? `${agentId} provider health is uncertain after one transient failure.`
+        : `${agentId} provider health is offline.`,
     metadata: {
       agentId,
       provider: providerStatus.provider,
       code: providerStatus.code || '',
       available: online,
+      healthStatus,
+      consecutiveFailures,
     },
   });
   return {
@@ -887,8 +939,8 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
     label: profile.displayName || profile.roleTitle || agentId,
     enabled: true,
     active: online,
-    status: online ? 'online' : 'offline',
-    tone: online ? 'active' : 'offline',
+    status: healthStatus,
+    tone: online ? 'active' : healthStatus === 'degraded' ? 'degraded' : 'offline',
     provider: providerStatus.provider,
     providerLabel: providerStatus.providerLabel,
     model: providerStatus.model,
@@ -896,7 +948,15 @@ async function buildAgentHealth(agentId, runtimeDefaults, availabilityByProvider
     diagnostic: providerStatus.reason || '',
     message: online
       ? `${profile.displayName || agentId} is active on ${formatProviderSummary(providerStatus)}.`
-      : formatAvailabilityMessage(providerStatus, 'Agent provider'),
+      : healthStatus === 'degraded'
+        ? `The latest ${providerStatus.providerLabel || 'provider'} health check did not complete. Availability is not yet confirmed, and the app will retry automatically.`
+        : formatAvailabilityMessage(providerStatus, 'Agent provider'),
+    consecutiveFailures,
+    confirmationThreshold: transientFailure ? TRANSIENT_FAILURE_CONFIRMATION_THRESHOLD : 1,
+    lastSuccessAt,
+    lastFailureAt,
+    statusCode: providerStatus.statusCode || 0,
+    nodeErrorCode: providerStatus.nodeErrorCode || '',
     checkedAt,
   };
 }
@@ -1185,6 +1245,7 @@ function getAgentHealthMonitorStatus() {
     lastCheckedAt,
     checkedAgents: agents.length,
     onlineAgents: agents.filter((agent) => agent?.status === 'online' || agent?.active === true).length,
+    degradedAgents: agents.filter((agent) => agent?.status === 'degraded').length,
     offlineAgents: agents.filter((agent) => agent?.status === 'offline').length,
   };
 }

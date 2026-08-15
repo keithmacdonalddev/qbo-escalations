@@ -350,15 +350,17 @@ const REMOTE_PROVIDER_TEST_CONFIGS = {
   },
   gemini: {
     hostname: 'generativelanguage.googleapis.com',
-    path: '/v1beta/models/gemini-3.6-flash:generateContent',
+    // Health checks only need to prove that the saved key can reach the
+    // selected model. Using models.get keeps the once-per-minute heartbeat
+    // fast and non-generative; actual image parsing remains the readiness
+    // proof that generateContent works end to end.
+    path: '/v1beta/models/gemini-3.6-flash',
+    method: 'GET',
     model: 'gemini-3.6-flash',
-    buildBody: () => JSON.stringify({
-      contents: [{ parts: [{ text: 'hi' }] }],
-      generationConfig: { maxOutputTokens: 1, responseMimeType: 'text/plain' },
-    }),
+    buildBody: () => null,
     buildHeaders: (key) => ({
       'x-goog-api-key': key,
-      'Content-Type': 'application/json',
+      'Accept': 'application/json',
     }),
   },
 };
@@ -909,18 +911,31 @@ async function validateRemoteProvider(provider, apiKey) {
     }
 
     const isAuthError = result.statusCode === 401 || result.statusCode === 403;
+    const isRateLimited = result.statusCode === 429;
+    const isTimeoutResponse = result.statusCode === 408 || result.statusCode === 504;
+    const isProviderUnavailable = result.statusCode >= 500;
+    const isModelMissing = result.statusCode === 404;
+    const isInvalidRequest = result.statusCode === 400;
     const fallback = isAuthError
       ? 'Invalid API key'
       : `Provider returned HTTP ${result.statusCode}`;
     const detail = extractProviderErrorMessage(result.body, fallback);
+    let code = 'PROVIDER_TEST_FAILED';
+    if (isAuthError) code = 'INVALID_KEY';
+    else if (isRateLimited) code = 'RATE_LIMITED';
+    else if (isTimeoutResponse) code = 'TIMEOUT';
+    else if (isProviderUnavailable) code = 'PROVIDER_UNAVAILABLE';
+    else if (isModelMissing) code = 'MODEL_NOT_FOUND';
+    else if (isInvalidRequest) code = 'INVALID_REQUEST';
     return {
       ok: false,
       configured: true,
       available: false,
-      code: isAuthError ? 'INVALID_KEY' : 'PROVIDER_TEST_FAILED',
+      code,
       reason: isAuthError ? 'API key rejected' : detail,
       detail,
       model: null,
+      statusCode: result.statusCode || 0,
     };
     } catch (err) {
       if (err.code === 'TIMEOUT') {
@@ -941,10 +956,11 @@ async function validateRemoteProvider(provider, apiKey) {
       ok: false,
       configured: true,
       available: false,
-      code: 'PROVIDER_TEST_FAILED',
+      code: 'NETWORK_ERROR',
       reason: err.message || 'Connection failed',
       detail: '',
       model: null,
+      nodeErrorCode: err.code || '',
     };
   }
 }

@@ -1442,10 +1442,9 @@ test('validateRemoteProvider captures Gemini provider-status package', async () 
   process.env.ENABLE_PROVIDER_CALL_PACKAGE_CAPTURE = 'true';
 
   const httpsMock = mockHttpsRequest(200, {
-    responseId: 'gemini-status-response-id',
-    modelVersion: 'gemini-3-flash-preview',
-    candidates: [{ content: { parts: [{ text: 'OK' }] }, finishReason: 'STOP' }],
-    usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
+    name: 'models/gemini-3.6-flash',
+    displayName: 'Gemini 3.6 Flash',
+    supportedGenerationMethods: ['generateContent'],
   });
 
   try {
@@ -1460,9 +1459,9 @@ test('validateRemoteProvider captures Gemini provider-status package', async () 
     assert.ok(saved);
     assert.equal(saved.providerId, 'gemini');
     assert.equal(saved.operation, 'provider-status');
-    assert.equal(saved.geminiApi.request.method, 'POST');
+    assert.equal(saved.geminiApi.request.method, 'GET');
+    assert.equal(saved.geminiApi.request.urlPath, '/v1beta/models/gemini-3.6-flash');
     assert.equal(saved.geminiApi.request.headers['x-goog-api-key'], '[REDACTED]');
-    assert.equal(saved.geminiApi.response.responseId, 'gemini-status-response-id');
     assert.equal(saved.geminiApi.providerStatus.ok, true);
     assert.equal(saved.geminiApi.providerStatus.authenticated, true);
     assert.equal(saved.geminiApi.providerStatus.model, 'gemini-3.6-flash');

@@ -1,105 +1,370 @@
-/* ==========================================================
-   AGENT HEALTH BANNER — persistent strip when any agent is offline
-   ==========================================================
-   Stacks directly under the existing HealthBanner (which is
-   position: fixed; top: 0; height: 34px). We pin at top: 34px so
-   the two banners read as siblings without overlapping.
-
-   Color note: this codebase has no "red" CSS palette entry — orange
-   is the strongest attention color we have (already used for the
-   .status-dot-degraded dot you see on offline agents in the dock).
-   We tint the banner with the same orange so the banner color and
-   the offending dot color agree.
-*/
-
-.agent-health-banner {
+.agent-health-banner,
+.agent-health-banner-collapsed {
   position: fixed;
-  top: 34px; /* directly under the HealthBanner strip */
-  left: 0;
-  right: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 10px;
-  min-height: 34px;
-  padding: 8px 16px;
-  font-size: 13px;
+  top: 44px;
+  left: 50%;
+  z-index: 10020;
+  box-sizing: border-box;
   font-family: var(--font-sans);
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  z-index: 10000; /* above HealthBanner (9999) — agent-down is more urgent than HTTP-slow */
-  background: #f5a623;
-  color: #1a1a1a;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.25);
-  animation: agent-health-banner-slide-in 200ms ease-out;
-  pointer-events: auto;
+  transform: translateX(-50%);
 }
 
-@keyframes agent-health-banner-slide-in {
-  from { transform: translateY(-100%); opacity: 0; }
-  to   { transform: translateY(0); opacity: 1; }
+.agent-health-banner {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 10px;
+  width: min(680px, calc(100vw - 32px));
+  padding: 11px 12px;
+  color: var(--ink);
+  background: var(--bg-floating);
+  border: 1px solid color-mix(in srgb, var(--warning) 48%, var(--line));
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .42);
+  animation: agent-health-banner-arrive 180ms cubic-bezier(.32, .72, 0, 1);
+}
+
+.agent-health-banner[data-status='offline'] {
+  border-color: color-mix(in srgb, var(--danger) 50%, var(--line));
+}
+
+@keyframes agent-health-banner-arrive {
+  from { opacity: 0; transform: translate(-50%, -5px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 .agent-health-banner-dot {
-  /* status-dot-degraded supplies the orange fill + glow; we only set the
-     box dimensions here so the dot matches the dock dot exactly. */
   width: 8px;
   height: 8px;
+  margin-top: 5px;
+  flex: 0 0 auto;
   border-radius: 50%;
-  flex-shrink: 0;
-  margin-top: 6px;
+  background: var(--warning);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 14%, transparent);
 }
 
-.agent-health-banner-content {
+[data-status='offline'] > .agent-health-banner-dot,
+[data-status='offline'] .agent-health-banner-restore > .agent-health-banner-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.agent-health-banner-main {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
   min-width: 0;
-  max-width: min(80vw, 920px);
 }
 
-.agent-health-banner-headline {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: center;
-  line-height: 1.4;
+.agent-health-banner-copy {
+  min-width: 0;
 }
 
-.agent-health-banner-list {
-  list-style: none;
-  padding: 0;
+.agent-health-banner-copy h2 {
   margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 680;
+  line-height: 1.35;
+  letter-spacing: -.005em;
 }
 
-.agent-health-banner-row {
+.agent-health-banner-copy p {
+  margin: 3px 0 0;
+  color: var(--ink-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.42;
+}
+
+.agent-health-banner-actions {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
-  font-size: 12px;
+  flex: 0 0 auto;
+}
+
+.agent-health-banner-actions button,
+.agent-health-banner-settings-link,
+.agent-health-banner-restore {
+  min-height: 0 !important;
+  margin: 0;
+  font-family: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  transform: none !important;
+  overflow: visible !important;
+}
+
+.agent-health-banner-actions button::after,
+.agent-health-banner-settings-link::after,
+.agent-health-banner-restore::after {
+  content: none !important;
+}
+
+.agent-health-banner-primary,
+.agent-health-banner-secondary {
+  height: 27px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.agent-health-banner-primary {
+  color: #fff;
+  background: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 76%, #fff);
+}
+
+.agent-health-banner-primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.agent-health-banner-primary:disabled {
+  opacity: .58;
+  cursor: wait;
+}
+
+.agent-health-banner-secondary {
+  color: var(--ink-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-strong);
+}
+
+.agent-health-banner-secondary:hover {
+  color: var(--ink);
+  background: var(--bg-hover);
+}
+
+.agent-health-banner-dismiss {
+  height: 27px;
+  padding: 0 8px;
+  color: var(--ink-secondary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.agent-health-banner-dismiss:hover {
+  color: var(--ink);
+  background: var(--bg-hover);
+}
+
+.agent-health-banner-primary:focus-visible,
+.agent-health-banner-secondary:focus-visible,
+.agent-health-banner-dismiss:focus-visible,
+.agent-health-banner-settings-link:focus-visible,
+.agent-health-banner-restore:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  box-shadow: none !important;
+}
+
+.agent-health-banner-details {
+  grid-column: 2;
+  min-width: 0;
+  margin-top: 2px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-subtle);
+  animation: agent-health-details-reveal 160ms ease-out;
+}
+
+@keyframes agent-health-details-reveal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.agent-health-banner-detail + .agent-health-banner-detail {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line-subtle);
+}
+
+.agent-health-banner-detail-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.agent-health-banner-detail-head strong {
+  color: var(--ink);
+  font-weight: 680;
+}
+
+.agent-health-banner-detail-head span {
+  color: var(--warning);
+  font-weight: 650;
+}
+
+[data-status='offline'] .agent-health-banner-detail-head span {
+  color: var(--danger);
+}
+
+.agent-health-banner-detail > p {
+  margin: 4px 0 0;
+  color: var(--ink-secondary);
+  font-size: 10.5px;
+  line-height: 1.42;
+}
+
+.agent-health-banner-detail dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 14px;
+  margin: 7px 0 0;
+}
+
+.agent-health-banner-detail dl > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 7px;
+  min-width: 0;
+}
+
+.agent-health-banner-detail dt,
+.agent-health-banner-detail dd {
+  margin: 0;
+  font-size: 10px;
   line-height: 1.4;
-  color: #1a1a1a;
 }
 
-.agent-health-banner-name {
+.agent-health-banner-detail dt {
+  color: var(--ink-secondary);
   font-weight: 600;
-  flex-shrink: 0;
 }
 
-.agent-health-banner-sep {
-  opacity: 0.5;
-  flex-shrink: 0;
+.agent-health-banner-detail dd {
+  color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
-.agent-health-banner-diag {
-  font-weight: 400;
-  opacity: 0.92;
+.agent-health-banner-detail .agent-health-banner-guidance {
+  color: var(--ink);
+}
+
+.agent-health-banner-detail a,
+.agent-health-banner-settings-link {
+  display: inline-flex;
+  margin-top: 7px;
+  color: var(--accent-text, var(--accent));
+  font-size: 10.5px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.agent-health-banner-detail a:hover,
+.agent-health-banner-settings-link:hover {
+  text-decoration: underline;
+}
+
+.agent-health-banner-settings-link {
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.agent-health-banner-feedback {
+  margin: 8px 0 0;
+  color: var(--ink-secondary);
+  font-size: 10.5px;
+}
+
+.agent-health-banner-collapsed {
+  width: max-content;
+  max-width: calc(100vw - 32px);
+}
+
+.agent-health-banner-restore {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  max-width: 100%;
+  padding: 0 9px;
+  color: var(--ink-secondary);
+  background: color-mix(in srgb, var(--bg-floating) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 44%, var(--line));
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .34);
+  font-size: 10.5px;
+}
+
+.agent-health-banner-collapsed[data-status='offline'] .agent-health-banner-restore {
+  border-color: color-mix(in srgb, var(--danger) 44%, var(--line));
+}
+
+.agent-health-banner-restore > span:nth-child(2) {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+}
+
+.agent-health-banner-restore .agent-health-banner-dot {
+  margin-top: 0;
+}
+
+.agent-health-banner-restore:hover {
+  color: var(--ink);
+  background: var(--bg-elevated);
+}
+
+@media (max-width: 600px) {
+  .agent-health-banner,
+  .agent-health-banner-collapsed {
+    top: 42px;
+  }
+
+  .agent-health-banner {
+    width: calc(100vw - 24px);
+    grid-template-columns: 8px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .agent-health-banner-main {
+    display: block;
+  }
+
+  .agent-health-banner-actions {
+    margin-top: 9px;
+  }
+
+  .agent-health-banner-primary,
+  .agent-health-banner-secondary {
+    flex: 1 1 auto;
+  }
+
+  .agent-health-banner-details {
+    max-height: min(56vh, 390px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .agent-health-banner-detail dl {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-health-banner,
+  .agent-health-banner-details {
+    animation: none !important;
+  }
+
+  .agent-health-banner button,
+  .agent-health-banner-collapsed button {
+    transition: none !important;
+  }
+}
+
+@media print {
+  .agent-health-banner,
+  .agent-health-banner-collapsed {
+    display: none !important;
+  }
 }

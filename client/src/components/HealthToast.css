@@ -4,7 +4,8 @@
 
 .health-toast-container {
   position: fixed;
-  bottom: 16px;
+  /* Clear the persistent bottom-right workspace control. */
+  bottom: 76px;
   right: 16px;
   z-index: 10000;
   display: flex;
@@ -43,6 +44,15 @@
   flex-shrink: 0;
 }
 
+.health-toast--success {
+  border-color: var(--success, #39b87f);
+  border-left-color: var(--success, #39b87f);
+}
+
+.health-toast--success .health-toast-icon {
+  color: var(--success, #39b87f);
+}
+
 .health-toast-text {
   flex: 1;
   min-width: 0;
@@ -66,4 +76,3 @@
   opacity: 1;
   color: var(--ink);
 }
-

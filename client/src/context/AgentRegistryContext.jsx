@@ -68,6 +68,19 @@ const DEFAULT_CTX = Object.freeze({
 
 const AgentRegistryContext = createContext(DEFAULT_CTX);
 
+export function pickLatestHealthSnapshot(polled, local) {
+  if (!local) return polled || null;
+  if (!polled) return local;
+  const polledAt = Date.parse(polled.checkedAt || '');
+  const localAt = Date.parse(local.checkedAt || '');
+  if (Number.isFinite(polledAt) && Number.isFinite(localAt)) {
+    return polledAt > localAt ? polled : local;
+  }
+  // A forced one-agent refresh is the more intentional signal when either
+  // legacy result lacks a comparable timestamp.
+  return local;
+}
+
 /**
  * AgentRegistryProvider
  *
@@ -97,8 +110,8 @@ const AgentRegistryContext = createContext(DEFAULT_CTX);
  *     refreshOne resolves to the fresh single-agent health payload
  *     ({ status, diagnostic|message, checkedAt, ... }) so a caller awaiting
  *     it can read the result directly without depending on React's render
- *     scheduling. On request failure it resolves to a synthesized offline
- *     snapshot describing the error. Resolves to null only when called with
+ *     scheduling. On request failure it resolves to a synthesized degraded
+ *     snapshot describing the uncertainty. Resolves to null only when called with
  *     no agentId (defensive guard).
  */
 export function AgentRegistryProvider({ children }) {
@@ -226,7 +239,7 @@ export function AgentRegistryProvider({ children }) {
       // just-saved profile shows its fresh result immediately.
       const polled = polledHealth?.[agentId] || null;
       const local = localHealth?.[agentId] || null;
-      const source = local || polled || null;
+      const source = pickLatestHealthSnapshot(polled, local);
 
       const checkedAt = source?.checkedAt
         || localCheckedAt
@@ -242,6 +255,11 @@ export function AgentRegistryProvider({ children }) {
 
       const health = source
         ? {
+            // Preserve the server's safe diagnostic evidence (provider/model,
+            // failure count, last success, error category) so recovery UI can
+            // explain what happened instead of flattening every issue into
+            // status + one sentence.
+            ...source,
             status: source.status || 'unknown',
             diagnostic,
             checkedAt,
@@ -302,34 +320,35 @@ export function AgentRegistryProvider({ children }) {
     } catch (err) {
       // Surface the failure on the agent's local health entry so a consumer
       // displaying the inline save-recheck result can read it. We mark the
-      // agent offline with the error message rather than swallowing.
-      const offlineSnapshot = {
-        status: 'offline',
-        diagnostic: err?.message || 'Health check failed.',
-        message: err?.message || 'Health check failed.',
+      // health result uncertain rather than claiming the provider is offline.
+      const uncertainSnapshot = {
+        status: 'degraded',
+        code: 'CLIENT_HEALTH_REQUEST_FAILED',
+        diagnostic: 'The health check could not be completed.',
+        message: err?.message || 'The health check could not be completed. The app will retry automatically.',
         checkedAt: new Date().toISOString(),
       };
       setLocalHealth((prev) => ({
         ...prev,
-        [agentId]: offlineSnapshot,
+        [agentId]: uncertainSnapshot,
       }));
-      // Same rationale as the success branch: return the synthesized offline
+      // Same rationale as the success branch: return the synthesized degraded
       // snapshot so the caller observes the failure without depending on
       // React's render scheduling.
-      return offlineSnapshot;
+      return uncertainSnapshot;
     }
   }, []);
 
   // ────────────────────────────────────────────────────────────────────────
   // Recovery polling (AC#12 from the bootstrap plan).
   //
-  // Goal: when an agent is offline, we want to notice it has come back
+  // Goal: when an agent is offline or uncertain, notice recovery
   // within ~15s rather than waiting up to 60s for the next normal poll.
   //
-  // Mechanism: for every agentId currently in `offline` status, run a 15s
+  // Mechanism: for every agentId in `offline` or `degraded` status, run a 15s
   // ticker that calls refreshOne(agentId). refreshOne bypasses the in-hook
   // cache (forceRefresh=true) so each tick actually re-checks the provider.
-  // When the agent's status flips away from `offline` (online / disabled /
+  // When the agent's status flips away from `offline` or `degraded` (online / disabled /
   // unknown), we clear that agent's ticker. Tickers are tracked PER AGENT
   // in a ref-held Map so multiple agents going offline don't interfere
   // with each other.
@@ -343,7 +362,7 @@ export function AgentRegistryProvider({ children }) {
   //     the context value.
   //
   // Cleanup contract:
-  //   - When an agent leaves offline → its ticker is cleared.
+  //   - When an agent leaves an unhealthy state → its ticker is cleared.
   //   - When an agent disappears from the registry → its ticker is cleared.
   //   - When the provider unmounts → all tickers are cleared.
   const RECOVERY_POLL_INTERVAL_MS = 15_000;
@@ -353,12 +372,12 @@ export function AgentRegistryProvider({ children }) {
     const tickers = recoveryTickersRef.current;
     const currentlyOffline = new Set();
     for (const agentId of Object.keys(agents)) {
-      if (agents[agentId]?.health?.status === 'offline') {
+      if (['offline', 'degraded'].includes(agents[agentId]?.health?.status)) {
         currentlyOffline.add(agentId);
       }
     }
 
-    // Start tickers for newly-offline agents.
+    // Start tickers for newly unhealthy agents.
     for (const agentId of currentlyOffline) {
       if (tickers.has(agentId)) continue;
       const handle = window.setInterval(() => {
@@ -368,7 +387,7 @@ export function AgentRegistryProvider({ children }) {
         try {
           const maybePromise = refreshOne(agentId);
           if (maybePromise && typeof maybePromise.then === 'function') {
-            // refreshOne already records errors as a local offline state,
+            // refreshOne already records errors as a local degraded state,
             // so we don't need to do anything with a rejection here. Swallow
             // to keep unhandled-rejection noise out of the console.
             maybePromise.catch(() => {});

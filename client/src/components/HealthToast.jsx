@@ -66,14 +66,15 @@ const SHOW_TOAST_EVENT = 'qbo:health-toast-show';
 
 /**
  * Programmatically queue a toast.
- * @param {{ message: string }} opts
+ * @param {{ message: string, tone?: 'error'|'success' }} opts
  *   message: required, the human-readable toast text.
  */
 export function showHealthToast(opts) {
   const message = opts && typeof opts.message === 'string' ? opts.message.trim() : '';
   if (!message) return;
+  const tone = opts?.tone === 'success' ? 'success' : 'error';
   try {
-    window.dispatchEvent(new CustomEvent(SHOW_TOAST_EVENT, { detail: { message } }));
+    window.dispatchEvent(new CustomEvent(SHOW_TOAST_EVENT, { detail: { message, tone } }));
   } catch {
     // Non-DOM environments (e.g. SSR or a Node test runner) — silently skip.
   }
@@ -88,7 +89,7 @@ export default function HealthToast({ requests }) {
   // setToasts on an unmounted component (setState-after-unmount warning + leak).
   const dismissTimersRef = useRef(new Set());
 
-  const addToast = useCallback((message) => {
+  const addToast = useCallback((message, tone = 'error') => {
     const now = Date.now();
     const lastSeen = recentMessagesRef.current.get(message);
     if (lastSeen && now - lastSeen < DEBOUNCE_MS) return;
@@ -96,7 +97,7 @@ export default function HealthToast({ requests }) {
 
     const id = ++toastIdCounter;
     setToasts(prev => {
-      const next = [...prev, { id, message, createdAt: now }];
+      const next = [...prev, { id, message, tone, createdAt: now }];
       // Keep max 3 — drop oldest
       return next.length > MAX_TOASTS ? next.slice(-MAX_TOASTS) : next;
     });
@@ -142,7 +143,7 @@ export default function HealthToast({ requests }) {
     function handle(event) {
       const message = event?.detail?.message;
       if (typeof message === 'string' && message.length > 0) {
-        addToast(message);
+        addToast(message, event?.detail?.tone === 'success' ? 'success' : 'error');
       }
     }
     window.addEventListener(SHOW_TOAST_EVENT, handle);
@@ -169,13 +170,20 @@ export default function HealthToast({ requests }) {
   return (
     <div className="health-toast-container">
       {toasts.map(t => (
-        <div key={t.id} className="health-toast">
+        <div key={t.id} className={`health-toast health-toast--${t.tone || 'error'}`}>
           <span className="health-toast-icon">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
+            {t.tone === 'success' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="m8 12 2.5 2.5L16 9" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            )}
           </span>
           <span className="health-toast-text">{t.message}</span>
           <button

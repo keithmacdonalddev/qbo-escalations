@@ -94,6 +94,11 @@ function buildLineParts({ phase, prefix, label, providerLabel, diagnostic, suffi
     if (diagnostic) {
       parts.push({ text: ` (${diagnostic})`, className: 'bl-dim' });
     }
+  } else if (phase === 'degraded') {
+    parts.push({ text: 'availability uncertain', className: colorClass });
+    if (diagnostic) {
+      parts.push({ text: ` (${diagnostic})`, className: 'bl-dim' });
+    }
   } else if (phase === 'retrying') {
     parts.push({ text: 'unreachable', className: colorClass });
     if (diagnostic) {
@@ -179,7 +184,7 @@ export default function AgentBootOverlay({ children }) {
   // Per-agent phase, locally tracked so we can model the "retrying"
   // transient state (which doesn't exist in the registry — the registry
   // only knows online/offline/disabled/unknown).
-  // phase: 'pending' | 'checking' | 'retrying' | 'online' | 'offline' | 'disabled' | 'stuck'
+  // phase: 'pending' | 'checking' | 'retrying' | 'online' | 'degraded' | 'offline' | 'disabled' | 'stuck'
   // arrivedAt: timestamp when the line was inserted (for stagger).
   // finalAt: timestamp when the phase locked to a terminal value.
   const [agentPhases, setAgentPhases] = useState({});
@@ -255,8 +260,8 @@ export default function AgentBootOverlay({ children }) {
   // ────────────────────────────────────────────────────────────────────────
   // Watch registry.agents for status changes and translate them into local
   // phase transitions. This is the bridge between the registry's "facts"
-  // (online/offline/disabled) and the UI's narrative (online / retrying /
-  // offline / disabled).
+  // (online/degraded/offline/disabled) and the UI's narrative (online /
+  // retrying / uncertain / offline / disabled).
   //
   // The interesting transition is the one-shot retry: when an agent first
   // arrives as 'offline', we mark it 'retrying' locally AND fire one
@@ -291,8 +296,8 @@ export default function AgentBootOverlay({ children }) {
           continue;
         }
 
-        if (status === 'offline') {
-          // First offline arrival → trigger the one-shot retry.
+        if (status === 'offline' || status === 'degraded') {
+          // First unavailable/uncertain arrival → trigger the one-shot retry.
           const hasRetried = retriedRef.current.has(agentId);
           if (!hasRetried) {
             retriedRef.current.add(agentId);
@@ -326,8 +331,8 @@ export default function AgentBootOverlay({ children }) {
           const retryStartedAt = current.retryStartedAt || 0;
           const SKEW_MS = 2_000;
           const retryResultArrived = checkedAtMs >= retryStartedAt - SKEW_MS;
-          if (retryResultArrived && current.phase !== 'offline') {
-            next[agentId] = { ...current, phase: 'offline', finalAt: Date.now() };
+          if (retryResultArrived && current.phase !== status) {
+            next[agentId] = { ...current, phase: status, finalAt: Date.now() };
             changed = true;
           }
         }
@@ -382,7 +387,7 @@ export default function AgentBootOverlay({ children }) {
     if (agentIds.length > 0 && elapsedMs >= SERVER_UNREACHABLE_MS) {
       // True only if NONE of the known agents has produced a real health
       // status yet — i.e. the health endpoint hung for every agent. If any
-      // agent has a concrete status (online/offline/disabled), the health
+      // agent has a concrete status (online/degraded/offline/disabled), the health
       // endpoint clearly is responding; this branch should not fire.
       let anyHealthArrived = false;
       for (const agentId of agentIds) {
@@ -399,7 +404,7 @@ export default function AgentBootOverlay({ children }) {
 
   // ────────────────────────────────────────────────────────────────────────
   // "All settled" check — every visible agent has reached a terminal phase
-  // (online / offline / disabled). 'stuck' does NOT count as settled, so a
+  // (online / degraded / offline / disabled). 'stuck' does NOT count as settled, so a
   // hung agent will keep the overlay up until the 25s ceiling triggers the
   // "Enter Now" path.
   // ────────────────────────────────────────────────────────────────────────
@@ -411,7 +416,7 @@ export default function AgentBootOverlay({ children }) {
     for (const agentId of agentIds) {
       const cur = agentPhases[agentId];
       if (!cur) return false;
-      if (cur.phase !== 'online' && cur.phase !== 'offline' && cur.phase !== 'disabled') {
+      if (cur.phase !== 'online' && cur.phase !== 'degraded' && cur.phase !== 'offline' && cur.phase !== 'disabled') {
         return false;
       }
     }
@@ -421,6 +426,7 @@ export default function AgentBootOverlay({ children }) {
   // Summary numbers for the closing line and for the "Enter Now" banner.
   const tally = useMemo(() => {
     let online = 0;
+    let degraded = 0;
     let offline = 0;
     let disabled = 0;
     let pending = 0;
@@ -428,11 +434,12 @@ export default function AgentBootOverlay({ children }) {
       const cur = agentPhases[agentId];
       const phase = cur?.phase || 'pending';
       if (phase === 'online') online += 1;
+      else if (phase === 'degraded') degraded += 1;
       else if (phase === 'offline') offline += 1;
       else if (phase === 'disabled') disabled += 1;
       else pending += 1;
     }
-    return { online, offline, disabled, pending, total: agentIds.length };
+    return { online, degraded, offline, disabled, pending, total: agentIds.length };
   }, [agentIds, agentPhases]);
 
   // ────────────────────────────────────────────────────────────────────────
@@ -490,7 +497,7 @@ export default function AgentBootOverlay({ children }) {
   // ────────────────────────────────────────────────────────────────────────
   const progressPct = useMemo(() => {
     if (agentIds.length === 0) return 5;
-    const settled = tally.online + tally.offline + tally.disabled;
+    const settled = tally.online + tally.degraded + tally.offline + tally.disabled;
     return Math.max(5, Math.round((settled / agentIds.length) * 100));
   }, [agentIds.length, tally]);
 
@@ -535,6 +542,7 @@ export default function AgentBootOverlay({ children }) {
 
     let prefix = 'chk';
     if (phase === 'online') prefix = 'ok';
+    else if (phase === 'degraded') prefix = 'warn';
     else if (phase === 'offline') prefix = 'warn';
     else if (phase === 'retrying') prefix = 'retry';
     else if (phase === 'disabled') prefix = 'skip';
@@ -550,6 +558,7 @@ export default function AgentBootOverlay({ children }) {
   // updated row-by-row via the /health/stream NDJSON path.
   function phaseToRowState(phase) {
     if (phase === 'online') return { variant: 'success', statusLabel: 'online', fill: 100 };
+    if (phase === 'degraded') return { variant: 'failure', statusLabel: 'uncertain', fill: 100 };
     if (phase === 'offline') return { variant: 'failure', statusLabel: 'offline', fill: 100 };
     if (phase === 'disabled') return { variant: 'disabled', statusLabel: 'disabled', fill: 100 };
     if (phase === 'retrying') return { variant: 'checking', statusLabel: 'retrying…', fill: null };
@@ -567,12 +576,13 @@ export default function AgentBootOverlay({ children }) {
       { text: `Bootstrap complete · ${tally.online}/${tally.total} online` },
     ];
     if (tally.offline > 0) pieces.push({ text: ` · ${tally.offline} offline`, className: 'bl-warn' });
+    if (tally.degraded > 0) pieces.push({ text: ` · ${tally.degraded} uncertain`, className: 'bl-warn' });
     if (tally.disabled > 0) pieces.push({ text: ` · ${tally.disabled} disabled`, className: 'bl-dim' });
     summaryParts = pieces;
   } else if (ceilingHit) {
     const pieces = [
       { text: '[warn] ', className: 'bl-dim' },
-      { text: `${tally.online + tally.offline + tally.disabled}/${tally.total} agents settled · ${tally.pending} still checking`, className: 'bl-warn' },
+      { text: `${tally.online + tally.degraded + tally.offline + tally.disabled}/${tally.total} agents settled · ${tally.pending} still checking`, className: 'bl-warn' },
     ];
     summaryParts = pieces;
   }
@@ -674,6 +684,7 @@ export default function AgentBootOverlay({ children }) {
             {allSettled && (
               <div className="boot-overlay__summary" aria-live="polite">
                 {tally.online}/{tally.total} agents online
+                {tally.degraded > 0 ? ` · ${tally.degraded} uncertain` : ''}
                 {tally.offline > 0 ? ` · ${tally.offline} offline` : ''}
                 {tally.disabled > 0 ? ` · ${tally.disabled} disabled` : ''}
               </div>

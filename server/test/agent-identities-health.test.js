@@ -250,3 +250,92 @@ test('GET /api/agent-identities/health without forceRefresh may reuse the cache'
     );
   });
 });
+
+test('one transient provider timeout is degraded, repeated timeouts confirm offline, and success recovers', async (t) => {
+  await connect();
+  const app = createApp();
+  await AgentIdentity.deleteMany({});
+
+  t.after(async () => {
+    await AgentIdentity.deleteMany({});
+    await disconnect();
+  });
+
+  await withHarnessProviders(async () => {
+    let geminiChecks = 0;
+    registerProviderStub('lm-studio', 'providerAvailability', async () => ({
+      available: true,
+      model: 'fixture-model',
+      reason: 'Fixture available',
+      code: 'OK',
+    }));
+    for (const provider of REMOTE_PROVIDERS) {
+      registerProviderStub(provider, 'validateRemoteProvider', async () => {
+        if (provider !== 'gemini') {
+          return { ok: true, configured: true, available: true, code: 'OK', reason: 'Authenticated', model: null };
+        }
+        geminiChecks += 1;
+        if (geminiChecks <= 2) {
+          return {
+            ok: false,
+            configured: true,
+            available: false,
+            code: 'TIMEOUT',
+            reason: 'Connection to provider timed out',
+            detail: '',
+            model: null,
+          };
+        }
+        return {
+          ok: true,
+          configured: true,
+          available: true,
+          code: 'OK',
+          reason: 'Authenticated (gemini-3.6-flash)',
+          model: 'gemini-3.6-flash',
+        };
+      });
+    }
+
+    await request(app)
+      .patch('/api/agent-identities/escalation-template-parser/runtime')
+      .send({
+        runtime: {
+          provider: 'gemini',
+          mode: 'single',
+          fallbackProvider: '',
+          model: 'gemini-3.6-flash',
+          fallbackModel: '',
+          reasoningEffort: 'low',
+        },
+        summary: 'Transient health state test fixture',
+      })
+      .expect(200);
+
+    const first = await request(app)
+      .get('/api/agent-identities/health?ids=escalation-template-parser&forceRefresh=true')
+      .expect(200);
+    const firstHealth = first.body.agents['escalation-template-parser'];
+    assert.equal(firstHealth.status, 'degraded');
+    assert.equal(firstHealth.code, 'TIMEOUT');
+    assert.equal(firstHealth.consecutiveFailures, 1);
+    assert.equal(firstHealth.confirmationThreshold, 2);
+    assert.match(firstHealth.message, /Availability is not yet confirmed/i);
+    assert.doesNotMatch(firstHealth.diagnostic, /timed out connecting/i);
+
+    const second = await request(app)
+      .get('/api/agent-identities/health?ids=escalation-template-parser&forceRefresh=true')
+      .expect(200);
+    const secondHealth = second.body.agents['escalation-template-parser'];
+    assert.equal(secondHealth.status, 'offline');
+    assert.equal(secondHealth.consecutiveFailures, 2);
+
+    const recovered = await request(app)
+      .get('/api/agent-identities/health?ids=escalation-template-parser&forceRefresh=true')
+      .expect(200);
+    const recoveredHealth = recovered.body.agents['escalation-template-parser'];
+    assert.equal(recoveredHealth.status, 'online');
+    assert.equal(recoveredHealth.consecutiveFailures, 0);
+    assert.ok(recoveredHealth.lastSuccessAt);
+  });
+});

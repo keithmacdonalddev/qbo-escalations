@@ -82,6 +82,14 @@ function getAgentState(agentId, { chat, workspaceMonitor, health }) {
         badge: '!',
       };
     }
+    if (health.status === 'degraded') {
+      return {
+        tone: 'attention',
+        status: 'Checking connection',
+        activity: health.message || 'Provider availability is not yet confirmed',
+        marker: true,
+      };
+    }
   }
 
   if (agentId === 'workspace') {
