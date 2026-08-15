@@ -489,6 +489,13 @@ test('POST /parse — input validation', async (t) => {
   });
 
   await t.test('accepts valid providers: lm-studio, anthropic, openai, kimi, gemini', async () => {
+    // Validation must never depend on a developer's local provider services or
+    // network availability. The request to this Express app bypasses the
+    // interceptor, while any provider request fails immediately and safely.
+    interceptAllRequests({
+      errorCode: 'ECONNREFUSED',
+      errorMessage: 'provider connection intentionally unavailable in validation test',
+    });
     for (const provider of ['lm-studio', 'anthropic', 'openai', 'kimi', 'gemini']) {
       // These will fail at the provider call level (no API key / no LM Studio)
       // but should NOT fail at validation. Check that we don't get MISSING_IMAGE

@@ -1,12 +1,12 @@
 # Questrade Investments Integration Implementation Plan
 
-**Status:** Proposed; no implementation has started
+**Status:** Gate 0 user-accepted; Stage 1 implemented and awaiting the user's Gate 1 acceptance
 
 **Created:** 2026-08-14
 
-**Revised:** 2026-08-14 after independent critical review, socket-hardening review, the product-owner requirement that Investments have first-class Main Chat and development-startup representation, Gate 0 account-readiness confirmation, the extraction-ready module decision, and the clarification that read-only/local/no-trade/AI limits are initial-stage boundaries while credential encryption is app-managed and accepted order-notification/monitoring preferences may persist; documentation revision only, with no Questrade implementation started
+**Revised:** 2026-08-14 after independent critical review, socket-hardening review, product-owner clarification, a fresh Gate 0 check of Questrade's official documentation, and completion of the simulated Stage 1 foundation; no live token was created and no live Questrade request was made
 
-**Primary decision:** Add Questrade as a separate Investments domain whose first implementation is read-only. This plan contains no trade placement, modification, cancellation, or autonomous financial action, but it does not permanently prohibit a separately planned and explicitly approved future trading capability.
+**Primary decision:** Add Questrade as a separate Investments domain whose first implementation is read-only. This plan contains no trade placement, modification, cancellation, or autonomous financial action. Questrade currently limits API trade execution to approved partner developers, so any future trading capability would require both Questrade partner approval and a separately planned, explicitly accepted high-risk project.
 
 **Stage rule:** Every implementation stage ends in a working, testable increment in the user's development app. No later stage may begin until the user completes the stage's hands-on acceptance script and explicitly accepts that gate.
 
@@ -23,7 +23,7 @@ The user should be able to connect a personal Questrade margin account and answe
 5. What do specialist agents conclude, which exact snapshot supports that conclusion, and what still needs human judgment?
 6. From the main Chat page, which work domain am I in, what investment evidence is currently available, and where do I go for deeper portfolio work?
 
-The first release deliberately stops before trade execution. The app may inspect, calculate, compare, explain, and propose. The user continues placing or changing orders in Questrade during the stages covered by this plan. Any future in-app trading capability is a new high-risk project with its own Questrade-permission, preview, confirmation, failure-recovery, and hands-on acceptance gates.
+The first release deliberately stops before trade execution. The app may inspect, calculate, compare, explain, and propose. The user continues placing or changing orders in Questrade during the stages covered by this plan. Under Questrade's currently published rules, a future in-app trading capability would first require partner-developer approval, then a new high-risk project with its own Questrade permission, preview, confirmation, failure-recovery, and hands-on acceptance gates.
 
 ## 2. Role in the broader platform
 
@@ -126,7 +126,8 @@ Official Questrade documentation was checked on 2026-08-14. Stage 0 must recheck
 - `read_acc` covers account information such as accounts, positions, balances, executions, and orders.
 - Questrade's current scope table explicitly includes `GET symbols/:id`, `GET symbols/:id/options`, and `GET markets` under `read_acc`; security classification does not require `read_md` under the current contract.
 - `read_md` covers quotes and candles.
-- Questrade documents `trade` as partner-only. This project will not request or implement it even if it later becomes available.
+- Questrade documents `trade` as partner-only and states that ordinary Questrade customers can access account/market data but cannot execute trades through a personal API app. This project will not request or implement trade access; a future trading project depends on Questrade granting partner-developer access first.
+- Questrade currently states that API access itself is free. Existing brokerage, transaction, and any separately chosen market-data-plan fees remain outside this app.
 - Questrade supports RawSocket and WebSocket streaming. This plan chooses WebSocket only.
 - Questrade's notification stream can send order-status changes and executions. It does not stream balances, positions, or Activities, so normal REST synchronization remains required.
 - Questrade supports Level 1 quote streaming when `stream=true`; quote access belongs to `read_md` and remains separately permission-gated.
@@ -134,12 +135,16 @@ Official Questrade documentation was checked on 2026-08-14. Stage 0 must recheck
 - Questrade says a second RawSocket/WebSocket connection replaces the previous connection, and that an access token must be sent promptly after WebSocket connection without the `Bearer` prefix. The app therefore needs one server-owned supervisor per stream kind and must never expose that handshake to the browser.
 - Keeping the socket open does not keep the Questrade session active. Questrade requires authenticated requests at least every 30 minutes, so an enabled stream needs bounded session maintenance plus normal token-expiry handling.
 - Questrade warns that Level 1 API streaming can freeze market data in another IQ Platform used at the same time. Live quote streaming must therefore be separately opt-in, session-scoped, and preceded by a plain-language warning.
+- Questrade's public streaming page documents obtaining a port and authenticating a WebSocket, but it does not publish an explicit `wss:` URL or TLS handshake contract. Stage 4B therefore keeps streaming disabled until a live certificate-verified secure connection is proven; the implementation must never fall back to plaintext.
+- Questrade requires the API access agreement to be accepted before API Centre activation. The owner's active API Centre and registered personal app show that the activation step was completed. The current public `See All` agreement link misroutes to the general Learning page, so this plan records the official activation requirement without claiming an independent legal interpretation of the agreement text.
 
 Official references:
 
 - [Authorization](https://www.questrade.com/api/documentation/authorization)
 - [Security, token exchange, revocation, and scopes](https://www.questrade.com/api/documentation/security)
 - [Streaming](https://www.questrade.com/api/documentation/streaming)
+- [API overview, personal-app limits, and API cost](https://www.questrade.com/api/home)
+- [Getting started and API access agreement](https://www.questrade.com/api/documentation/getting-started)
 - [Current market-data packages and pricing](https://www.questrade.com/pricing/self-directed-commissions-plans-fees/market-data/)
 
 ### Data facts
@@ -151,6 +156,7 @@ Official references:
 - The current scope table does not explicitly list the Activities endpoint even though Questrade documents the endpoint. Preflight records Activities as the remaining external-contract ambiguity, and Stage 4A requires a safe live `read_acc` probe before promising activity import.
 - Orders and executions expose their own status and timestamps and must not be inferred from position changes.
 - Questrade returns rate-limit headers and documents different limits for account and market-data calls.
+- Real-time Level 1 quotes require the user's separate real-time data entitlement. Without it, quote requests can consume the available snap-quote allowance and then return delayed data; the app must always use Questrade's returned delay indicator instead of promising real-time data.
 
 Official references:
 
@@ -161,6 +167,7 @@ Official references:
 - [Orders](https://www.questrade.com/api/documentation/rest-operations/account-calls/accounts-id-orders)
 - [Executions](https://www.questrade.com/api/documentation/rest-operations/account-calls/accounts-id-executions)
 - [Rate limiting](https://www.questrade.com/api/documentation/rate-limiting)
+- [Level 1 quote entitlement and delay indicator](https://www.questrade.com/api/documentation/rest-operations/market-calls/markets-quotes-id)
 
 ### Contract uncertainty rule
 
@@ -1232,7 +1239,7 @@ Expected final groups:
 - client production build;
 - automated browser evidence reported as `incomplete` with the exact inherited transport reason if it cannot run.
 
-`verify:investments` must report the deterministic and automated-browser lanes separately. A stage may advance to manual user acceptance when every stage-owned deterministic group passes and the only incomplete automated item is the named pre-existing browser-transport problem. That exception does not convert the automated browser result to passed, does not excuse a Questrade-specific browser failure, and does not replace the user's required rendered acceptance.
+`verify:investments` must report the deterministic and automated-browser lanes separately. For a user-facing Investments increment, the automated browser lane is required: an unavailable already-running app produces an honest `incomplete` result, while any Questrade-specific browser failure produces a failed gate. Neither result can be relabelled as passed or replaced by source inspection. The user's own rendered acceptance remains a separate requirement after automation passes.
 
 ### Core server tests
 
@@ -1322,7 +1329,7 @@ Each implementation stage uses exactly these statuses:
 
 Only `user-accepted` unlocks the next stage.
 
-`technical-verification-passed` means every deterministic check owned by that stage passed. An automated browser group may remain separately `incomplete` only for the freshly reproduced repository-level transport problem described above; the stage cannot reach `user-accepted` until the user completes the equivalent rendered dev-app script. Any Questrade-specific browser failure keeps the stage in progress or rejected.
+`technical-verification-passed` means every deterministic and required automated-browser check owned by that stage passed. An unavailable user-owned app makes the browser group and stage `incomplete`; any Questrade-specific browser failure keeps the stage in progress or rejected. The separate user acceptance script is still required before the stage becomes `user-accepted`.
 
 ### Visible stage ledger
 
@@ -1330,8 +1337,8 @@ This table is updated immediately when a gate changes state so the plan never ap
 
 | Gate | Increment | Current status | Acceptance evidence |
 | --- | --- | --- | --- |
-| 0 | Account, scope, retention, privacy, and no-trade decisions | `implementation-in-progress` | User decision record; no live secret captured |
-| 1 | Development fixtures and Connected Accounts shell | `not-started` | Automated checks plus desktop/mobile dev-app script |
+| 0 | Account, scope, retention, privacy, and no-trade decisions | `user-accepted` | Official documentation rechecked; owner instructed implementation to proceed; no live secret captured |
+| 1 | Development fixtures and Connected Accounts shell | `awaiting-user` | Dedicated verification profile passed; automated desktop/mobile journey passed all seven fixtures with no browser errors or live Questrade traffic; owner acceptance remains required |
 | 2 | Live connection, token refresh, repair, and revoke | `not-started` | Live connect/reload/reauthorize/revoke/reconnect script |
 | 3A | Snapshot engine and visible reconciliation workbench | `not-started` | Fixture/partial-failure reconciliation, live comparison, and local-data deletion in the dev app |
 | 3B | Investments workspace | `not-started` | Accepted desktop/mobile portfolio workspace using the Stage 3A snapshot contract |
@@ -1403,7 +1410,12 @@ Confirm that the user has the credentials and accepts the storage/privacy bounda
 - The owner confirmed that the Questrade token belongs in **Settings > Connected Accounts > Questrade**, like other provider credentials. The app—not the user—must create/load the encryption key and encrypt the token before storage; neither a token nor an encryption key is entered into chat or source code.
 - The owner wants explicitly enabled order/execution notifications and scheduled monitoring to remain useful after restart. Each capability therefore starts disabled when first introduced, persists only after explicit enablement, and may resume after core startup until disabled. Level 1 quotes remain a separate session-only stream because of their market-data scope and IQ Platform side effect.
 - The owner confirmed the app is currently local. Loopback-only is therefore the truthful first-release boundary and an accidental-exposure safeguard, not a claim that remote access can never be added.
-- The remaining official-documentation, Activities-scope, pricing/entitlement, secure-stream, and any required license checks are still open, so Gate 0 remains `implementation-in-progress`.
+- A fresh official-documentation check confirmed that the API is free, the selected account-data permission covers the core snapshot endpoints, and personal customer apps cannot execute trades. Future API trading would require Questrade partner-developer approval as well as a separate implementation plan.
+- The Activities endpoint is official and limited to 31-day request windows, but Questrade still omits it from both the published scope table and rate-limit table. Stage 4A must therefore keep Activities unavailable until Questrade support or a bounded live `read_acc` probe proves access; this ambiguity does not block the simulated Stage 1 foundation.
+- Questrade documents WebSocket authentication but still does not publish an explicit secure `wss:` connection contract. Streaming remains fail-closed and cannot be called supported until Stage 4B proves a certificate-verified live handshake.
+- Questrade states that real-time Level 1 results depend on a separate real-time data package; otherwise snap-quote limits can lead to delayed data. `read_md` and any market-data cost decision remain deferred to Stage 7B.
+- Questrade requires acceptance of its API access agreement before activating API Centre. The active API Centre and registered personal app establish that the activation step was completed; the plan makes no independent legal interpretation because the current public agreement link misroutes.
+- On 2026-08-14, after these boundaries were explained, the owner instructed Codex to “do what's next.” Together with the prior explicit scope, storage, credential, socket, monitoring, and deployment decisions, this is recorded as Gate 0 acceptance. No token was generated or exposed. Stage 1 may begin using simulated data only.
 
 ### Work
 
@@ -1451,13 +1463,13 @@ The dev app can show and safely exercise all Questrade connection states using s
 5. Add the minimal `QuestradeConnection` model and safe serializer.
 6. Add the provider-adapter contract and extend connected-service harness stubs with Questrade fixtures inside the Investments-owned provider path.
 7. Add `GET /api/investments/providers/questrade/connection` using the fixture adapter only.
-8. Add dev-only scenario selection in Settings > Developer Tools.
+8. Add dev-only scenario selection inside the Questrade Connected Accounts card, where the simulated status is visible and testable without mixing it into general performance diagnostics.
 9. Extract a small provider-neutral connected-account card frame from `SettingsAccountsSection.jsx`. Keep Google and Questrade bodies provider-specific and re-verify Google behavior and rendering.
-10. Add the Investments-owned Questrade card body and show configured, disconnected, connected, degraded, locked, permission, last-access, and simulated-data states.
+10. Add the Investments-owned Questrade card body and show disconnected, connected Margin, reauthorization-required, unsafe-server-blocked, degraded, locked, key-store-unavailable, last-complete-save, and simulated-data states.
 11. Add secret-leak canaries and a forbidden-production-fixture test.
 12. Add the deterministic import/route/side-effect/module-ownership boundary suite defined in Section 9A.
-13. Add `questrade-connection-safety` and the module-boundary group to the testing capability map.
-14. Introduce `verify:investments` with Stage 1 deterministic checks plus a separately reported automated-browser attempt.
+13. Add `investments-questrade-stage-1` to the testing capability map with unit, component, server, and browser evidence lanes.
+14. Introduce `verify:investments` with Stage 1 deterministic checks plus a separately reported required automated-browser lane. The browser lane uses an already-running user-owned stack and reports `incomplete` without starting services when that stack is unavailable.
 15. Add the `INVEST` launcher source tag and a local-only Investments readiness summary without changing the current startup banner. At this stage the truthful states are `not configured — optional`, `fixture mode available — live provider disabled`, or a safe local configuration error; the launcher must not contact Questrade.
 16. Update focused launcher tests, `npm run dev:preview`, and `docs/development-startup.md` together. Preserve early core readiness, late checks, final core/operational/optional totals, color/no-color/quiet behavior, and one-stop shutdown wording.
 
@@ -1477,48 +1489,63 @@ The dev app can show and safely exercise all Questrade connection states using s
 - existing core HTTP, realtime WebSocket, and Live Call Assist WebSocket tests pass with explicit accepted local hosts because the incoming-host policy changes an app-wide boundary;
 - testing-map validation passes;
 - client build passes;
-- `npm run verify:investments` reaches a truthful deterministic verdict and reports the automated-browser lane separately;
+- `npm run verify:investments` reaches a truthful verdict and requires the separately reported automated-browser lane to pass;
 - focused launcher tests prove the unchanged banner plus new `INVEST` tag/status wording, optional classification, no-Questrade-call behavior, secret/value redaction, and existing output modes;
 - `npm run dev:preview` shows the same privacy-safe Investments grammar without starting a service;
 - Questrade absent and provider-failure fixtures leave core/QBO health and deterministic behavior unchanged;
 - `npm run verify:core` passes before Gate 1 is offered to the user.
 
+### Current implementation evidence — 2026-08-14
+
+- The Investments module is mounted only at `/api/investments` and its public contract is documented in `docs/investments/module-contract.md`.
+- The server includes AES-256-GCM field encryption, a lazy Windows current-user credential-key provider, a loopback Host policy shared by HTTP and both WebSocket upgrade paths, and a separate HTTPS Questrade API-host allowlist.
+- Questrade remains read-only by contract: the fixture adapter exposes account reads and has no place, replace, or cancel order methods.
+- Settings shows Questrade as a peer to Google using a provider-neutral frame, while each provider keeps its own body and actions.
+- Seven simulated states are available directly in the Questrade card: `disconnected`, `healthy-margin`, `token-expired`, `malicious-api-server`, `locked`, `key-store-unavailable`, and `service-unavailable`.
+- The dedicated `npm run verify:investments` profile passes its server/security, client/Google-regression, friendly-startup, rendered-browser, and testing-map lanes against the current already-running user-owned stack.
+- The final passing Investments evidence is recorded at `test-results/app-check/2026-08-15T00-48-00-082Z-e720c8ed/summary.json`; all six groups passed, including the required browser lane and the separately reported module-ownership boundary.
+- Automated rendered checks passed at desktop and 390px mobile widths, including reduced motion, all seven simulated states, card viewport bounds, an empty browser-error list, and zero requests to a `questrade.com` host.
+- The production client build passed, and the complete whole-app `npm run verify:core` profile passed all seven groups at `test-results/app-check/2026-08-15T00-42-37-174Z-ab3c651a/summary.json`, including the same module-ownership boundary required by the Investments profile.
+- `server/test/investments/module-boundaries.test.js` proves that Investments imports only owned code and reviewed shared seams, shared registration uses only public server/client entry points, Questrade provider routes remain Investments-owned, and creating the module performs no network, storage, child-process, or repeating-timer work.
+- `npm run dev:preview -- --no-color` shows the aligned `INVEST` line and optional total without starting a service or printing a token, account number, financial value, or provider destination.
+- The browser scenario is left at `disconnected`. No later-stage live connection, portfolio page, main-chat redesign, socket stream, monitoring job, or agent access has started.
+
 ### User dev-app acceptance script — Gate 1
 
-Prerequisite: the user enables the documented development fixture flags and restarts their own server.
+Prerequisite: use the already-running development app. Stage 1 fixtures are available by default outside production unless `QUESTRADE_DEV_FIXTURES=0` was deliberately set; no token or environment change is required.
 
 1. Open **Settings > Connected Accounts** and review Google before testing Questrade.
    - Expected: Google retains its prior identity, connection state, account defaults, permission health, and actions; Questrade appears as a separate provider without duplicating Google-specific controls.
-2. Select the `disconnected` fixture in Developer Tools.
-   - Expected: Questrade says not connected and provides one clear next action.
-3. Select `healthy-margin-cad-usd`.
-   - Expected: status becomes Connected, account number is masked, and plain-English read permissions are visible.
-4. Select `token-expired-refresh-failure`.
+2. In the Questrade card, select `Not connected` (`disconnected`).
+   - Expected: Questrade says no token has been saved, live access is off, and the card remains clearly labelled Margin and Simulated.
+3. Select `Connected` (`healthy-margin`).
+   - Expected: status becomes Connected, the non-sensitive label `margin-demo-01` appears, and a last-complete-save time is visible. No balances, positions, account number, or live permission claim appears in Stage 1.
+4. Select `Reauthorization required` (`token-expired`).
    - Expected: status says reauthorization is required; it does not claim the account is disconnected or erase prior health metadata.
-5. Select `malicious-api-server`.
+5. Select `Unsafe server blocked` (`malicious-api-server`).
    - Expected: connection is blocked with a safe error and no outbound request to the supplied host.
-6. Select `locked` by using the provided wrong-key fixture.
+6. Select `Credential locked` (`locked`).
    - Expected: credentials are described as locked; the UI does not delete them or expose decryption details.
-7. Select `credential-key-store-unavailable`.
+7. Select `Credential protection unavailable` (`key-store-unavailable`).
    - Expected: the app explains that secure credential storage is unavailable, blocks Connect, and does not ask the user to encrypt anything, paste an encryption key, or enter a token.
-8. Select `service-unavailable-preserve-prior`, then open the existing QBO Chat workflow and review the Google connected-account card.
+8. Select `Questrade unavailable` (`service-unavailable`), then open the existing QBO Chat workflow and review the Google connected-account card.
    - Expected: Questrade is safely degraded, while QBO and Google remain usable and contain no Investments error, account context, or controls.
-9. Reload the page after each state.
-   - Expected: the selected fixture state is stable and never flickers through a false Connected claim.
+9. Reload the page after a selected state.
+   - Expected: the process-local selected fixture remains stable while the server is running and never flickers through a false Connected claim. A server restart intentionally resets it to Not connected.
 10. Repeat at 390px width and keyboard-navigate all Questrade controls.
    - Expected: no horizontal overflow, clipped controls, hover dependency, or missing focus indicator.
 11. Open browser console and Network response previews.
    - Expected: no console errors, token canary, raw account number, or authorization header.
-12. Stop only the user-owned development stack using its normal `Ctrl+C` flow, then run `npm run dev:preview`.
+12. Run `npm run dev:preview -- --no-color` in another terminal; it is safe while the app is running and does not start another service.
     - Expected: the existing banner remains unchanged; an aligned `INVEST` line describes Questrade as optional/fixture-only; core and optional totals remain distinct; no server starts and no live Questrade request occurs.
-13. Start the stack with the normal user-owned `npm run dev` command and capture the early-ready and background-check sections in the terminal.
+13. When convenient, stop only the user-owned development stack with its normal `Ctrl+C`, then start it with `npm run dev` and capture the early-ready and background-check sections in the terminal.
     - Expected: output follows the supplied screenshot grammar, the core app becomes ready without waiting on Investments, no balance/account/symbol/provider destination is printed, and `Ctrl+C` still stops only launcher-owned API and web processes cleanly.
 
 ### Gate 1 blocks Stage 2 until
 
 - the user accepts every connection state and the desktop/mobile presentation;
 - all Stage 1 deterministic checks pass;
-- the automated browser attempt has either passed or has one freshly reproduced inherited transport gap covered by the completed manual rendered script;
+- the required automated desktop/mobile browser journey has passed against the already-running user-owned app;
 - Google Connected Accounts behavior is proven unchanged;
 - fixture mode is proven unavailable in production;
 - the user accepts that the app owns automatic local key management and that secure-storage failure blocks connection without asking them to handle encryption;

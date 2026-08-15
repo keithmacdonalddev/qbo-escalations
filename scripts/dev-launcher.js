@@ -53,6 +53,7 @@ function createOutput({ stream = process.stdout, color = true, quiet = false } =
     if (source === 'jobs') return colorize('33;1', 'JOBS ', color);
     if (source === 'data') return colorize('32;1', 'DATA ', color);
     if (source === 'work') return colorize('34;1', 'WORK ', color);
+    if (source === 'invest') return colorize('36;1', 'INVEST', color);
     if (source === 'deep') return colorize('33;1', 'DEEP ', color);
     return colorize('34;1', ' DEV ', color);
   };
@@ -929,6 +930,28 @@ function emitServiceHealth(output, health) {
     }
   }
 
+  if (health.investments) {
+    const investmentTransport = health.transport?.investments;
+    if (investmentTransport?.ok === false) {
+      emitHealthWarning(
+        output,
+        `${healthFailureLabel(investmentTransport)} — Investments status could not be verified`,
+        'Open Connected Accounts after the API finishes settling.',
+        'invest'
+      );
+      mark('attention', 'optional');
+    } else if (health.investments.mode === 'simulated') {
+      output.success('✅ Questrade test states ready — simulated Margin account only; live access off', 'invest');
+      mark('healthy', 'optional');
+    } else if (health.investments.liveAccessEnabled === true) {
+      output.success(`✅ Questrade connection ready — ${health.investments.accountType || 'investment'} account`, 'invest');
+      mark('healthy', 'optional');
+    } else {
+      output.info('ℹ️ Questrade not connected — optional; live access is off', 'invest');
+      mark('notConfigured', 'optional');
+    }
+  }
+
   return summary;
 }
 
@@ -939,7 +962,7 @@ async function collectServiceHealth(ports, options = {}) {
   const websocketFn = options.websocketFn || checkWebSocket;
   const eventStreamFn = options.eventStreamFn || checkWorkspaceEventStream;
   const retryOptions = { sleep: options.retrySleep, delayMs: options.retryDelayMs ?? 200 };
-  const [realtime, liveCall, eventStream, runtimeResponse, workspaceResponse, profileResponse, packageStoreResponse] = await Promise.all([
+  const [realtime, liveCall, eventStream, runtimeResponse, workspaceResponse, profileResponse, packageStoreResponse, investmentsResponse] = await Promise.all([
     retryTransientHealthCheck(
       () => websocketFn(`${wsBase}/api/realtime`, { origin: webBase }),
       { ...retryOptions, fallbackMessage: 'Realtime socket check failed.' }
@@ -968,6 +991,10 @@ async function collectServiceHealth(ports, options = {}) {
       () => requestFn(`${webBase}/api/image-parser/package-store-health`, { method: 'POST', timeoutMs: 8000 }),
       'Provider evidence storage check failed.'
     ),
+    retryTransientHealthCheck(
+      () => requestFn(`${webBase}/api/investments/providers/questrade/connection`, 5000),
+      { ...retryOptions, fallbackMessage: 'Investments status check failed.' }
+    ),
   ]);
   return {
     realtime,
@@ -977,11 +1004,13 @@ async function collectServiceHealth(ports, options = {}) {
     workspaceStatus: parseJsonResponse(workspaceResponse) || workspaceResponse,
     profile: parseJsonResponse(profileResponse)?.profile || null,
     packageStore: parseJsonResponse(packageStoreResponse) || packageStoreResponse,
+    investments: parseJsonResponse(investmentsResponse) || investmentsResponse,
     transport: {
       runtime: runtimeResponse,
       workspace: workspaceResponse,
       profile: profileResponse,
       packageStore: packageStoreResponse,
+      investments: investmentsResponse,
     },
   };
 }
@@ -1274,13 +1303,14 @@ function renderPreview(output, ports = { api: DEFAULT_API_PORT, client: DEFAULT_
   output.success('✅ No stuck requests, AI operations, Workspace sessions, or background tasks', 'jobs');
   output.success('✅ Provider evidence storage is writable and readable (12 ms)', 'data');
   output.success('✅ Connected services: Gmail just now · Calendar 2m ago', 'work');
+  output.success('✅ Questrade test states ready — simulated Margin account only; live access off', 'invest');
   output.success('✅ Background systems: monitor healthy · briefing healthy · knowledge review-needed · AI catalog scheduled · agents checked just now', 'jobs');
   output.blank();
   output.always(formatReadySummary({
     durationMs: 4300,
     healthSummary: {
       operational: { healthy: 7, notConfigured: 0, attention: 0, total: 7 },
-      optional: { healthy: 0, notConfigured: 0, attention: 0, total: 0 },
+      optional: { healthy: 1, notConfigured: 0, attention: 0, total: 1 },
     },
   }));
 }

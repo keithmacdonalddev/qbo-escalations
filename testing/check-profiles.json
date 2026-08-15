@@ -45,7 +45,45 @@
       "cwd": ".",
       "timeoutMs": 30000,
       "why": "Checks startup messaging, code identity, core-before-background ordering, safe transient retry, precise recovery guidance, quiet and browser-open modes, WebSocket and event-stream health, evidence-store reporting, and honest per-service shutdown without controlling persistent services.",
-      "capabilities": ["development-startup-safety"]
+      "capabilities": ["development-startup-safety", "investments-questrade-stage-1"]
+    },
+    "investments-server": {
+      "label": "Investments server and security boundaries",
+      "command": "node",
+      "args": ["server/scripts/run-tests.js", "--continue", "test/investments/security-boundaries.test.js", "test/investments/connection-routes.test.js", "test/realtime-websocket.test.js", "test/live-call-assist-websocket.test.js"],
+      "resultContract": "server-tests",
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "why": "Checks the isolated Investments module, safe simulated Questrade states, encryption, local Host policy, outbound host allowlist, and HTTP/WebSocket boundaries.",
+      "capabilities": ["investments-questrade-stage-1"]
+    },
+    "investments-client": {
+      "label": "Investments Connected Accounts UI",
+      "command": "npm",
+      "args": ["--prefix", "client", "test", "--", "src/api/investments.test.js", "src/components/connected-accounts/ConnectedAccountCard.test.jsx", "src/components/SettingsAccountsSection.test.jsx", "src/components/investments/QuestradeConnectedAccount.test.jsx"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "why": "Checks the provider-neutral account frame and every safe simulated Questrade state without live services.",
+      "capabilities": ["investments-questrade-stage-1"]
+    },
+    "investments-boundary": {
+      "label": "Investments module ownership boundaries",
+      "command": "node",
+      "args": ["server/scripts/run-tests.js", "--continue", "test/investments/module-boundaries.test.js"],
+      "resultContract": "server-tests",
+      "cwd": ".",
+      "timeoutMs": 30000,
+      "why": "Prevents Investments and QBO teams from importing each other's internals and proves module registration has no lifecycle side effects.",
+      "capabilities": ["investments-questrade-stage-1"]
+    },
+    "investments-browser": {
+      "label": "Rendered Investments desktop and mobile journey",
+      "command": "node",
+      "args": ["scripts/investments-browser-acceptance.js"],
+      "cwd": ".",
+      "timeoutMs": 120000,
+      "why": "Uses the already-running user-owned app for the required rendered gate; if it is unavailable, reports an explicit incomplete result without starting or stopping services.",
+      "capabilities": ["investments-questrade-stage-1"]
     },
     "client-build": {
       "label": "Production client build and bundle canary",
@@ -99,8 +137,9 @@
     }
   },
   "profiles": {
-    "core": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "dev-startup", "testing-map"],
+    "core": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "dev-startup", "investments-boundary", "testing-map"],
     "focused-qbo": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "dev-startup", "qbo-stress-slices", "testing-map"],
+    "investments": ["investments-server", "investments-client", "investments-boundary", "dev-startup", "investments-browser", "testing-map"],
     "full": ["client-components", "server-suite", "stress-harness-tests", "runner-contracts", "dev-startup", "client-build", "all-stress-slices", "testing-map"]
   }
 }

@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import ConnectedAccountCard from './connected-accounts/ConnectedAccountCard.jsx';
 
 function GoogleLogo({ size = 18 }) {
   return (
@@ -38,39 +39,24 @@ export default function SettingsAccountsSection({
   onDefaultEmailAccountChange,
   onDefaultSendingAccountChange,
   onDefaultCalendarAccountChange,
+  additionalProviderCards = [],
 }) {
   return (
     <div className="settings-panel">
       <header className="settings-v2-heading">
         <div>
           <h2>Connected Accounts</h2>
-          <p>Google access and defaults for reading, sending, and calendar.</p>
+          <p>Services and financial accounts connected to your personal workspace.</p>
         </div>
       </header>
 
-      <div className="settings-accounts-card">
-        <div className="settings-accounts-card-header">
-          <div className="settings-accounts-provider">
-            <div className="settings-accounts-provider-icon">
-              <GoogleLogo size={24} />
-            </div>
-            <div className="settings-accounts-provider-info">
-              <span className="settings-accounts-provider-name">Google</span>
-              <span className="settings-accounts-provider-desc">Gmail &amp; Calendar</span>
-            </div>
-          </div>
-          {googleAuth.loading ? (
-            <span className="settings-accounts-status settings-accounts-status--loading">Checking...</span>
-          ) : googleAuth.connected ? (
-            <span className="settings-accounts-status settings-accounts-status--connected">
-              <span className="settings-accounts-status-dot" />
-              Connected
-            </span>
-          ) : (
-            <span className="settings-accounts-status settings-accounts-status--disconnected">Not connected</span>
-          )}
-        </div>
-
+      <ConnectedAccountCard
+        icon={<GoogleLogo size={24} />}
+        providerName="Google"
+        providerDescription="Gmail & Calendar"
+        statusLabel={googleAuth.loading ? 'Checking...' : googleAuth.connected ? 'Connected' : 'Not connected'}
+        statusTone={googleAuth.loading ? 'loading' : googleAuth.connected ? 'connected' : 'disconnected'}
+      >
         <AnimatePresence mode="wait">
           {googleAuth.loading ? (
             <motion.div
@@ -285,7 +271,9 @@ export default function SettingsAccountsSection({
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </ConnectedAccountCard>
+
+      {additionalProviderCards.map((card) => card)}
 
       <div className="settings-info-footer" style={{ marginTop: 'var(--sp-6)' }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -294,7 +282,7 @@ export default function SettingsAccountsSection({
           <line x1="12" y1="8" x2="12.01" y2="8" />
         </svg>
         <span>
-          Credentials stay local. Disconnecting revokes Google access.
+          Connected-account credentials stay local. Disconnecting a provider revokes its access.
         </span>
       </div>
     </div>

@@ -61,9 +61,10 @@ test('preview is concise, useful, and free of raw startup stack noise', () => {
   assert.match(text, /Press Ctrl\+C once/);
   assert.match(text, /one-stop shutdown/);
   assert.match(text, /master · commit 417b85c · Node/);
-  assert.match(text, /Ready in 4\.3s — core 2\/2 ready · operational 7\/7 healthy/);
+  assert.match(text, /INVEST.*Questrade test states ready/);
+  assert.match(text, /Ready in 4\.3s — core 2\/2 ready · operational 7\/7 healthy · optional 1 healthy/);
   assert.ok(text.indexOf('Core app ready') < text.indexOf('Finishing background checks'));
-  assert.doesNotMatch(text, /AggregateError|node:internal|EADDRINUSE/);
+  assert.doesNotMatch(text, /AggregateError|node:internal|EADDRINUSE|accessToken|refreshToken|accountNumber/);
 });
 
 test('environment parsing handles comments, export, and quoted values', () => {

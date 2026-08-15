@@ -2,6 +2,7 @@
 
 const { WebSocketServer, WebSocket } = require('ws');
 const { isAllowedOrigin } = require('../lib/origin-policy');
+const { isAllowedLocalRequestHost } = require('../lib/local-host-policy');
 const {
   getCaseRealtimeStatus,
   resetCaseRealtimeEvents,
@@ -359,7 +360,8 @@ function attachRealtimeServer(httpServer) {
 
     if (pathname !== REALTIME_PATH) return;
 
-    if (!isAllowedOrigin(request.headers.origin, undefined, { host: request.headers.host })) {
+    if (!isAllowedLocalRequestHost(request.headers.host)
+      || !isAllowedOrigin(request.headers.origin, undefined, { host: request.headers.host })) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;

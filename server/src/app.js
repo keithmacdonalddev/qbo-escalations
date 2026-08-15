@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { buildCorsOptions } = require('./lib/origin-policy');
+const { requireLocalRequestHost } = require('./lib/local-host-policy');
 const { normalizeApiError } = require('./lib/api-errors');
 const { listProviderHealth } = require('./services/provider-health');
 const { registerRequestRuntime, getRequestRuntimeHealth } = require('./services/request-runtime');
@@ -30,6 +31,7 @@ function createApp() {
 
   const app = express();
   if (process.env.QBO_TRUST_PROXY === '1') app.set('trust proxy', 1);
+  app.use(requireLocalRequestHost());
   app.use(cors(buildCorsOptions()));
   app.use(requestId);
   app.use(registerRequestRuntime);
@@ -101,6 +103,8 @@ function createApp() {
   app.use('/api/test-runner', require('./routes/test-runner'));
   app.use('/api/rooms', require('./routes/room'));
   app.use('/api/ticket-snitch', require('./routes/ticket-snitch'));
+  const investmentsModule = require('./modules/investments').createInvestmentsModule();
+  app.use(investmentsModule.apiBasePath, investmentsModule.router);
 
   // Catch-all for unmatched /api routes. Without this, an unknown /api path falls
   // through to Express's default finalizer and returns an HTML 404, which breaks

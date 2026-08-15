@@ -21,6 +21,7 @@
     "stress:slices": "node stress-testing/scripts/run-slices.js",
     "verify:core": "node scripts/run-app-checks.js core",
     "verify:qbo": "node scripts/run-app-checks.js focused-qbo",
+    "verify:investments": "node scripts/run-app-checks.js investments",
     "verify:full": "node scripts/run-app-checks.js full",
     "validate:testing-map": "node scripts/validate-testing-map.js"
   },

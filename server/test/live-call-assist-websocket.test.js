@@ -21,6 +21,27 @@ function openSocket(port, options = {}) {
   });
 }
 
+function expectSocketOpenFailure(port, options = {}, timeoutMs = 5_000) {
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${LIVE_CALL_ASSIST_PATH}`, options);
+    const timer = setTimeout(() => {
+      try { ws.terminate(); } catch {}
+      reject(new Error(`Timed out waiting for websocket failure after ${timeoutMs}ms`));
+    }, timeoutMs);
+    ws.once('open', () => {
+      clearTimeout(timer);
+      try { ws.close(); } catch {}
+      reject(new Error('Expected websocket handshake to fail, but it opened'));
+    });
+    ws.once('unexpected-response', (_req, res) => {
+      clearTimeout(timer);
+      try { ws.close(); } catch {}
+      resolve(res.statusCode);
+    });
+    ws.once('error', () => {});
+  });
+}
+
 function waitForClose(ws, timeoutMs = 5_000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timed out waiting for websocket close after ${timeoutMs}ms`)), timeoutMs);
@@ -170,6 +191,13 @@ test('live call assist websocket bridge', async (t) => {
     assert.equal(res.body.provider, 'elevenlabs');
     assert.equal(res.body.modelId, 'scribe_v2_realtime');
     assert.equal(Object.prototype.hasOwnProperty.call(res.body, 'apiKey'), false);
+  });
+
+  await t.test('non-local Host headers are rejected before live-call websocket upgrade', async () => {
+    const statusCode = await expectSocketOpenFailure(appPort, {
+      headers: { Host: 'attacker.example:4000' },
+    });
+    assert.equal(statusCode, 403);
   });
 
   await t.test('proxies browser audio to ElevenLabs and relays transcript events', async () => {

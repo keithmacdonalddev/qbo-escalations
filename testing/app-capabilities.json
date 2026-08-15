@@ -518,6 +518,38 @@
       "lastHumanReviewDate": "2026-07-22"
     },
     {
+      "id": "investments-questrade-stage-1",
+      "label": "Safe simulated Questrade foundation",
+      "userOutcome": "The user can see Investments as a first-class connected account, test every important connection and failure state locally, and confirm that no real Questrade token, financial value, provider request, or trading action is involved yet.",
+      "risk": "high",
+      "owner": "Investments",
+      "sourcePaths": [
+        "server/src/modules/investments/index.js",
+        "server/src/routes/investments/index.js",
+        "server/src/lib/local-host-policy.js",
+        "server/src/lib/field-encryption.js",
+        "server/src/services/investments/credential-key-provider.js",
+        "server/src/services/investments/providers/questrade/api-host-policy.js",
+        "client/src/components/connected-accounts/ConnectedAccountCard.jsx",
+        "client/src/components/investments/QuestradeConnectedAccount.jsx",
+        "client/src/hooks/useQuestradeConnection.js",
+        "scripts/dev-launcher.js"
+      ],
+      "requiredCheckTypes": ["unit", "component", "server", "browser"],
+      "evidence": [
+        { "type": "unit", "groupId": "investments-boundary", "paths": ["server/test/investments/module-boundaries.test.js"] },
+        { "type": "unit", "groupId": "dev-startup", "paths": ["scripts/dev-launcher.test.js"] },
+        { "type": "component", "groupId": "investments-client", "paths": ["client/src/api/investments.test.js", "client/src/components/connected-accounts/ConnectedAccountCard.test.jsx", "client/src/components/SettingsAccountsSection.test.jsx", "client/src/components/investments/QuestradeConnectedAccount.test.jsx"] },
+        { "type": "server", "groupId": "investments-server", "paths": ["server/test/investments/security-boundaries.test.js", "server/test/investments/connection-routes.test.js", "server/test/realtime-websocket.test.js", "server/test/live-call-assist-websocket.test.js"] },
+        { "type": "browser", "groupId": "investments-browser", "paths": ["scripts/investments-browser-acceptance.js"] }
+      ],
+      "knownGaps": [
+        "Rendered desktop and mobile acceptance is required before Stage 1 passes.",
+        "No live Questrade request, token storage, account read, streaming connection, scheduler, or portfolio value exists in Stage 1 by design."
+      ],
+      "lastHumanReviewDate": "2026-08-14"
+    },
+    {
       "id": "development-startup-safety",
       "label": "Friendly and safe local development startup",
       "userOutcome": "Starting or checking the local app quickly identifies the exact code in use, reports core readiness before slower operational checks, retries only safe temporary failures once, gives one direct fix for each warning, supports quiet or browser-open startup, and confirms shutdown service by service without touching unrelated processes.",

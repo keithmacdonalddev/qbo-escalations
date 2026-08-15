@@ -188,6 +188,13 @@ test('realtime websocket channels', async (t) => {
     assert.equal(statusCode, 403);
   });
 
+  await t.test('non-local Host headers are rejected before websocket upgrade', async () => {
+    const statusCode = await expectSocketOpenFailure(port, {
+      headers: { Host: 'attacker.example:4000' },
+    });
+    assert.equal(statusCode, 403);
+  });
+
   await t.test('invalid case subscriptions are rejected without affecting the shared connection', async () => {
     const ws = await openSocket(port);
     const feed = createMessageFeed(ws);

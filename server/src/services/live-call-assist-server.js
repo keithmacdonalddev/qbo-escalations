@@ -2,6 +2,7 @@
 
 const { WebSocketServer, WebSocket } = require('ws');
 const { isAllowedOrigin } = require('../lib/origin-policy');
+const { isAllowedLocalRequestHost } = require('../lib/local-host-policy');
 
 const LIVE_CALL_ASSIST_PATH = '/api/live-call-assist/stream';
 const DEFAULT_ELEVENLABS_REALTIME_URL = 'wss://api.elevenlabs.io/v1/speech-to-text/realtime';
@@ -594,7 +595,8 @@ function attachLiveCallAssistServer(httpServer) {
 
     if (pathname !== LIVE_CALL_ASSIST_PATH) return;
 
-    if (!isAllowedOrigin(request.headers.origin, undefined, { host: request.headers.host })) {
+    if (!isAllowedLocalRequestHost(request.headers.host)
+      || !isAllowedOrigin(request.headers.origin, undefined, { host: request.headers.host })) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
       socket.destroy();
       return;

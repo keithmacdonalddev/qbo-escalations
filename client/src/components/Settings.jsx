@@ -15,6 +15,7 @@ import {
 import AiAssistantSettingsPanel from './AiAssistantSettingsPanel.jsx';
 import AiManagementSettings from './AiManagementSettings.jsx';
 import SettingsAccountsSection from './SettingsAccountsSection.jsx';
+import { QuestradeConnectedAccount, useQuestradeConnection } from './investments/index.js';
 
 function Icon({ name, size = 17 }) {
   const paths = {
@@ -35,7 +36,7 @@ function Icon({ name, size = 17 }) {
 
 const SETTINGS_SECTIONS = [
   { id: 'ai-management', label: 'AI Management', desc: 'Providers, models, keys, and releases', icon: 'cpu', keywords: 'api key model catalog enable disable dynamic discovery' },
-  { id: 'accounts', label: 'Connected Accounts', desc: 'Google access and account defaults', icon: 'link', keywords: 'gmail email send oauth account calendar' },
+  { id: 'accounts', label: 'Connected Accounts', desc: 'Google and investments', icon: 'link', keywords: 'gmail email send oauth account calendar questrade investments margin portfolio' },
   { id: 'ai-safety', label: 'AI Safety & Context', desc: 'Cost, context, memory, and diagnostics', icon: 'shield', keywords: 'budget token retrieval guardrail debug memory' },
   { id: 'display', label: 'Display & Navigation', desc: 'Readability, sidebar, and hints', icon: 'display', keywords: 'text size tooltip sidebar labels hover accessibility' },
   { id: 'advanced', label: 'Developer Tools', desc: 'Performance and network diagnostics', icon: 'tools', keywords: 'waterfall flame led speed intensity diagnostics' },
@@ -49,6 +50,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
   const [savingDefault, setSavingDefault] = useState('');
   const liveRegionRef = useRef(null);
   const { level: tooltipLevel, setLevel: setTooltipLevel } = useTooltipLevel();
+  const questradeConnection = useQuestradeConnection();
   const textSize = themeProps?.textSize || 0;
 
   const [googleAuth, setGoogleAuth] = useState({
@@ -345,6 +347,9 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
                   successMessage: (value) => value ? `Default calendar set to ${value}` : 'Default calendar reset.',
                 });
               }}
+              additionalProviderCards={[
+                <QuestradeConnectedAccount key="questrade" connection={questradeConnection} />,
+              ]}
             />
           </div>
         )}
