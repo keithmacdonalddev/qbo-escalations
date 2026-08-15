@@ -28,6 +28,15 @@ When explaining or building features, separate the user goal, product workflow, 
 - Deliver a complete, polished result—not a bare-minimum or watered-down implementation. Fill obvious gaps and include normal supporting work such as validation, error handling, documentation, and proportionate tests.
 - Critical thinking does not authorize unrelated scope. If filling a gap would materially change product direction, permissions, stored data, cost, or the requested workflow, explain the assumption and ask before proceeding.
 
+## Mandatory Scope Lock
+
+- Before any task that may edit files, run more than read-only inspection, or change external state, state a short scope lock in the conversation. It must name the goal, allowed changes, explicit exclusions, verification limit, and the conditions that require renewed user approval.
+- Do not begin mutations until the scope lock is stated. Treat normal supporting work as in scope only when it is directly required for the requested result and included in the allowed changes.
+- The scope lock also limits testing. Default to the smallest focused checks that directly prove the affected behavior. Run a complete core or repository-wide suite only when the user requests it, the change alters a genuinely shared contract or release boundary, or focused checks cannot provide adequate confidence; state the reason before running it.
+- Discovering an adjacent defect, cleanup opportunity, documentation improvement, or feature idea does not authorize implementing it. Report it separately unless leaving it unresolved would make the requested result incorrect or unsafe.
+- If new information would materially increase elapsed time, changed files, behavior, test breadth, cost, permissions, or risk, pause and ask before expanding the scope lock.
+- Before committing, perform a final scope audit: compare every changed file and verification command with the scope lock, remove only your own out-of-scope work, preserve concurrent work, and disclose any approved deviation in the final response.
+
 ## Provider Model Currency
 
 - Use the most recent appropriate release in each provider model line. Do not keep an older model selectable merely because a new release might regress.
