@@ -10,16 +10,16 @@ AI Management is the system-wide source of truth for which AI providers and mode
 
 Changing the catalog never silently rewrites an agent profile. This preserves intentional agent-specific choices and makes any affected profile visible for review.
 
-## Current verified model baseline (2026-07-21)
+## Current verified model baseline (2026-08-15)
 
 The Gemini and Kimi entries were rechecked against the providers' current official documentation, not only their model-list endpoints.
 
 | Provider | Current default | Other current approved choices | Request compatibility enforced by the app |
 | --- | --- | --- | --- |
-| Gemini | `gemini-3.6-flash` | `gemini-3.5-flash`, `gemini-3.5-flash-lite`, `gemini-3.1-pro-preview` | Uses `thinkingConfig.thinkingLevel`; omits deprecated `temperature`, `topP`, and `topK` sampling controls |
+| Gemini | `gemini-3.6-flash` | `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite` | Uses `thinkingConfig.thinkingLevel`; omits deprecated `temperature`, `topP`, and `topK` sampling controls |
 | Kimi Open Platform | `kimi-k3` | `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` | K3 is always-reasoning and uses `reasoning_effort` plus `max_completion_tokens`; K2.7 Code keeps thinking on and does not receive `reasoning_effort`; fixed sampling fields are omitted |
 
-Gemini 3.6 Flash is the current default for balanced agent work. Gemini 3.5 Flash remains a current stable choice because Google separately positions it for sustained frontier agentic and coding work; it is not retained merely as a rollback. Gemini 3.5 Flash-Lite replaces Gemini 3.1 Flash-Lite. Kimi K3 replaces K2.6 as the current general-purpose default. Removed entries remain usable by existing profiles while **Approved models only** is off, and old harness results remain historical evidence; they are no longer offered as current choices.
+Gemini 3.6 Flash remains the documented default for balanced agent work. The authenticated Gemini model-list response on 2026-08-15 exposed `gemini-3.7-flash` with `generateContent`, image input, thinking, a 1,048,576-token input limit, and a 65,536-token output limit, so it is now an approved selectable choice. Google's public model and pricing guides did not yet list 3.7 Flash during this review, so the app does not automatically reassign agents to it or invent a cost rate. The older Gemini 3.1 Pro Preview choice was removed, and the confidential `gemini-3.7-flash-video-understanding-eap` surface is ignored because this app's Gemini transport is for text/agent responses rather than video generation. Gemini 3.5 Flash and Flash-Lite remain separately documented current choices. Kimi K3 remains the current general-purpose Kimi default. Removed entries remain usable by existing profiles while **Approved models only** is off, and old harness results remain historical evidence; they are no longer offered as current choices.
 
 Kimi Open Platform and the separate Kimi Code membership API are not interchangeable. This app's `kimi` provider uses `https://api.moonshot.ai/v1` and Open Platform model IDs such as `kimi-k3`. It must not send Kimi Code membership IDs such as `k3` or `kimi-for-coding` unless a separate provider, base URL, and credential type are deliberately added.
 

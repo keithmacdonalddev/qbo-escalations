@@ -243,7 +243,7 @@ test('Anthropic request builder sends system separately and parses usage', async
   assert.equal(fableResult.text, 'Fable answer.');
 });
 
-test('Gemini request builder uses native generateContent payload and parses usage', async () => {
+test('Gemini 3.7 Flash request builder uses native generateContent payload and parses usage', async () => {
   let captured = null;
   const request = requestGeminiChat({
     messages: [
@@ -251,7 +251,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
       { role: 'assistant', content: 'Here is the draft answer.' },
     ],
     systemPrompt: 'Be precise.',
-    model: 'gemini-3.6-flash',
+    model: 'gemini-3.7-flash',
     reasoningEffort: 'medium',
     getApiKeyFn: async () => 'AIza-test',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
@@ -260,7 +260,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
         promise: Promise.resolve({
           statusCode: 200,
           body: JSON.stringify({
-            modelVersion: 'gemini-3.6-flash',
+            modelVersion: 'gemini-3.7-flash',
             candidates: [{ content: { parts: [{ text: 'Gemini reply' }] } }],
             usageMetadata: { promptTokenCount: 19, candidatesTokenCount: 6, totalTokenCount: 25 },
           }),
@@ -274,7 +274,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
 
   assert.equal(captured.method, 'POST');
   assert.equal(captured.baseUrl, 'https://generativelanguage.googleapis.com');
-  assert.match(captured.urlPath, /\/v1beta\/models\/gemini-3\.6-flash:generateContent$/);
+  assert.match(captured.urlPath, /\/v1beta\/models\/gemini-3\.7-flash:generateContent$/);
   assert.equal(captured.headers['x-goog-api-key'], 'AIza-test');
   assert.equal(captured.body.system_instruction.parts[0].text, 'Be precise.');
   assert.equal(captured.body.contents[0].role, 'user');
@@ -291,7 +291,7 @@ test('Gemini request builder uses native generateContent payload and parses usag
   assert.equal(captured.captureContext.callSite, 'remote-api-providers:requestGeminiChat');
   assert.equal(result.text, 'Gemini reply');
   assert.deepStrictEqual(result.usage, {
-    model: 'gemini-3.6-flash',
+    model: 'gemini-3.7-flash',
     inputTokens: 19,
     outputTokens: 6,
   });

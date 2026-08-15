@@ -234,7 +234,7 @@ function buildCatalogReview(providerId) {
 function isReviewedDiscoveryIgnore(providerId, modelId) {
   if (providerModelDefaults(providerId).some((model) => model.id === modelId)) return false;
   const unsupportedSurfacePattern = providerId === 'gemini'
-    ? /(?:^|[-_])(tts|live|audio|image|imagen|veo|embedding|aqa|robotics|computer-use|omni)(?:$|[-_])/i
+    ? /(?:^|[-_])(tts|live|audio|image|imagen|video|veo|embedding|aqa|robotics|computer-use|omni)(?:$|[-_])/i
     : providerId === 'openai'
       ? /(audio|realtime|transcrib|tts|image|search|embedding|moderation)/i
       : null;
@@ -393,6 +393,13 @@ function sanitizeDiscoverySummary(providerId, savedModels, configuredSummary) {
   };
 }
 
+function shouldIncludeUncuratedModel(providerId, modelId, modelState = {}) {
+  const source = String(modelState.source || '');
+  const isAutomaticallyManaged = source === 'provider-discovery' || source === 'curated-catalog';
+  if (!isAutomaticallyManaged || String(modelState.validationEvidence || '').trim()) return true;
+  return classifyDiscoveryModel(providerId, { ...modelState, id: modelId }) === 'new';
+}
+
 function buildProviderSnapshot(providerId) {
   const meta = PROVIDER_META[providerId] || {};
   const providerState = isPlainObject(state.providers[providerId]) ? state.providers[providerId] : {};
@@ -416,9 +423,7 @@ function buildProviderSnapshot(providerId) {
   }
   for (const [modelId, modelState] of Object.entries(savedModels)) {
     if (seen.has(modelId)) continue;
-    if (modelState?.source === 'provider-discovery'
-      && !String(modelState.validationEvidence || '').trim()
-      && classifyDiscoveryModel(providerId, { ...modelState, id: modelId }) !== 'new') continue;
+    if (!shouldIncludeUncuratedModel(providerId, modelId, modelState)) continue;
     models.push(mergeModel(providerId, null, { ...modelState, id: modelId }));
   }
 
@@ -764,7 +769,7 @@ function normalizeGeminiModels(data) {
   return (Array.isArray(data?.models) ? data.models : [])
     .filter((model) => Array.isArray(model?.supportedGenerationMethods)
       && model.supportedGenerationMethods.includes('generateContent'))
-    .filter((model) => !/(?:^|[-_])(tts|live|audio|image|imagen|veo|embedding|aqa|robotics|computer-use|omni)(?:$|[-_])/i.test(
+    .filter((model) => !/(?:^|[-_])(tts|live|audio|image|imagen|video|veo|embedding|aqa|robotics|computer-use|omni)(?:$|[-_])/i.test(
       String(model.baseModelId || model.name || '').replace(/^models\//, '')
     ))
     .map((model) => ({
@@ -1389,4 +1394,5 @@ module.exports._internal = {
   isReviewedDiscoveryIgnore,
   mergeModel,
   reconcileModelPolicy,
+  shouldIncludeUncuratedModel,
 };

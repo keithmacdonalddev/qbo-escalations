@@ -31,6 +31,7 @@ const {
   isReviewedDiscoveryIgnore,
   mergeModel,
   reconcileModelPolicy,
+  shouldIncludeUncuratedModel,
 } = require('../src/services/ai-management')._internal;
 const { createApp } = require('../src/app');
 const { evaluateProactiveAction } = require('../src/services/workspace-proactive');
@@ -148,14 +149,17 @@ test('provider defaults and CLI model presets cannot drift from the governed mod
   }
 });
 
-test('the governed catalog carries review provenance and current Gemini stable choices', () => {
+test('the governed catalog carries review provenance and current Gemini approved choices', () => {
   const snapshot = getManagementSnapshot();
   const gemini = snapshot.providers.find((provider) => provider.id === 'gemini');
 
+  assert.ok(gemini.models.some((model) => model.id === 'gemini-3.7-flash'));
   assert.ok(gemini.models.some((model) => model.id === 'gemini-3.6-flash'));
   assert.ok(gemini.models.some((model) => model.id === 'gemini-3.5-flash'));
   assert.ok(gemini.models.some((model) => model.id === 'gemini-3.5-flash-lite'));
-  assert.equal(gemini.catalogReview.reviewedAt, '2026-07-21');
+  assert.equal(gemini.models.some((model) => model.id === 'gemini-3.1-pro-preview'), false);
+  assert.equal(gemini.models.some((model) => model.id === 'gemini-3.7-flash-video-understanding-eap'), false);
+  assert.equal(gemini.catalogReview.reviewedAt, '2026-08-15');
   assert.equal(gemini.catalogReview.expiresAfterDays, 14);
   assert.equal(gemini.catalogReview.requiresMaintainedCatalogRelease, true);
   assert.ok(gemini.catalogReview.officialSources.some((source) => source === 'https://ai.google.dev/gemini-api/docs/models'));
@@ -164,10 +168,10 @@ test('the governed catalog carries review provenance and current Gemini stable c
 test('catalog refresh promotes newly curated discoveries and demotes superseded auto-approvals', () => {
   const newlyCurated = mergeModel(
     'gemini',
-    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', releaseChannel: 'stable' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash', releaseChannel: 'account-visible' },
     {
-      id: 'gemini-3.6-flash',
-      label: 'Gemini 3.6 Flash from discovery',
+      id: 'gemini-3.7-flash',
+      label: 'Gemini 3.7 Flash from discovery',
       approval: 'candidate',
       enabled: false,
       validationStatus: 'not-run',
@@ -179,7 +183,7 @@ test('catalog refresh promotes newly curated discoveries and demotes superseded 
   assert.equal(newlyCurated.enabled, true);
   assert.equal(newlyCurated.validationStatus, 'catalogued');
   assert.equal(newlyCurated.source, 'curated-catalog');
-  assert.equal(newlyCurated.label, 'Gemini 3.6 Flash');
+  assert.equal(newlyCurated.label, 'Gemini 3.7 Flash');
 
   assert.deepEqual(reconcileModelPolicy(null, {
     id: 'gemini-superseded-flash',
@@ -202,14 +206,36 @@ test('catalog refresh promotes newly curated discoveries and demotes superseded 
     validationEvidence: 'harness-run-123',
     source: 'provider-discovery',
   }), {});
+
+  assert.equal(shouldIncludeUncuratedModel('gemini', 'gemini-3.1-pro-preview', {
+    approval: 'approved',
+    enabled: true,
+    validationStatus: 'catalogued',
+    source: 'curated-catalog',
+  }), false);
+  assert.equal(shouldIncludeUncuratedModel('gemini', 'gemini-3.8-flash', {
+    approval: 'candidate',
+    enabled: false,
+    validationStatus: 'not-run',
+    source: 'provider-discovery',
+  }), true);
+  assert.equal(shouldIncludeUncuratedModel('gemini', 'custom-validated-model', {
+    approval: 'approved',
+    enabled: true,
+    validationStatus: 'passed',
+    validationEvidence: 'harness-run-123',
+    source: 'provider-discovery',
+  }), true);
 });
 
 test('reviewed discovery filters surface only models newer than the catalog', () => {
   assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-3.1-flash-tts-preview'), true);
+  assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-3.7-flash-video-understanding-eap'), true);
   assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-2.5-flash'), true);
   assert.equal(isReviewedDiscoveryIgnore('gemini', 'gemini-3.5-flash'), false);
   assert.equal(isReviewedDiscoveryIgnore('openai', 'text-embedding-5-large'), true);
-  assert.equal(classifyDiscoveryModel('gemini', { id: 'gemini-3.7-flash' }), 'new');
+  assert.equal(classifyDiscoveryModel('gemini', { id: 'gemini-3.7-flash' }), 'reviewed');
+  assert.equal(classifyDiscoveryModel('gemini', { id: 'gemini-3.8-flash' }), 'new');
   assert.equal(classifyDiscoveryModel('gemini', { id: 'gemini-3.1-pro-preview-customtools' }), 'not-new');
   assert.equal(classifyDiscoveryModel('openai', { id: 'gpt-5.7-terra' }), 'new');
   assert.equal(classifyDiscoveryModel('openai', { id: 'gpt-5.6-experimental' }), 'not-new');
@@ -381,6 +407,12 @@ test('Gemini discovery follows pagination and ignores non-agent model surfaces',
             supportedGenerationMethods: ['generateContent'],
           },
           {
+            name: 'models/gemini-3.7-flash-video-understanding-eap',
+            baseModelId: 'gemini-3.7-flash-video-understanding-eap',
+            displayName: '[Confidential] Gemini 3.7 Flash Video Understanding EAP',
+            supportedGenerationMethods: ['generateContent'],
+          },
+          {
             name: 'models/gemini-3.1-pro-preview-customtools',
             baseModelId: 'gemini-3.1-pro-preview-customtools',
             displayName: 'Gemini 3.1 Pro Preview Custom Tools',
@@ -394,22 +426,21 @@ test('Gemini discovery follows pagination and ignores non-agent model surfaces',
   try {
     const result = await refreshProviderModels(['gemini']);
     const provider = result.snapshot.providers.find((entry) => entry.id === 'gemini');
-    const candidate = provider.models.find((model) => model.id === 'gemini-3.7-flash');
 
     assert.deepEqual(urls, [
       'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
       'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&pageToken=page%20two',
     ]);
     assert.equal(result.results[0].ok, true);
-    assert.equal(result.results[0].found, 1);
-    assert.equal(result.results[0].newModelsFound, 1);
-    assert.equal(result.results[0].ignoredCount, 3);
-    assert.equal(result.results[0].candidates, 1);
-    assert.equal(result.results[0].missingReviewed, 3);
+    assert.equal(result.results[0].found, 0);
+    assert.equal(result.results[0].newModelsFound, 0);
+    assert.equal(result.results[0].ignoredCount, 4);
+    assert.equal(result.results[0].candidates, 0);
+    assert.equal(result.results[0].missingReviewed, 2);
     assert.equal(provider.discoveryStatus, 'attention');
     assert.equal(provider.discoverySummary.pages, 2);
-    assert.equal(candidate.approval, 'candidate');
-    assert.equal(candidate.enabled, false);
+    assert.equal(provider.models.some((model) => model.id === 'gemini-3.7-flash'), true);
+    assert.equal(provider.models.some((model) => model.id === 'gemini-3.7-flash-video-understanding-eap'), false);
     assert.equal(provider.models.some((model) => model.id === 'gemini-3.1-flash-tts-preview'), false);
     assert.equal(provider.models.some((model) => model.id === 'gemini-2.5-flash'), false);
     assert.equal(provider.models.some((model) => model.id === 'gemini-3.1-pro-preview-customtools'), false);

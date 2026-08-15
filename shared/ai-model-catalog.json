@@ -64,7 +64,7 @@
       "officialSources": []
     },
     "gemini": {
-      "reviewedAt": "2026-07-21",
+      "reviewedAt": "2026-08-15",
       "expiresAfterDays": 14,
       "reviewKind": "maintained-release",
       "officialSources": [
@@ -76,6 +76,7 @@
         "^gemini-2(?:\\.|-)",
         "^gemini-3-(?:flash|pro)-preview$",
         "^gemini-3\\.1-flash-lite(?:-preview)?$",
+        "^gemini-3\\.7-flash-video-understanding-eap$",
         "^gemini-(?:flash|flash-lite|pro)-latest$"
       ],
       "newModelVersionRules": [
@@ -162,10 +163,10 @@
     "gemini": {
       "discovery": "api",
       "models": [
+        { "id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash", "releaseChannel": "account-visible", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
         { "id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
         { "id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
-        { "id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 },
-        { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro Preview", "releaseChannel": "preview", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 }
+        { "id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash-Lite", "releaseChannel": "stable", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1048576, "maxOutputTokens": 65536 }
       ]
     },
     "kimi": {
