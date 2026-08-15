@@ -602,7 +602,7 @@ function isClaudeImageParserProvider(provider) {
 function getClaudeImageParserModel(provider, model) {
   const requested = typeof model === 'string' ? model.trim() : '';
   if (requested) return requested;
-  return CLAUDE_IMAGE_PARSER_PROVIDER_MODELS[provider] || process.env.CLAUDE_PARSE_MODEL || 'claude-opus-4-8';
+  return CLAUDE_IMAGE_PARSER_PROVIDER_MODELS[provider] || process.env.CLAUDE_PARSE_MODEL || 'claude-opus-5';
 }
 
 function getCodexImageParserModel(provider, model) {

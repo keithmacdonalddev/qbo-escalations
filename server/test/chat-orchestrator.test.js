@@ -659,7 +659,7 @@ await t.test('parallel mode succeeds when one provider fails and one succeeds', 
 
 // ---------- Phase 5: Expanded provider set ----------
 
-await t.test('P5: single mode with claude-opus-4-8 routes through claude CLI', async () => {
+await t.test('P5: single mode with claude-opus-5 routes through claude CLI', async () => {
   claude.chat = ({ onChunk, onDone }) => {
     onChunk('opus response');
     onDone('opus response');
@@ -668,14 +668,14 @@ await t.test('P5: single mode with claude-opus-4-8 routes through claude CLI', a
 
   const out = await runChat({
     mode: 'single',
-    primaryProvider: 'claude-opus-4-8',
+    primaryProvider: 'claude-opus-5',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
   });
 
   assert.equal(out.result, 'done');
-  assert.equal(out.data.providerUsed, 'claude-opus-4-8');
+  assert.equal(out.data.providerUsed, 'claude-opus-5');
   assert.equal(out.data.fullResponse, 'opus response');
 });
 
@@ -699,7 +699,7 @@ await t.test('P5: single mode with gpt-5.4-mini routes through codex CLI', async
   assert.equal(out.data.fullResponse, 'mini response');
 });
 
-await t.test('P5: fallback from claude-opus-4-8 to gpt-5.4-mini', async () => {
+await t.test('P5: fallback from claude-opus-5 to gpt-5.4-mini', async () => {
   claude.chat = ({ onError }) => {
     const err = new Error('opus failed');
     err.code = 'PROVIDER_EXEC_FAILED';
@@ -714,7 +714,7 @@ await t.test('P5: fallback from claude-opus-4-8 to gpt-5.4-mini', async () => {
 
   const out = await runChat({
     mode: 'fallback',
-    primaryProvider: 'claude-opus-4-8',
+    primaryProvider: 'claude-opus-5',
     fallbackProvider: 'gpt-5.4-mini',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
@@ -724,7 +724,7 @@ await t.test('P5: fallback from claude-opus-4-8 to gpt-5.4-mini', async () => {
   assert.equal(out.result, 'done');
   assert.equal(out.data.providerUsed, 'gpt-5.4-mini');
   assert.equal(out.data.fallbackUsed, true);
-  assert.equal(out.data.fallbackFrom, 'claude-opus-4-8');
+  assert.equal(out.data.fallbackFrom, 'claude-opus-5');
 });
 
 await t.test('P5: parallel mode with mixed new providers', async () => {
@@ -741,7 +741,7 @@ await t.test('P5: parallel mode with mixed new providers', async () => {
 
   const out = await runChat({
     mode: 'parallel',
-    primaryProvider: 'claude-opus-4-8',
+    primaryProvider: 'claude-opus-5',
     fallbackProvider: 'gpt-5.4-mini',
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
@@ -752,7 +752,7 @@ await t.test('P5: parallel mode with mixed new providers', async () => {
   assert.equal(out.data.mode, 'parallel');
   assert.ok(Array.isArray(out.data.results));
   assert.equal(out.data.results.length, 2);
-  const opusResult = out.data.results.find((r) => r.provider === 'claude-opus-4-8');
+  const opusResult = out.data.results.find((r) => r.provider === 'claude-opus-5');
   const miniResult = out.data.results.find((r) => r.provider === 'gpt-5.4-mini');
   assert.equal(opusResult.status, 'ok');
   assert.equal(miniResult.status, 'ok');
@@ -778,7 +778,7 @@ await t.test('parallel mode with 3 parallelProviders returns 3 ordered results',
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-8'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-5'],
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -792,7 +792,7 @@ await t.test('parallel mode with 3 parallelProviders returns 3 ordered results',
   // Verify ordering matches the requested parallelProviders
   assert.equal(out.data.results[0].provider, 'claude');
   assert.equal(out.data.results[1].provider, 'gpt-5.5');
-  assert.equal(out.data.results[2].provider, 'claude-opus-4-8');
+  assert.equal(out.data.results[2].provider, 'claude-opus-5');
 
   // Verify each result has the expected fields
   for (const result of out.data.results) {
@@ -818,7 +818,7 @@ await t.test('parallel mode with 4 parallelProviders handles mixed success and f
   const out = await runChat({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-8', 'gpt-5.4-mini'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-5', 'gpt-5.4-mini'],
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],
@@ -832,7 +832,7 @@ await t.test('parallel mode with 4 parallelProviders handles mixed success and f
   // Verify ordering matches parallelProviders
   assert.equal(out.data.results[0].provider, 'claude');
   assert.equal(out.data.results[1].provider, 'gpt-5.5');
-  assert.equal(out.data.results[2].provider, 'claude-opus-4-8');
+  assert.equal(out.data.results[2].provider, 'claude-opus-5');
   assert.equal(out.data.results[3].provider, 'gpt-5.4-mini');
 
   // claude family succeeds, codex family fails
@@ -933,10 +933,10 @@ await t.test('resolvePolicy accepts all 4 valid providers in parallelProviders',
   const policy = resolvePolicy({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-8', 'gpt-5.4-mini'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-5', 'gpt-5.4-mini'],
   });
   assert.equal(policy.parallelProviders.length, 4);
-  assert.deepEqual(policy.parallelProviders, ['claude', 'gpt-5.5', 'claude-opus-4-8', 'gpt-5.4-mini']);
+  assert.deepEqual(policy.parallelProviders, ['claude', 'gpt-5.5', 'claude-opus-5', 'gpt-5.4-mini']);
 });
 
 await t.test('resolvePolicy with empty parallelProviders array falls through to legacy behavior', async () => {
@@ -977,7 +977,7 @@ await t.test('resolvePolicy with null/undefined entries in parallelProviders rej
 });
 
 await t.test('parallel cancel with 3 providers aborts in-flight and preserves completed', async () => {
-  const claudeUsage = { inputTokens: 50, outputTokens: 25, model: 'claude-opus-4-8' };
+  const claudeUsage = { inputTokens: 50, outputTokens: 25, model: 'claude-opus-5' };
   claude.chat = ({ onDone }) => {
     // Claude finishes quickly
     onDone('claude-done', claudeUsage);
@@ -996,7 +996,7 @@ await t.test('parallel cancel with 3 providers aborts in-flight and preserves co
   const cleanup = startChatOrchestration({
     mode: 'parallel',
     primaryProvider: 'claude',
-    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-8'],
+    parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-5'],
     messages: [{ role: 'user', content: 'hi' }],
     systemPrompt: '',
     images: [],

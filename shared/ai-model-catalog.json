@@ -2,20 +2,22 @@
   "schemaVersion": 1,
   "catalogReviews": {
     "claude": {
-      "reviewedAt": "2026-07-21",
+      "reviewedAt": "2026-08-15",
       "expiresAfterDays": 14,
       "reviewKind": "maintained-release",
       "officialSources": [
-        "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "https://platform.claude.com/docs/en/about-claude/models/whats-new-opus-5",
+        "https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions",
         "https://code.claude.com/docs/en/model-config"
       ]
     },
     "anthropic": {
-      "reviewedAt": "2026-07-21",
+      "reviewedAt": "2026-08-15",
       "expiresAfterDays": 14,
       "reviewKind": "maintained-release",
       "officialSources": [
-        "https://platform.claude.com/docs/en/about-claude/models/overview",
+        "https://platform.claude.com/docs/en/about-claude/models/whats-new-opus-5",
+        "https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions",
         "https://platform.claude.com/docs/en/api/models/list"
       ],
       "ignoredModelIdPatterns": [
@@ -116,7 +118,7 @@
       "discovery": "manual",
       "models": [
         { "id": "claude-fable-5", "label": "Claude Fable 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
-        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-opus-5", "label": "Claude Opus 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1000000, "maxOutputTokens": 128000 },
         { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
         { "id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true }
       ]
@@ -125,7 +127,7 @@
       "discovery": "api",
       "models": [
         { "id": "claude-fable-5", "label": "Claude Fable 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
-        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
+        { "id": "claude-opus-5", "label": "Claude Opus 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true, "contextWindowTokens": 1000000, "maxOutputTokens": 128000 },
         { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true },
         { "id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5", "releaseChannel": "current", "supportsImageInput": true, "supportsThinking": true }
       ]

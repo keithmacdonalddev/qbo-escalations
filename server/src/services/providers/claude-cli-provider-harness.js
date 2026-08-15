@@ -307,7 +307,7 @@ async function sendClaudeCliPrompt({
   onProviderEvent,
   signal,
 } = {}) {
-  const effectiveModel = model || captureContext.modelRequested || process.env.CLAUDE_CHAT_MODEL || 'claude-opus-4-8';
+  const effectiveModel = model || captureContext.modelRequested || process.env.CLAUDE_CHAT_MODEL || 'claude-opus-5';
   // Guard BEFORE the model can reach the spawn args below (shell:true).
   assertSafeModel(effectiveModel, 'model');
   const effectiveReasoningEffort = normalizeClaudeEffort(reasoningEffort || captureContext.reasoningEffort);

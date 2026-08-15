@@ -443,12 +443,12 @@ test('knowledgebase-agent runtime round-trips and resolveKbAgentRuntimePolicy re
 test('knowledgebase-agent persists a non-default Claude CLI primary model', async (t) => {
   // Regression guard for an operator-reported confusion: a primary model the
   // operator picks for the Claude CLI provider must persist verbatim — even when
-  // it equals the CLI default (claude-opus-4-8). Only a truly empty/whitespace
+  // it equals the CLI default (claude-opus-5). Only a truly empty/whitespace
   // field means "no override → use the provider default". (The client previously
   // collapsed a default-equal model to '' before sending, which made a deliberate
   // pick on the KB agent vanish on save; that client-side collapse was removed so
   // any non-empty model now round-trips like any other agent — see the second
-  // case below, where claude-opus-4-8 itself persists.)
+  // case below, where claude-opus-5 itself persists.)
   await connect();
   const agent = request(createApp());
   await AgentIdentity.deleteMany({});
@@ -486,7 +486,7 @@ test('knowledgebase-agent persists a non-default Claude CLI primary model', asyn
   // The CLI default itself round-trips: neither the client nor the server strips
   // a model against the catalog default anymore. The client now sends whatever
   // non-empty model the operator chose, and the server persists it verbatim — so
-  // claude-opus-4-8 (the default) is stored and reloaded instead of vanishing.
+  // claude-opus-5 (the default) is stored and reloaded instead of vanishing.
   await agent
     .patch('/api/agent-identities/knowledgebase-agent/runtime')
     .send({
@@ -494,7 +494,7 @@ test('knowledgebase-agent persists a non-default Claude CLI primary model', asyn
         provider: 'claude',
         mode: 'fallback',
         fallbackProvider: 'gemini',
-        model: 'claude-opus-4-8',
+        model: 'claude-opus-5',
       },
       summary: 'Persisted KB agent runtime with explicit CLI default model.',
     })
@@ -505,7 +505,7 @@ test('knowledgebase-agent persists a non-default Claude CLI primary model', asyn
     .expect(200);
   assert.equal(
     defaultRes.body.runtimes['knowledgebase-agent'].runtime.model,
-    'claude-opus-4-8',
+    'claude-opus-5',
     'a default-equal Claude CLI model must persist verbatim (no longer stripped)'
   );
 });

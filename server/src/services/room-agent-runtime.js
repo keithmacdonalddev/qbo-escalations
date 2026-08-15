@@ -15,9 +15,9 @@ const { DEFAULT_CHAT_RUNTIME_SETTINGS } = require('../lib/chat-settings');
 const { DEFAULT_PROFILES } = require('./room-agents/agent-profiles');
 
 const FALLBACK_ROOM_AGENT_PROVIDERS = Object.freeze({
-  chat: 'claude-opus-4-8',
-  workspace: 'claude-opus-4-8',
-  copilot: 'claude-opus-4-8',
+  chat: 'claude-opus-5',
+  workspace: 'claude-opus-5',
+  copilot: 'claude-opus-5',
   'image-analyst': 'claude',
 });
 

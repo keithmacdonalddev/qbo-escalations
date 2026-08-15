@@ -206,7 +206,7 @@ function normalizeProviderModelOverride(provider, model) {
   // non-empty model the operator chose is stored verbatim — including a model
   // that happens to equal the provider's current default. (Previously this
   // collapsed a default-equal model to '' via hasCustomModelOverride, which made
-  // a deliberate pick — e.g. claude-opus-4-8 on the KB agent — vanish on save
+  // a deliberate pick — e.g. claude-opus-5 on the KB agent — vanish on save
   // and reload, looking like the save failed.) Trade-off accepted by the user: a
   // pinned default-equal model will NOT auto-follow a future change to the app's
   // default model. `provider` is kept in the signature for call-site symmetry

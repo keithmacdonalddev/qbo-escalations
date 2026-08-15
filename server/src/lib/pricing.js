@@ -10,7 +10,7 @@ const path = require('path');
  * To convert from vendor pricing ($/MTok): rate_nanos = price_per_MTok * 1000
  * Example: $3/MTok input = 3000 nanos/token
  *
- * PRICING_VERSION: 2026-07-21
+ * PRICING_VERSION: 2026-08-15
  * Sources:
  *   Anthropic: https://docs.anthropic.com/en/docs/about-claude/pricing
  *   OpenAI:    https://openai.com/api/pricing/
@@ -18,12 +18,13 @@ const path = require('path');
  * Override stale values via PRICING_CONFIG_PATH env var.
  */
 const DEFAULT_PRICING = {
-  // Claude models — Anthropic pricing as of 2026-06-11.
+  // Claude models — Anthropic pricing as of 2026-08-15.
   // Fable 5 is priced at $10/$50 per MTok.
   'claude-fable-5':              { inputNanosPerToken: 10000, outputNanosPerToken: 50000  }, // $10/$50 per MTok
   'fable':                       { inputNanosPerToken: 10000, outputNanosPerToken: 50000  }, // Claude Code alias
   'best':                        { inputNanosPerToken: 10000, outputNanosPerToken: 50000  }, // Conservative alias: may resolve below Fable on accounts without access
-  // Opus 4.8 is priced at $5/$25 per MTok.
+  // Opus 5 is priced at $5/$25 per MTok. Retain older exact ids for historical usage.
+  'claude-opus-5':                { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
   'claude-opus-4-8':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok
   'opus':                         { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // Claude Code alias
   'claude-opus-4-6':              { inputNanosPerToken: 5000,  outputNanosPerToken: 25000  }, // $5/$25 per MTok

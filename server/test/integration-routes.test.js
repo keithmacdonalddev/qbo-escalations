@@ -1263,10 +1263,10 @@ await t.test('screenshot upload warns when another escalation already has the sa
 
 // ---------- Phase 5: New provider ID acceptance ----------
 
-await t.test('P5: chat accepts claude-opus-4-8 as primaryProvider', async () => {
+await t.test('P5: chat accepts claude-opus-5 as primaryProvider', async () => {
   const res = await agent
     .post('/api/chat')
-    .send({ message: 'P5 test', primaryProvider: 'claude-opus-4-8' })
+    .send({ message: 'P5 test', primaryProvider: 'claude-opus-5' })
     .expect(200);
 
   assert.equal(res.headers['content-type'].includes('text/event-stream'), true);
@@ -1292,7 +1292,7 @@ await t.test('P5: chat rejects invalid provider ID', async () => {
 });
 
 await t.test('P5: chat rejects removed provider IDs', async () => {
-  for (const retiredProvider of ['claude-sonnet-4-6', 'gpt-5.4-pro', 'gpt-5-mini', 'gpt-5-nano']) {
+  for (const retiredProvider of ['claude-opus-4-8', 'claude-sonnet-4-6', 'gpt-5.4-pro', 'gpt-5-mini', 'gpt-5-nano']) {
     const res = await agent
       .post('/api/chat')
       .send({ message: 'retired provider test', primaryProvider: retiredProvider })
@@ -1308,7 +1308,7 @@ await t.test('P5: chat fallback works across provider families', async () => {
     .post('/api/chat')
     .send({
       message: 'P5 fallback test',
-      primaryProvider: 'claude-opus-4-8',
+      primaryProvider: 'claude-opus-5',
       fallbackProvider: 'gpt-5.4-mini',
       mode: 'fallback',
     })
@@ -1320,13 +1320,13 @@ await t.test('P5: chat fallback works across provider families', async () => {
 await t.test('P5: conversation persists new provider IDs', async () => {
   await agent
     .post('/api/chat')
-    .send({ message: 'P5 persist test', primaryProvider: 'claude-opus-4-8' })
+    .send({ message: 'P5 persist test', primaryProvider: 'claude-opus-5' })
     .expect(200);
 
   const Conversation = require('../src/models/Conversation');
   const conv = await Conversation.findOne({ title: /P5 persist test/ }).lean();
   assert.ok(conv, 'conversation should exist');
-  assert.equal(conv.provider, 'claude-opus-4-8');
+  assert.equal(conv.provider, 'claude-opus-5');
 });
 
 // The 'P5: escalation parse accepts new provider IDs' test was removed
@@ -1340,7 +1340,7 @@ await t.test('P5: chat retry accepts new provider IDs', async () => {
   // Create a conversation first
   await agent
     .post('/api/chat')
-    .send({ message: 'P5 retry setup', primaryProvider: 'claude-opus-4-8' })
+    .send({ message: 'P5 retry setup', primaryProvider: 'claude-opus-5' })
     .expect(200);
 
   const Conversation = require('../src/models/Conversation');
@@ -1363,7 +1363,7 @@ await t.test('P5: chat parse-escalation accepts new provider IDs', async () => {
     .post('/api/chat/parse-escalation')
     .send({
       text: 'P5 chat parse test',
-      provider: 'claude-opus-4-8',
+      provider: 'claude-opus-5',
     });
 
   assert.ok([200, 201].includes(res.status));
@@ -1454,7 +1454,7 @@ await t.test('POST /api/chat rejects parallelProviders with 5 providers', async 
     .send({
       message: 'test',
       mode: 'parallel',
-      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-8', 'gpt-5.4-mini', 'claude'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-5', 'gpt-5.4-mini', 'claude'],
     });
 
   assert.equal(res.status, 400);
@@ -1530,7 +1530,7 @@ await t.test('parallel accept rejects provider not in requestedProviders for 3-w
     .send({
       message: 'accept reject test',
       mode: 'parallel',
-      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-4-8'],
+      parallelProviders: ['claude', 'gpt-5.5', 'claude-opus-5'],
     });
   assert.equal(chatRes.status, 200);
 

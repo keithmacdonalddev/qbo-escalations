@@ -11,7 +11,7 @@ const {
 } = require('../src/lib/anthropic-thinking');
 
 test('current adaptive Claude models receive readable thinking summaries', () => {
-  for (const model of ['claude-fable-5', 'claude-opus-4-8', 'claude-sonnet-5']) {
+  for (const model of ['claude-fable-5', 'claude-opus-5', 'claude-opus-4-8', 'claude-sonnet-5']) {
     assert.deepEqual(
       buildAnthropicThinkingParam(model),
       { thinking: { type: 'adaptive', display: 'summarized' } }
@@ -21,6 +21,11 @@ test('current adaptive Claude models receive readable thinking summaries', () =>
 });
 
 test('Anthropic effort is sent only for a model and level that accept it', () => {
+  assert.equal(supportsAnthropicEffort('claude-opus-5', 'max'), true);
+  assert.deepEqual(
+    buildAnthropicEffortParam('claude-opus-5', 'max'),
+    { output_config: { effort: 'max' } }
+  );
   assert.equal(supportsAnthropicEffort('claude-sonnet-5', 'xhigh'), true);
   assert.deepEqual(
     buildAnthropicEffortParam('claude-sonnet-5', 'xhigh'),
@@ -33,6 +38,7 @@ test('Anthropic effort is sent only for a model and level that accept it', () =>
 
 test('current Claude 5 models reject sampling parameters in direct requests', () => {
   assert.equal(modelRejectsSamplingParams('claude-fable-5'), true);
+  assert.equal(modelRejectsSamplingParams('claude-opus-5'), true);
   assert.equal(modelRejectsSamplingParams('claude-sonnet-5'), true);
   assert.equal(modelRejectsSamplingParams('claude-haiku-4-5-20251001'), false);
 });

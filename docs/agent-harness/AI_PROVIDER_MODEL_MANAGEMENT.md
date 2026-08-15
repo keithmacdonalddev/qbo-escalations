@@ -12,18 +12,22 @@ Changing the catalog never silently rewrites an agent profile. This preserves in
 
 ## Current verified model baseline (2026-08-15)
 
-The Gemini and Kimi entries were rechecked against the providers' current official documentation, not only their model-list endpoints.
+The Claude, Anthropic, Gemini, and Kimi entries were rechecked against the providers' current official documentation, not only their model-list endpoints.
 
 | Provider | Current default | Other current approved choices | Request compatibility enforced by the app |
 | --- | --- | --- | --- |
+| Claude CLI | `claude-opus-5` | `claude-fable-5`, `claude-sonnet-5`, `claude-haiku-4-5` | Uses Claude Code's full model ID; Opus 5 supports adaptive reasoning and `low` through `max` effort |
+| Anthropic API | `claude-sonnet-5` | `claude-fable-5`, `claude-opus-5`, `claude-haiku-4-5-20251001` | Opus 5 receives adaptive thinking, effort, and no sampling controls; the API default remains Sonnet 5 |
 | Gemini | `gemini-3.6-flash` | `gemini-3.7-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite` | Uses `thinkingConfig.thinkingLevel`; omits deprecated `temperature`, `topP`, and `topK` sampling controls |
 | Kimi Open Platform | `kimi-k3` | `kimi-k2.7-code`, `kimi-k2.7-code-highspeed` | K3 is always-reasoning and uses `reasoning_effort` plus `max_completion_tokens`; K2.7 Code keeps thinking on and does not receive `reasoning_effort`; fixed sampling fields are omitted |
+
+Claude Opus 5 replaces Opus 4.8 in both the Claude CLI and Anthropic API inventories. It uses the exact API model ID `claude-opus-5`, supports a 1,000,000-token context window and 128,000-token maximum output, and keeps the $5/$25 per-million-token input/output price. Claude CLI's default moves to Opus 5; the Anthropic API default remains Sonnet 5, with Opus 5 available as an approved choice. Existing saved assignments are not silently rewritten, and historical Opus 4.8 usage remains priceable.
 
 Gemini 3.6 Flash remains the documented default for balanced agent work. The authenticated Gemini model-list response on 2026-08-15 exposed `gemini-3.7-flash` with `generateContent`, image input, thinking, a 1,048,576-token input limit, and a 65,536-token output limit, so it is now an approved selectable choice. Google's public model and pricing guides did not yet list 3.7 Flash during this review, so the app does not automatically reassign agents to it or invent a cost rate. The older Gemini 3.1 Pro Preview choice was removed, and the confidential `gemini-3.7-flash-video-understanding-eap` surface is ignored because this app's Gemini transport is for text/agent responses rather than video generation. Gemini 3.5 Flash and Flash-Lite remain separately documented current choices. Kimi K3 remains the current general-purpose Kimi default. Removed entries remain usable by existing profiles while **Approved models only** is off, and old harness results remain historical evidence; they are no longer offered as current choices.
 
 Kimi Open Platform and the separate Kimi Code membership API are not interchangeable. This app's `kimi` provider uses `https://api.moonshot.ai/v1` and Open Platform model IDs such as `kimi-k3`. It must not send Kimi Code membership IDs such as `k3` or `kimi-for-coding` unless a separate provider, base URL, and credential type are deliberately added.
 
-Primary sources: [Gemini latest models](https://ai.google.dev/gemini-api/docs/generate-content/latest-model), [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations), [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), [Kimi K3 quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart), [Kimi model parameter reference](https://platform.kimi.ai/docs/api/models-overview), and [Kimi model-list API](https://platform.kimi.ai/docs/api/list-models).
+Primary sources: [Claude Opus 5](https://platform.claude.com/docs/en/about-claude/models/whats-new-opus-5), [Claude model IDs](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions), [Claude Code model configuration](https://code.claude.com/docs/en/model-config), [Gemini latest models](https://ai.google.dev/gemini-api/docs/generate-content/latest-model), [Gemini deprecations](https://ai.google.dev/gemini-api/docs/deprecations), [Gemini pricing](https://ai.google.dev/gemini-api/docs/pricing), [Kimi K3 quickstart](https://platform.kimi.ai/docs/guide/kimi-k3-quickstart), [Kimi model parameter reference](https://platform.kimi.ai/docs/api/models-overview), and [Kimi model-list API](https://platform.kimi.ai/docs/api/list-models).
 
 ## Sources of truth
 

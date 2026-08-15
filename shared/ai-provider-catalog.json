@@ -7,7 +7,7 @@
     "iconPath": "/provider-icons/anthropic.png",
     "iconSourceUrl": "https://www.anthropic.com/",
     "transport": "claude",
-    "model": "claude-opus-4-8",
+    "model": "claude-opus-5",
     "selectable": true,
     "order": 10,
     "default": true,
@@ -21,7 +21,7 @@
     "modelAliases": ["best", "fable", "opus", "sonnet", "haiku"],
     "featureNotes": [
       "Claude Code accepts model aliases best, fable, opus, sonnet, and haiku, plus full model names.",
-      "Fable 5, Opus 4.8, and Sonnet 5 use adaptive reasoning controlled by effort; manual thinking budgets are not supported.",
+      "Fable 5, Opus 5, and Sonnet 5 use adaptive reasoning controlled by effort; manual thinking budgets are not supported.",
       "Fable 5 requires Claude Code v2.1.170 or later and may be unavailable on some account or zero-data-retention configurations."
     ]
   },
@@ -48,14 +48,14 @@
     "maxOutputTokens": 128000
   },
   {
-    "id": "claude-opus-4-8",
-    "label": "Claude Opus 4.8",
-    "shortLabel": "Claude Opus 4.8",
+    "id": "claude-opus-5",
+    "label": "Claude Opus 5",
+    "shortLabel": "Claude Opus 5",
     "family": "claude",
     "iconPath": "/provider-icons/anthropic.png",
     "iconSourceUrl": "https://www.anthropic.com/",
     "transport": "claude",
-    "model": "claude-opus-4-8",
+    "model": "claude-opus-5",
     "selectable": false,
     "order": 25,
     "allowedEfforts": ["low", "medium", "high", "xhigh", "max"],

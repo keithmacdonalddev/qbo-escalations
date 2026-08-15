@@ -126,7 +126,7 @@ function BootLine({ parts, visible }) {
 }
 
 // Pretty-format a runtime (provider + model) when both are present. Used in
-// the success line: "Triage Agent .... online  (claude-opus-4-8 via Claude CLI)".
+// the success line: "Triage Agent .... online  (claude-opus-5 via Claude CLI)".
 function describeRuntime(profileLike) {
   const runtime = profileLike?.runtime || profileLike || {};
   const model = (runtime.model || '').trim();

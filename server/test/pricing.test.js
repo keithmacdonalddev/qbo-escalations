@@ -127,8 +127,8 @@ test('exact key o3 still matches', () => {
 
 // --- Pricing table correctness (cross-checked against vendor docs) ---
 
-test('Claude Opus 4.8 priced at $5/$25 per MTok', () => {
-  const rates = getRates('claude-opus-4-8', null);
+test('Claude Opus 5 priced at $5/$25 per MTok', () => {
+  const rates = getRates('claude-opus-5', null);
   assert.equal(rates.inputNanosPerToken, 5000);
   assert.equal(rates.outputNanosPerToken, 25000);
 });
@@ -150,10 +150,10 @@ test('Claude Code aliases resolve to their current tier rates', () => {
 // --- Regression (batch 3 / Fix #5): current Opus ids must NOT fall back to the
 // generic `claude` provider rate (which equals Sonnet $3/$15) and undercount. ---
 
-test('Claude Opus 4.8 resolves to Opus rate, NOT the Sonnet/generic fallback', () => {
+test('Claude Opus 5 resolves to Opus rate, NOT the Sonnet/generic fallback', () => {
   // Pass provider 'claude' to prove the Opus rate wins over the generic
   // provider fallback (3000/15000) that previously masked the miss.
-  const r = calculateCost(1000, 500, 'claude-opus-4-8', 'claude');
+  const r = calculateCost(1000, 500, 'claude-opus-5', 'claude');
   assert.equal(r.rateFound, true);
   // Opus = $5/$25 per MTok = 5000/25000 nanos per token.
   assert.equal(r.inputCostNanos, 5_000_000);

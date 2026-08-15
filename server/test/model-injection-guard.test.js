@@ -37,7 +37,7 @@ const MALICIOUS_MODELS = [
 ];
 
 const LEGITIMATE_MODELS = [
-  'claude-opus-4-8',          // catalog id
+  'claude-opus-5',            // catalog id
   'claude-sonnet-4-20250514', // catalog id
   'gpt-5.5',                  // catalog id
   'gpt-5.4-mini',             // catalog id

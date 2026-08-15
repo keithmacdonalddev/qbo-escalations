@@ -12,7 +12,7 @@ const {
 test('Claude CLI catalog exposes the four real user-selectable model choices', () => {
   const expected = [
     ['claude-fable-5', 'claude-fable-5'],
-    ['claude-opus-4-8', 'claude-opus-4-8'],
+    ['claude-opus-5', 'claude-opus-5'],
     ['claude-sonnet-5', 'claude-sonnet-5'],
     ['claude-haiku-4-5', 'claude-haiku-4-5'],
   ];
@@ -24,7 +24,8 @@ test('Claude CLI catalog exposes the four real user-selectable model choices', (
   }
 });
 
-test('current direct-provider and Codex defaults match the July 2026 catalog', () => {
+test('current direct-provider and Codex defaults match the August 2026 catalog', () => {
+  assert.equal(getProviderModelId('claude'), 'claude-opus-5');
   assert.equal(getProviderModelId('anthropic'), 'claude-sonnet-5');
   assert.equal(getProviderModelId('codex'), 'gpt-5.6-sol');
   assert.equal(getProviderModelId('openai'), 'gpt-5.6-terra');

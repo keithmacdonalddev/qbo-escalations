@@ -211,23 +211,23 @@ test('Anthropic request builder sends system separately and parses usage', async
     outputTokens: 9,
   });
 
-  // Adaptive-thinking-capable models opt into readable reasoning summaries.
-  let capturedFable = null;
-  const fableRequest = requestAnthropicChat({
+  // Opus 5 uses the same direct-API adaptive-thinking request contract.
+  let capturedOpus = null;
+  const opusRequest = requestAnthropicChat({
     messages: [{ role: 'user', content: 'Question' }],
-    model: 'claude-fable-5',
+    model: 'claude-opus-5',
     reasoningEffort: 'max',
     getApiKeyFn: async () => 'sk-ant-test',
     requestFn: (method, baseUrl, urlPath, body, headers, timeoutMs, captureContext) => {
-      capturedFable = { body };
+      capturedOpus = { body };
       return {
         promise: Promise.resolve({
           statusCode: 200,
           body: JSON.stringify({
-            model: 'claude-fable-5',
+            model: 'claude-opus-5',
             content: [
               { type: 'thinking', thinking: 'Readable summary.' },
-              { type: 'text', text: 'Fable answer.' },
+              { type: 'text', text: 'Opus answer.' },
             ],
             usage: { input_tokens: 5, output_tokens: 3 },
           }),
@@ -236,11 +236,15 @@ test('Anthropic request builder sends system separately and parses usage', async
       };
     },
   });
-  const fableResult = await fableRequest.promise;
-  assert.deepStrictEqual(capturedFable.body.thinking, { type: 'adaptive', display: 'summarized' });
-  assert.deepStrictEqual(capturedFable.body.output_config, { effort: 'max' });
+  const opusResult = await opusRequest.promise;
+  assert.equal(capturedOpus.body.model, 'claude-opus-5');
+  assert.deepStrictEqual(capturedOpus.body.thinking, { type: 'adaptive', display: 'summarized' });
+  assert.deepStrictEqual(capturedOpus.body.output_config, { effort: 'max' });
+  assert.equal(capturedOpus.body.temperature, undefined);
+  assert.equal(capturedOpus.body.top_p, undefined);
+  assert.equal(capturedOpus.body.top_k, undefined);
   // Text extraction must ignore the leading thinking block.
-  assert.equal(fableResult.text, 'Fable answer.');
+  assert.equal(opusResult.text, 'Opus answer.');
 });
 
 test('Gemini 3.7 Flash request builder uses native generateContent payload and parses usage', async () => {

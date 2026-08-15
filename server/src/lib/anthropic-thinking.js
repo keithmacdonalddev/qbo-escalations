@@ -18,6 +18,7 @@ const ADAPTIVE_THINKING_MODEL_PREFIXES = [
   'claude-opus-4-6',
   'claude-opus-4-7',
   'claude-opus-4-8',
+  'claude-opus-5',
   'claude-sonnet-4-6',
   'claude-sonnet-5',
 ];
@@ -29,6 +30,7 @@ const EFFORT_MODEL_PREFIXES = [
   'claude-opus-4-6',
   'claude-opus-4-7',
   'claude-opus-4-8',
+  'claude-opus-5',
   'claude-sonnet-4-6',
   'claude-sonnet-5',
 ];
@@ -38,6 +40,7 @@ const XHIGH_EFFORT_MODEL_PREFIXES = [
   'claude-mythos',
   'claude-opus-4-7',
   'claude-opus-4-8',
+  'claude-opus-5',
   'claude-sonnet-5',
 ];
 
@@ -80,6 +83,7 @@ const SAMPLING_PARAMS_REJECTED_MODEL_PREFIXES = [
   'claude-mythos',
   'claude-opus-4-7',
   'claude-opus-4-8',
+  'claude-opus-5',
   'claude-sonnet-5',
 ];
 
