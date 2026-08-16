@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QBO Escalations — Color Palette Report</title>
+  <meta name="description" content="A visual source-backed report of the colors currently present across the QBO Escalations client.">
+  <style>
+    :root {
+      --page: #101114;
+      --page-raised: #18191c;
+      --panel: #1c1c1e;
+      --panel-raised: #2c2c2e;
+      --panel-elevated: #3a3a3c;
+      --panel-floating: #48484a;
+      --ink: #f5f5f7;
+      --ink-2: #a1a1a6;
+      --ink-3: #77777d;
+      --line: rgba(84,84,88,.45);
+      --line-soft: rgba(84,84,88,.24);
+      --blue: #0a84ff;
+      --blue-bright: #409cff;
+      --blue-local: #4a9eff;
+      --green: #30d158;
+      --yellow: #ffd60a;
+      --amber: #f0b232;
+      --red: #ff453a;
+      --purple: #8b5cf6;
+      --orange: #f59e0b;
+      --slate-blue: #6ea1f7;
+      --shadow: 0 20px 60px rgba(0,0,0,.3);
+      --radius: 16px;
+      --radius-sm: 10px;
+      --max: 1180px;
+      color-scheme: dark;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 88% -10%, rgba(10,132,255,.14), transparent 32rem),
+        radial-gradient(circle at 5% 18%, rgba(139,92,246,.07), transparent 28rem),
+        var(--page);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    a { color: var(--blue-bright); }
+    a:hover { color: #7dbbff; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid rgba(64,156,255,.8); outline-offset: 3px; }
+
+    .skip-link {
+      position: fixed; left: 16px; top: 12px; z-index: 10;
+      transform: translateY(-160%); padding: 9px 13px; border-radius: 9px;
+      color: #06172b; background: var(--blue-bright); font-weight: 700;
+    }
+    .skip-link:focus { transform: translateY(0); }
+
+    header {
+      position: sticky; top: 0; z-index: 5;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(16,17,20,.86);
+      backdrop-filter: blur(18px);
+    }
+    .topbar, main, footer { width: min(calc(100% - 40px), var(--max)); margin: 0 auto; }
+    .topbar { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+    .brand { display: flex; align-items: center; gap: 11px; min-width: max-content; font-weight: 760; letter-spacing: -.02em; }
+    .brand-mark { width: 27px; height: 27px; border-radius: 8px; background: linear-gradient(135deg, var(--blue), var(--purple)); box-shadow: 0 0 24px rgba(10,132,255,.35); }
+    nav { display: flex; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+    nav::-webkit-scrollbar { display: none; }
+    nav a { color: var(--ink-2); text-decoration: none; font-size: 13px; white-space: nowrap; }
+    nav a:hover { color: var(--ink); }
+
+    main { padding: 58px 0 100px; }
+    section { scroll-margin-top: 86px; margin-top: 80px; }
+    section:first-of-type { margin-top: 0; }
+    .eyebrow { margin: 0 0 10px; color: var(--blue-bright); text-transform: uppercase; letter-spacing: .13em; font-weight: 800; font-size: 11px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { max-width: 800px; margin-bottom: 18px; font-size: clamp(38px, 6vw, 72px); line-height: .98; letter-spacing: -.065em; }
+    h2 { margin-bottom: 12px; font-size: clamp(26px, 4vw, 40px); line-height: 1.04; letter-spacing: -.045em; }
+    h3 { margin-bottom: 7px; font-size: 17px; line-height: 1.2; }
+    .lede { max-width: 750px; color: var(--ink-2); font-size: 18px; }
+    .muted { color: var(--ink-2); }
+    .quiet { color: var(--ink-3); }
+    .hero-grid { display: grid; grid-template-columns: 1.3fr .7fr; gap: 28px; align-items: end; }
+    .hero-note { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius); background: linear-gradient(145deg, rgba(44,44,46,.92), rgba(28,28,30,.92)); box-shadow: var(--shadow); }
+    .hero-note strong { display: block; margin-bottom: 7px; color: var(--yellow); }
+    .hero-note p { margin-bottom: 0; color: var(--ink-2); font-size: 14px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+    .chip { padding: 6px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink-2); background: rgba(255,255,255,.035); font-size: 12px; }
+    .chip b { color: var(--ink); }
+
+    .section-intro { max-width: 710px; color: var(--ink-2); margin-bottom: 24px; }
+    .panel { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(28,28,30,.82); box-shadow: 0 12px 34px rgba(0,0,0,.16); }
+    .panel-pad { padding: 22px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; }
+    .callout { border-left: 3px solid var(--blue); padding: 13px 16px; background: rgba(10,132,255,.08); color: var(--ink-2); border-radius: 0 10px 10px 0; }
+    .callout strong { color: var(--ink); }
+    .callout.warning { border-left-color: var(--yellow); background: rgba(255,214,10,.08); }
+    .callout.danger { border-left-color: var(--red); background: rgba(255,69,58,.08); }
+
+    .swatches { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 10px; }
+    .swatch { display: block; min-width: 0; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel-raised); }
+    .swatch-color { display: block; height: 82px; background: var(--swatch); }
+    .swatch-meta { padding: 10px 10px 11px; }
+    .swatch-name { display: block; overflow: hidden; color: var(--ink); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+    .swatch-code { display: block; margin-top: 2px; color: var(--ink-2); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; }
+    .copy-swatch { width: 100%; padding: 0; color: inherit; text-align: left; border: 0; background: transparent; cursor: pointer; }
+    .copy-swatch:hover .swatch-meta { background: rgba(255,255,255,.05); }
+    .copied { color: var(--green) !important; }
+
+    .shell { display: grid; grid-template-columns: 170px 1fr; min-height: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); box-shadow: var(--shadow); }
+    .shell-sidebar { padding: 16px 12px; background: #1c1c1e; border-right: 1px solid rgba(84,84,88,.35); }
+    .shell-sidebar .mini-logo { width: 28px; height: 28px; margin: 0 0 26px 5px; border-radius: 8px; background: var(--blue); }
+    .shell-nav-item { display: flex; align-items: center; gap: 8px; margin: 4px 0; padding: 9px 10px; border-radius: 8px; color: #a1a1a6; font-size: 12px; }
+    .shell-nav-item.active { color: #f5f5f7; background: rgba(10,132,255,.15); }
+    .shell-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .8; }
+    .shell-content { min-width: 0; background: #1c1c1e; }
+    .shell-header { display: flex; align-items: center; justify-content: space-between; padding: 15px 19px; border-bottom: 1px solid rgba(84,84,88,.35); }
+    .shell-header b { font-size: 14px; }
+    .shell-header small { color: #a1a1a6; }
+    .shell-body { display: grid; grid-template-columns: 1.25fr .75fr; gap: 14px; padding: 18px; }
+    .shell-card { padding: 15px; border: 1px solid rgba(84,84,88,.35); border-radius: 11px; background: #2c2c2e; }
+    .shell-card h4 { margin: 0 0 12px; font-size: 13px; }
+    .shell-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-top: 1px solid rgba(84,84,88,.2); color: #a1a1a6; font-size: 12px; }
+    .shell-row:first-of-type { border-top: 0; }
+    .shell-status { color: #30d158; }
+    .shell-button { display: inline-flex; margin-top: 14px; padding: 8px 12px; border-radius: 8px; color: #06172b; background: #409cff; font-size: 12px; font-weight: 800; }
+    .shell-popover { padding: 13px; border-radius: 10px; background: #48484a; box-shadow: 0 12px 32px rgba(0,0,0,.36); }
+    .shell-popover p { margin: 0; color: #f5f5f7; font-size: 12px; }
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; margin-top: 14px; color: var(--ink-2); font-size: 12px; }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .legend i { width: 9px; height: 9px; border-radius: 50%; background: var(--legend); }
+
+    .family { padding: 17px; border: 1px solid var(--line-soft); border-radius: 13px; background: rgba(255,255,255,.025); }
+    .family-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .family-head span { color: var(--ink-3); font-size: 11px; }
+    .mini-swatches { display: flex; gap: 5px; height: 32px; }
+    .mini-swatches i { flex: 1; min-width: 0; border-radius: 5px; background: var(--swatch); }
+    .family p { margin: 11px 0 0; color: var(--ink-2); font-size: 13px; }
+    .family code, code { color: #b8d0fb; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em; }
+
+    .good, .bad, .ugly { border-top: 3px solid var(--tone); }
+    .good { --tone: var(--green); }
+    .bad { --tone: var(--yellow); }
+    .ugly { --tone: var(--red); }
+    .judgment { padding: 20px; border-radius: 0 0 var(--radius-sm) var(--radius-sm); background: rgba(255,255,255,.025); }
+    .judgment ul { margin: 12px 0 0; padding-left: 18px; color: var(--ink-2); }
+    .judgment li + li { margin-top: 7px; }
+    .judgment strong { color: var(--ink); }
+
+    .contrast-row { display: grid; grid-template-columns: 1.1fr 1.1fr .7fr; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
+    .contrast-row:first-child { border-top: 0; }
+    .contrast-pair { display: flex; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 8px; }
+    .contrast-pair span { flex: 1; padding: 8px; font-family: ui-monospace, monospace; font-size: 11px; text-align: center; }
+    .ratio { font-weight: 800; }
+    .pass { color: var(--green); }
+    .watch { color: var(--yellow); }
+    .fail { color: var(--red); }
+    .plan { counter-reset: plan; display: grid; gap: 10px; }
+    .plan-item { display: grid; grid-template-columns: 35px 1fr; gap: 12px; align-items: start; padding: 13px; border: 1px solid var(--line-soft); border-radius: 11px; background: rgba(255,255,255,.025); }
+    .plan-item::before { counter-increment: plan; content: counter(plan); display: grid; place-items: center; width: 27px; height: 27px; border-radius: 9px; color: #06172b; background: var(--blue-bright); font-weight: 800; }
+    .plan-item p { margin: 3px 0 0; color: var(--ink-2); font-size: 13px; }
+    details { border-top: 1px solid var(--line-soft); }
+    details:first-of-type { border-top: 0; }
+    summary { padding: 14px 0; color: var(--ink); cursor: pointer; font-weight: 700; }
+    details p, details ul { color: var(--ink-2); font-size: 13px; }
+    .source-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; margin: 0; padding: 0; list-style: none; }
+    .source-grid li { padding: 10px 0; border-bottom: 1px solid var(--line-soft); }
+    .source-grid small { display: block; color: var(--ink-3); }
+    .source-grid a { font-family: ui-monospace, monospace; font-size: 12px; }
+    .scope-line { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line-soft); color: var(--ink-3); font-size: 12px; }
+    footer { padding: 0 0 46px; color: var(--ink-3); font-size: 12px; }
+
+    @media (max-width: 820px) {
+      .topbar, main, footer { width: min(calc(100% - 28px), var(--max)); }
+      .topbar { align-items: flex-start; flex-direction: column; gap: 8px; padding: 14px 0; }
+      nav { width: 100%; padding-bottom: 2px; }
+      main { padding-top: 40px; }
+      .hero-grid, .grid-2 { grid-template-columns: 1fr; }
+      .grid-3 { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .swatches { grid-template-columns: repeat(3, minmax(0,1fr)); }
+      .shell { grid-template-columns: 1fr; }
+      .shell-sidebar { display: flex; align-items: center; gap: 4px; overflow-x: auto; padding: 10px; border-right: 0; border-bottom: 1px solid rgba(84,84,88,.35); }
+      .shell-sidebar .mini-logo { margin: 0 10px 0 2px; flex: 0 0 auto; }
+      .shell-nav-item { margin: 0; white-space: nowrap; }
+      .shell-body { grid-template-columns: 1fr; }
+      .source-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      h1 { font-size: 42px; }
+      h2 { font-size: 30px; }
+      .grid-3 { grid-template-columns: 1fr; }
+      .swatches { grid-template-columns: repeat(2, minmax(0,1fr)); }
+      .panel-pad { padding: 16px; }
+      .contrast-row { grid-template-columns: 1fr; gap: 7px; }
+      .contrast-row .ratio { justify-self: start; }
+    }
+    @media print {
+      :root { color-scheme: light; }
+      body { color: #111827; background: #fff; }
+      header { position: static; background: #fff; }
+      nav, .skip-link { display: none; }
+      .panel, .hero-note { box-shadow: none; background: #fff; border-color: #cbd5e1; }
+      .muted, .section-intro, .family p, .judgment ul, details p, details ul { color: #475569; }
+      a { color: #1d4ed8; }
+      section { margin-top: 42px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#report">Skip to report</a>
+  <header>
+    <div class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><span>QBO Escalations · Color report</span></div>
+      <nav aria-label="Report sections">
+        <a href="#current">Current story</a>
+        <a href="#core">Core colors</a>
+        <a href="#areas">Feature areas</a>
+        <a href="#judgment">Good / bad / ugly</a>
+        <a href="#hardening">Hardening</a>
+        <a href="#sources">Sources</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="report">
+    <section id="current">
+      <div class="hero-grid">
+        <div>
+          <p class="eyebrow">Current client · source-backed visual inventory · 16 Aug 2026</p>
+          <h1>One app, several color languages.</h1>
+          <p class="lede">The colors you are likely to see most often are Apple-dark grays and blue. Underneath that, the older Slate palette, feature-local accents, light embedded cards, and external brand colors are still active-looking paths in the client.</p>
+          <div class="chips" aria-label="Audit summary">
+            <span class="chip"><b>392</b> client files scanned</span>
+            <span class="chip"><b>3,832</b> hex occurrences</span>
+            <span class="chip"><b>9,256</b> variable uses</span>
+            <span class="chip"><b>277</b> gradient calls</span>
+          </div>
+        </div>
+        <aside class="hero-note">
+          <strong>What this report includes</strong>
+          <p>Colors found in the current client styles, inline JSX, feature components, and global cascade. Unused theme-gallery entries are intentionally left out.</p>
+        </aside>
+      </div>
+      <div class="callout warning" style="margin-top:28px"><strong>Important:</strong> <span>The report visualizes source evidence. It does not claim that every selector has been browser-rendered and computed in every route.</span></div>
+    </section>
+
+    <section id="core">
+      <p class="eyebrow">01 · The foundation you will notice first</p>
+      <h2>The current global story is Apple dark.</h2>
+      <p class="section-intro">The late-loaded <code>overhaul.css</code> layer defines these values with <code>!important</code>. That makes this the strongest global visual signal in the current source, even though <code>App.css</code> still defines Slate values underneath it.</p>
+      <div class="panel panel-pad">
+        <h3>Global surfaces and text</h3>
+        <div class="swatches">
+          <button class="copy-swatch" data-copy="#1c1c1e" title="Copy #1c1c1e"><span class="swatch"><span class="swatch-color" style="--swatch:#1c1c1e"></span><span class="swatch-meta"><span class="swatch-name">Background</span><span class="swatch-code">#1c1c1e</span></span></span></button>
+          <button class="copy-swatch" data-copy="#2c2c2e" title="Copy #2c2c2e"><span class="swatch"><span class="swatch-color" style="--swatch:#2c2c2e"></span><span class="swatch-meta"><span class="swatch-name">Raised surface</span><span class="swatch-code">#2c2c2e</span></span></span></button>
+          <button class="copy-swatch" data-copy="#3a3a3c" title="Copy #3a3a3c"><span class="swatch"><span class="swatch-color" style="--swatch:#3a3a3c"></span><span class="swatch-meta"><span class="swatch-name">Elevated surface</span><span class="swatch-code">#3a3a3c</span></span></span></button>
+          <button class="copy-swatch" data-copy="#48484a" title="Copy #48484a"><span class="swatch"><span class="swatch-color" style="--swatch:#48484a"></span><span class="swatch-meta"><span class="swatch-name">Floating surface</span><span class="swatch-code">#48484a</span></span></span></button>
+          <button class="copy-swatch" data-copy="#f5f5f7" title="Copy #f5f5f7"><span class="swatch"><span class="swatch-color" style="--swatch:#f5f5f7"></span><span class="swatch-meta"><span class="swatch-name">Primary text</span><span class="swatch-code">#f5f5f7</span></span></span></button>
+          <button class="copy-swatch" data-copy="#a1a1a6" title="Copy #a1a1a6"><span class="swatch"><span class="swatch-color" style="--swatch:#a1a1a6"></span><span class="swatch-meta"><span class="swatch-name">Secondary text</span><span class="swatch-code">#a1a1a6</span></span></span></button>
+        </div>
+        <h3 style="margin-top:26px">Actions and meaning</h3>
+        <div class="swatches">
+          <button class="copy-swatch" data-copy="#0a84ff" title="Copy #0a84ff"><span class="swatch"><span class="swatch-color" style="--swatch:#0a84ff"></span><span class="swatch-meta"><span class="swatch-name">Primary blue</span><span class="swatch-code">#0a84ff</span></span></span></button>
+          <button class="copy-swatch" data-copy="#409cff" title="Copy #409cff"><span class="swatch"><span class="swatch-color" style="--swatch:#409cff"></span><span class="swatch-meta"><span class="swatch-name">Blue hover</span><span class="swatch-code">#409cff</span></span></span></button>
+          <button class="copy-swatch" data-copy="#30d158" title="Copy #30d158"><span class="swatch"><span class="swatch-color" style="--swatch:#30d158"></span><span class="swatch-meta"><span class="swatch-name">Success</span><span class="swatch-code">#30d158</span></span></span></button>
+          <button class="copy-swatch" data-copy="#ffd60a" title="Copy #ffd60a"><span class="swatch"><span class="swatch-color" style="--swatch:#ffd60a"></span><span class="swatch-meta"><span class="swatch-name">Warning</span><span class="swatch-code">#ffd60a</span></span></span></button>
+          <button class="copy-swatch" data-copy="#ff453a" title="Copy #ff453a"><span class="swatch"><span class="swatch-color" style="--swatch:#ff453a"></span><span class="swatch-meta"><span class="swatch-name">Danger</span><span class="swatch-code">#ff453a</span></span></span></button>
+          <button class="copy-swatch" data-copy="#e31937" title="Copy #e31937"><span class="swatch"><span class="swatch-color" style="--swatch:#e31937"></span><span class="swatch-meta"><span class="swatch-name">Tesla/emphasis red</span><span class="swatch-code">#e31937</span></span></span></button>
+        </div>
+      </div>
+      <div class="panel panel-pad" style="margin-top:16px">
+        <h3>What the shell looks like when those values meet</h3>
+        <div class="shell" aria-label="Illustrated application shell using the current Apple-dark palette">
+          <div class="shell-sidebar">
+            <div class="mini-logo" aria-hidden="true"></div>
+            <div class="shell-nav-item active"><i class="shell-dot"></i>Dashboard</div>
+            <div class="shell-nav-item"><i class="shell-dot"></i>Agents</div>
+            <div class="shell-nav-item"><i class="shell-dot"></i>Knowledge</div>
+            <div class="shell-nav-item"><i class="shell-dot"></i>Settings</div>
+          </div>
+          <div class="shell-content">
+            <div class="shell-header"><b>Operational overview</b><small>Today · 09:42</small></div>
+            <div class="shell-body">
+              <div class="shell-card"><h4>Active work</h4><div class="shell-row"><span>Provider connection</span><span class="shell-status">Healthy</span></div><div class="shell-row"><span>Knowledge review</span><span style="color:#ffd60a">Attention</span></div><div class="shell-row"><span>Agent run</span><span style="color:#0a84ff">In progress</span></div><span class="shell-button">Open work center</span></div>
+              <div class="shell-popover"><p><strong>Evidence first.</strong><br><span style="color:#a1a1a6">The elevated surface gives the next decision a clear place to land.</span></p></div>
+            </div>
+          </div>
+        </div>
+        <div class="legend"><span><i style="--legend:#1c1c1e"></i>app background</span><span><i style="--legend:#2c2c2e"></i>working surface</span><span><i style="--legend:#0a84ff"></i>action / progress</span><span><i style="--legend:#30d158"></i>healthy / done</span><span><i style="--legend:#ffd60a"></i>attention</span><span><i style="--legend:#ff453a"></i>danger</span></div>
+      </div>
+    </section>
+
+    <section id="areas">
+      <p class="eyebrow">02 · What changes from area to area</p>
+      <h2>The app is unified in mood, not in exact values.</h2>
+      <p class="section-intro">These are the palettes that appear in active-looking client paths. They are not unused theme previews. The repeated pattern is “Apple dark, then locally adjusted,” with a few screens that still carry older or light-world assumptions.</p>
+      <div class="grid-3">
+        <article class="family"><div class="family-head"><h3>Escalations</h3><span>--ec-*</span></div><div class="mini-swatches"><i style="--swatch:#1c1c1e"></i><i style="--swatch:#2c2c2e"></i><i style="--swatch:#3a3a3c"></i><i style="--swatch:#4a9eff"></i><i style="--swatch:#30d158"></i><i style="--swatch:#ff453a"></i></div><p>Apple-dark surfaces, but local blue <code>#4a9eff</code> and warning <code>#f0b232</code> instead of the global <code>#0a84ff</code> and <code>#ffd60a</code>.</p></article>
+        <article class="family"><div class="family-head"><h3>Agents</h3><span>--ag-*</span></div><div class="mini-swatches"><i style="--swatch:#1c1c1e"></i><i style="--swatch:#2c2c2e"></i><i style="--swatch:#4a9eff"></i><i style="--swatch:#6cb0ff"></i><i style="--swatch:#f0b232"></i><i style="--swatch:#ff453a"></i></div><p>A coherent local system at the top of the file, followed by older agent/terminal colors further down the same stylesheet.</p></article>
+        <article class="family"><div class="family-head"><h3>Sessions</h3><span>--sx-*</span></div><div class="mini-swatches"><i style="--swatch:#1c1c1e"></i><i style="--swatch:#2c2c2e"></i><i style="--swatch:#3a3a3c"></i><i style="--swatch:#4a9eff"></i><i style="--swatch:#f0b232"></i><i style="--swatch:#ff453a"></i></div><p>Another Apple-like copy of the surface ladder. Visually close, but not an alias of one central contract.</p></article>
+        <article class="family"><div class="family-head"><h3>Knowledgebase</h3><span>--kb-*</span></div><div class="mini-swatches"><i style="--swatch:#1c1c1e"></i><i style="--swatch:#232326"></i><i style="--swatch:#2c2c2e"></i><i style="--swatch:#4a9eff"></i><i style="--swatch:#30d158"></i><i style="--swatch:#ff453a"></i></div><p>Shares the dark hierarchy but adds its own sheet surface and shadow vocabulary.</p></article>
+        <article class="family"><div class="family-head"><h3>Investments</h3><span>workspace CSS</span></div><div class="mini-swatches"><i style="--swatch:#161719"></i><i style="--swatch:#18191c"></i><i style="--swatch:#202124"></i><i style="--swatch:#292a2e"></i><i style="--swatch:#79b3ff"></i><i style="--swatch:#f3c45e"></i></div><p>A darker gray-black workbench with progress blue, attention gold, simulated-data gold, and green updates.</p></article>
+        <article class="family"><div class="family-head"><h3>Chat / evidence</h3><span>--v5-* / local</span></div><div class="mini-swatches"><i style="--swatch:#101217"></i><i style="--swatch:#17191f"></i><i style="--swatch:#f4f5f7"></i><i style="--swatch:#7aa7ff"></i><i style="--swatch:#e8b75b"></i><i style="--swatch:#ef6a74"></i></div><p>Mostly aliases the global system, with local fallback colors for workflow logs and recovery states.</p></article>
+      </div>
+      <div class="grid-2" style="margin-top:16px">
+        <article class="panel panel-pad"><h3>Gmail is a palette crossroads</h3><p class="muted">The Gmail stylesheet contains light Gmail-like fallbacks such as <code>#fff</code> and <code>#3c4043</code>, a teal fallback around <code>#1a7a6d</code>, and later indigo tooling around <code>#6366f1</code>, <code>#1a1a2e</code>, and <code>#1e1e2e</code>.</p><div class="mini-swatches"><i style="--swatch:#fff"></i><i style="--swatch:#1a7a6d"></i><i style="--swatch:#6366f1"></i><i style="--swatch:#1a1a2e"></i></div></article>
+        <article class="panel panel-pad"><h3>Calendar and data colors are special cases</h3><p class="muted">Calendar events, shipment states, image grades, avatars, and provider marks use direct colors. They can remain distinct, but they need an explicit “external data / identity / visualization” classification so they do not quietly become new semantic colors.</p><div class="mini-swatches"><i style="--swatch:#22c55e"></i><i style="--swatch:#3b82f6"></i><i style="--swatch:#f59e0b"></i><i style="--swatch:#8b5cf6"></i><i style="--swatch:#ef4444"></i><i style="--swatch:#6b7280"></i></div></article>
+      </div>
+      <div class="callout" style="margin-top:16px"><strong>Read this as “unified, not uniform.”</strong> The app does not need every external data color to become Apple blue. It does need a visible rule for which colors are product meaning, which are provider identity, and which came from data outside the app.</div>
+    </section>
+
+    <section id="judgment">
+      <p class="eyebrow">03 · Judgment</p>
+      <h2>The good, the bad, and the ugly.</h2>
+      <p class="section-intro">This is the part to use when deciding what to preserve and what to harden.</p>
+      <div class="grid-3">
+        <article class="panel good"><div class="judgment"><h3>Good · strong visual foundation</h3><ul><li><strong>Clear hierarchy:</strong> four dark surface levels make panels and popovers understandable.</li><li><strong>Recognizable meaning:</strong> blue, green, yellow, and red already have useful status roles.</li><li><strong>Readable primary text:</strong> <code>#f5f5f7</code> and <code>#a1a1a6</code> work well on the dark baseline.</li><li><strong>Existing variables:</strong> many newer components can be migrated by changing aliases, not every rule.</li></ul></div></article>
+        <article class="panel bad"><div class="judgment"><h3>Bad · the system has competing authorities</h3><ul><li><strong>Slate versus Apple dark:</strong> the documented baseline and the strongest CSS override disagree.</li><li><strong>Local copies drift:</strong> <code>#0a84ff</code>, <code>#4a9eff</code>, <code>#6ea1f7</code>, and <code>#3b82f6</code> all compete as “blue.”</li><li><strong>Fallbacks change the language:</strong> missing variables can fall into Slate, light, teal, or indigo values.</li><li><strong>Theme selection is uncertain:</strong> normal inline theme variables may lose to global <code>!important</code> tokens.</li></ul></div></article>
+        <article class="panel ugly"><div class="judgment"><h3>Ugly · users may see contradictory signals</h3><ul><li><strong>White on primary blue:</strong> several blue action treatments are likely too low-contrast for normal-sized text.</li><li><strong>Tertiary gray is too dim:</strong> <code>#636366</code> on <code>#1c1c1e</code> is a metadata-only color, not general body text.</li><li><strong>Light cards in a dark app:</strong> invoice matching and Gmail fallbacks can look imported rather than integrated.</li><li><strong>Global fights:</strong> giant override layers force components to defend themselves with more <code>!important</code>.</li></ul></div></article>
+      </div>
+    </section>
+
+    <section id="hardening">
+      <p class="eyebrow">04 · Hardening map</p>
+      <h2>What to fix first.</h2>
+      <div class="grid-2">
+        <div class="panel panel-pad">
+          <h3>Contrast checks worth acting on</h3>
+          <div class="contrast-row"><span>Primary text on background</span><span class="contrast-pair"><span style="color:#1c1c1e;background:#f5f5f7">#f5f5f7</span><span style="color:#f5f5f7;background:#1c1c1e">#1c1c1e</span></span><span class="ratio pass">15.6:1 · strong</span></div>
+          <div class="contrast-row"><span>Secondary text on background</span><span class="contrast-pair"><span style="color:#1c1c1e;background:#a1a1a6">#a1a1a6</span><span style="color:#a1a1a6;background:#1c1c1e">#1c1c1e</span></span><span class="ratio pass">6.6:1 · good</span></div>
+          <div class="contrast-row"><span>Tertiary text on background</span><span class="contrast-pair"><span style="color:#1c1c1e;background:#636366">#636366</span><span style="color:#636366;background:#1c1c1e">#1c1c1e</span></span><span class="ratio fail">2.8:1 · too dim</span></div>
+          <div class="contrast-row"><span>White text on primary blue</span><span class="contrast-pair"><span style="color:#0a84ff;background:#fff">#fff</span><span style="color:#fff;background:#0a84ff">#0a84ff</span></span><span class="ratio fail">3.4:1 · review</span></div>
+          <div class="contrast-row"><span>Dark text on local blue</span><span class="contrast-pair"><span style="color:#08233f;background:#4a9eff">#4a9eff</span><span style="color:#4a9eff;background:#08233f">#08233f</span></span><span class="ratio pass">5.8:1 · safer</span></div>
+          <p class="quiet" style="margin:14px 0 0;font-size:12px">Ratios are static token checks, not a substitute for rendered browser inspection across states.</p>
+        </div>
+        <div class="panel panel-pad">
+          <h3>Recommended sequence</h3>
+          <div class="plan">
+            <div class="plan-item"><div><strong>Declare one baseline.</strong><p>Formally choose Apple dark or Slate. The current source behaves most like Apple dark.</p></div></div>
+            <div class="plan-item"><div><strong>Make semantic tokens win.</strong><p>Put action, text, surface, status, focus, and disabled tokens in one authoritative layer.</p></div></div>
+            <div class="plan-item"><div><strong>Turn local tokens into aliases.</strong><p>Keep feature names such as <code>--ag-accent</code> only when they point to shared meanings.</p></div></div>
+            <div class="plan-item"><div><strong>Approve exceptions.</strong><p>Keep provider brands, calendar events, shipment data, and grades in a documented external-data lane.</p></div></div>
+            <div class="plan-item"><div><strong>Remove cascade escalation.</strong><p>Reduce the global <code>!important</code> layer so components no longer need defensive overrides.</p></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="callout danger" style="margin-top:16px"><strong>Priority decision:</strong> Do not start by picking more colors. First decide which layer is allowed to define what a color means. Then fix contrast and migrate the highest-drift areas: overhaul, Agents, Gmail, Calendar, invoice matching, and the agent-test modal.</div>
+    </section>
+
+    <section id="sources">
+      <p class="eyebrow">Appendix · evidence map</p>
+      <h2>Where this report came from.</h2>
+      <p class="section-intro">The report uses the current working tree as of 16 August 2026. The worktree already contains unrelated concurrent edits; this page is additive and does not claim those edits are complete or released.</p>
+      <div class="panel panel-pad">
+        <ul class="source-grid">
+          <li><a href="../../client/src/main.jsx">client/src/main.jsx</a><small>CSS import order; overhaul is loaded late.</small></li>
+          <li><a href="../../client/src/overhaul.css">client/src/overhaul.css</a><small>Apple-dark root overrides, semantic colors, focus ring, gradients.</small></li>
+          <li><a href="../../client/src/App.css">client/src/App.css</a><small>Slate tokens, provider identity, status, category colors.</small></li>
+          <li><a href="../../client/src/hooks/useTheme.js">client/src/hooks/useTheme.js</a><small>Theme definitions and runtime variable application; unused theme gallery excluded from this report.</small></li>
+          <li><a href="../../client/src/components/EscalationDashboard.css">EscalationDashboard.css</a><small>Escalation-local Apple-like token family.</small></li>
+          <li><a href="../../client/src/components/AgentsView.css">AgentsView.css</a><small>Local agent tokens plus legacy sections and defensive overrides.</small></li>
+          <li><a href="../../client/src/components/SessionsView.css">SessionsView.css</a><small>Session-local surface and accent family.</small></li>
+          <li><a href="../../client/src/components/KnowledgebaseView.css">KnowledgebaseView.css</a><small>Knowledgebase-local palette, sheets, and depth.</small></li>
+          <li><a href="../../client/src/components/investments/investments-workspace.css">investments-workspace.css</a><small>Investment workbench palette.</small></li>
+          <li><a href="../../client/src/components/GmailInbox.css">GmailInbox.css</a><small>Light, teal, indigo, and dark sub-palettes.</small></li>
+          <li><a href="../../client/src/components/CalendarView.jsx">CalendarView.jsx</a><small>Inline gradients, avatars, and event presentation colors.</small></li>
+          <li><a href="../../client/src/components/InvMatchBanner.jsx">InvMatchBanner.jsx</a><small>Light amber/blue embedded-card palette.</small></li>
+          <li><a href="../../client/src/components/ShipmentTracker.jsx">ShipmentTracker.jsx</a><small>External shipment status colors.</small></li>
+          <li><a href="../../client/src/components/ImageGallery.jsx">ImageGallery.jsx</a><small>Grade visualization colors.</small></li>
+          <li><a href="../../client/src/components/icons/AnthropicMark.jsx">AnthropicMark.jsx</a><small>Approved provider brand colors.</small></li>
+          <li><a href="../../DESIGN.md">DESIGN.md</a><small>Product intent: Slate, compact, operational, flat, blue-accented.</small></li>
+        </ul>
+        <p class="scope-line"><strong>Audit boundary:</strong> source and cascade inspection only. No production client files were changed for this report. No server, dev server, browser session, or persistent service was started, stopped, or restarted.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer>QBO Escalations color palette report · standalone local HTML · source evidence, not a release approval</footer>
+
+  <script>
+    document.querySelectorAll('[data-copy]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const value = button.dataset.copy;
+        try {
+          await navigator.clipboard.writeText(value);
+          const code = button.querySelector('.swatch-code');
+          const original = code.textContent;
+          code.textContent = 'Copied';
+          code.classList.add('copied');
+          window.setTimeout(() => { code.textContent = original; code.classList.remove('copied'); }, 900);
+        } catch { /* The swatch remains useful when clipboard access is unavailable. */ }
+      });
+    });
+  </script>
+</body>
+</html>
