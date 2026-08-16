@@ -93,6 +93,7 @@ For feedback/reporting specifically, the modal is one new-report workflow. Open 
 | --- | --- | --- |
 | Global color and semantic tokens | `client/src/App.css` | Canonical Slate palette and component variables |
 | Shared control language | `client/src/design-system.css` | Flat surfaces, states, buttons, form treatment |
+| Design-system documentation site | `/docs` via `client/src/docs/` | Routed plain-English guidance, live production specimens, foundations, search, and per-component pages; `DESIGN.HTML` is only a migration pointer |
 | Dense operational layouts | `client/src/console-density.css` | Compact panels, gaps, rows, and controls |
 | Application-wide refinement layer | `client/src/overhaul.css` | Large legacy override layer; use cautiously |
 | Settings composition | `client/src/components/Settings.jsx` | Section navigation and compact control group patterns |

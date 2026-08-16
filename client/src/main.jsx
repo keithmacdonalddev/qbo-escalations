@@ -6,6 +6,7 @@ import { ToastProvider } from './hooks/useToast.jsx';
 import { ProviderCatalogProvider } from './context/ProviderCatalogContext.jsx';
 import ErrorFallback from './components/ErrorFallback.jsx';
 import App from './App.jsx';
+import DocsApp from './docs/DocsApp.jsx';
 import { installRuntimeGuards } from './lib/installRuntimeGuards.js';
 import { setRuntimeStreamingState } from './lib/runtimeStreamingState.js';
 import './App.css';
@@ -20,8 +21,11 @@ import './overhaul.css';
 import './settings-v2.css';
 import './components/AgentsView.css';
 import './console-density.css';
+import './docs/docs.css';
 
 installRuntimeGuards({ isDev: import.meta.env.DEV, hot: import.meta.hot });
+
+const isDocsRoute = /^\/docs(?:\/|$)/.test(window.location.pathname);
 
 // ── App mount ────────────────────────────────────────────────
 createRoot(document.getElementById('root')).render(
@@ -41,13 +45,17 @@ createRoot(document.getElementById('root')).render(
         }));
       }}
     >
-      <TooltipProvider>
-        <ToastProvider>
-          <ProviderCatalogProvider>
-            <App />
-          </ProviderCatalogProvider>
-        </ToastProvider>
-      </TooltipProvider>
+      {isDocsRoute ? (
+        <DocsApp />
+      ) : (
+        <TooltipProvider>
+          <ToastProvider>
+            <ProviderCatalogProvider>
+              <App />
+            </ProviderCatalogProvider>
+          </ToastProvider>
+        </TooltipProvider>
+      )}
     </ErrorBoundary>
   </StrictMode>
 );

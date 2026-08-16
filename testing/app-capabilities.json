@@ -662,6 +662,30 @@
       "lastHumanReviewDate": "2026-07-24"
     },
     {
+      "id": "design-system-documentation",
+      "label": "Routed design-system documentation",
+      "userOutcome": "The user can open a stable /docs route, find a governed component or foundation, inspect a real production specimen, understand its detailed usage contract, and recover from search, route, or specimen failures on desktop and mobile.",
+      "risk": "normal",
+      "owner": "Design system",
+      "sourcePaths": [
+        "client/src/main.jsx",
+        "client/src/docs/DocsApp.jsx",
+        "client/src/docs/DocsPages.jsx",
+        "client/src/docs/docsNavigation.js",
+        "client/src/docs/docs.css",
+        "DESIGN.md",
+        "docs/design-system/COMPONENT_LIBRARY.md"
+      ],
+      "requiredCheckTypes": ["component"],
+      "evidence": [
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/docs/DocsApp.test.jsx"] }
+      ],
+      "knownGaps": [
+        "The sanitized desktop, exact-390px mobile, keyboard, reduced-motion, copy-success, specimen-fallback, search, and 404 browser evidence plus the independent release verdict are recorded in docs/design-system/docs-site-design-release-record.md. That human visual gate is not represented as a deterministic check-profile command."
+      ],
+      "lastHumanReviewDate": "2026-08-16"
+    },
+    {
       "id": "request-diagnostics",
       "label": "Request diagnostics",
       "userOutcome": "Request timing and failure information remains understandable and bounded.",

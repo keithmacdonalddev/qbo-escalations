@@ -19,7 +19,7 @@ Use these sources in this order:
 
 1. `DESIGN.md` defines the product-wide design principles, Slate tokens, density, interaction quality, and release bar.
 2. This file defines the reusable component contracts and approved composition boundaries.
-3. `DESIGN.HTML` provides a plain-English visual tour of the canonical defaults.
+3. The routed `/docs` experience provides plain-English guidance and live production specimens; `DESIGN.HTML` is only a migration pointer to that site.
 4. `client/src/components/design-system/` is the production implementation.
 5. Feature CSS may compose these components but may not silently redefine their anatomy or semantics.
 
