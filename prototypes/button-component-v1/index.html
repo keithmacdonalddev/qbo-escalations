@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Button component prototype v1</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="specimen" aria-labelledby="specimen-title">
+      <header class="specimen__header">
+        <div>
+          <p class="specimen__kicker">Proposed component 04</p>
+          <h1 id="specimen-title">Button</h1>
+          <p class="specimen__summary">One named action, with priority, consequence, and progress kept distinct.</p>
+        </div>
+        <div class="axis-key" aria-label="Component contract axes">
+          <span><b>Priority</b> primary / secondary</span>
+          <span><b>Tone</b> neutral / destructive</span>
+          <span><b>State</b> rest / loading / disabled</span>
+        </div>
+      </header>
+
+      <section class="canonical" aria-labelledby="canonical-title">
+        <div class="section-copy">
+          <p class="section-label">Canonical default</p>
+          <h2 id="canonical-title">Quiet until the parent declares priority</h2>
+          <p>Medium · neutral · secondary · content width</p>
+        </div>
+        <button class="qds-button" type="button">Review details</button>
+      </section>
+
+      <section class="specimen-section" aria-labelledby="treatments-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Requested treatments</p>
+            <h2 id="treatments-title">Same control, separate signals</h2>
+          </div>
+          <p>Loading and disabled are states—not visual intents.</p>
+        </div>
+
+        <div class="treatment-grid">
+          <article class="treatment">
+            <div class="treatment__copy">
+              <h3>Primary</h3>
+              <p>Preferred local action</p>
+            </div>
+            <button class="qds-button qds-button--primary qds-button--stable-save" type="button">Save changes</button>
+          </article>
+
+          <article class="treatment">
+            <div class="treatment__copy">
+              <h3>Secondary</h3>
+              <p>Available, lower emphasis</p>
+            </div>
+            <button class="qds-button" type="button">Review later</button>
+          </article>
+
+          <article class="treatment">
+            <div class="treatment__copy">
+              <h3>Loading</h3>
+              <p>Accepted and in progress</p>
+            </div>
+            <button
+              class="qds-button qds-button--primary qds-button--loading qds-button--stable-save"
+              type="button"
+              aria-busy="true"
+              data-loading="true"
+            >
+              <span class="qds-button__spinner" aria-hidden="true"></span>
+              <span>Saving changes…</span>
+            </button>
+          </article>
+
+          <article class="treatment">
+            <div class="treatment__copy">
+              <h3>Disabled</h3>
+              <p>Unavailable, still identifiable</p>
+            </div>
+            <button class="qds-button" type="button" disabled>Continue</button>
+          </article>
+
+          <article class="treatment">
+            <div class="treatment__copy">
+              <h3>Destructive</h3>
+              <p>Harmful action, restrained default</p>
+            </div>
+            <button class="qds-button qds-button--destructive" type="button">
+              <svg class="qds-button__icon" aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                <path d="M4.8 6.3h10.4M8 3.8h4M6.4 6.3l.6 9h6l.6-9M8.5 8.7v4.2M11.5 8.7v4.2" />
+              </svg>
+              <span>Delete item</span>
+            </button>
+          </article>
+        </div>
+      </section>
+
+      <section class="specimen-section specimen-section--states" aria-labelledby="states-title">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Interaction proof</p>
+            <h2 id="states-title">Feedback changes, layout does not</h2>
+          </div>
+          <p>The outer ring remains visible on every surface.</p>
+        </div>
+
+        <div class="state-row">
+          <div class="state-sample">
+            <span>Rest</span>
+            <button class="qds-button" type="button">Save changes</button>
+          </div>
+          <div class="state-sample">
+            <span>Hover</span>
+            <button class="qds-button is-hovered" type="button">Save changes</button>
+          </div>
+          <div class="state-sample">
+            <span>Keyboard focus</span>
+            <button class="qds-button is-focused" type="button">Save changes</button>
+          </div>
+          <div class="state-sample">
+            <span>Pressed</span>
+            <button class="qds-button is-pressed" type="button">Save changes</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="specimen__footer">
+        <span>Native button semantics</span>
+        <span>36px medium visual height</span>
+        <span>Dark ink on bright fills</span>
+        <span>No gradient, glow, or routine shadow</span>
+      </footer>
+    </main>
+    <script src="./script.js"></script>
+  </body>
+</html>
