@@ -1,8 +1,10 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
-import { MetadataLine, StatusIndicator, TitleBlock } from '../components/design-system/index.js';
+import { Button, MetadataLine, StatusIndicator, TitleBlock } from '../components/design-system/index.js';
+import BUTTON_CONTRACT from '../components/design-system/Button/Button.contract.json';
 import { DOC_GROUPS, DOC_HOME } from './docsNavigation.js';
 import { DocsLink, Icon } from './DocsApp.jsx';
+import './button-docs.css';
 
 const PAGE_TOC = {
   '/docs': [
@@ -103,6 +105,18 @@ const PAGE_TOC = {
     ['accessibility', 'Accessibility'],
     ['api', 'API'],
     ['boundary', 'Composition boundary'],
+  ],
+  '/docs/components/button': [
+    ['overview', 'Button'],
+    ['at-a-glance', 'At a glance'],
+    ['specification-map', 'Specification map'],
+    ['purpose', 'Purpose and boundaries'],
+    ['visual-system', 'Visual system'],
+    ['states', 'States and interaction'],
+    ['usage', 'Usage and content'],
+    ['accessibility', 'Accessibility and responsive'],
+    ['api', 'API and safeguards'],
+    ['quality', 'Quality and adoption'],
   ],
   '/docs/quality/release-checklist': [
     ['before', 'Before implementation'],
@@ -287,6 +301,16 @@ function OnThisPage({ items }) {
   );
 }
 
+function MobilePageContents({ items }) {
+  if (!items?.length) return null;
+  return (
+    <details className="docs-on-page-mobile docs-button-on-page-mobile">
+      <summary>On this page</summary>
+      <nav aria-label="On this page">{items.map(([id, label]) => <a href={`#${id}`} key={id}>{label}</a>)}</nav>
+    </details>
+  );
+}
+
 function ArticleFooter({ adjacent, navigate }) {
   return (
     <nav aria-label="Previous and next documentation pages" className="docs-article-footer">
@@ -306,7 +330,7 @@ function ArticleFooter({ adjacent, navigate }) {
 
 function ArticleFrame({ adjacent, children, currentItem, currentPath, navigate }) {
   return (
-    <div className="docs-content-frame">
+    <div className="docs-content-frame" data-page={currentPath}>
       <article className="docs-article">
         {children}
         <ArticleFooter adjacent={adjacent} navigate={navigate} />
@@ -863,6 +887,437 @@ function MetadataLinePage({ adjacent, currentItem, currentPath, navigate }) {
   );
 }
 
+const BUTTON_MINIMAL = `<Button onClick={reviewDetails}>
+  Review details
+</Button>`;
+
+const BUTTON_COMPLETE = `<Button
+  priority="primary"
+  tone="neutral"
+  size="medium"
+  loading={isSaving}
+  loadingLabel="Saving changes…"
+  icon={<svg viewBox="0 0 16 16"><path d={savePath} /></svg>}
+  onClick={saveChanges}
+>
+  Save changes
+</Button>`;
+
+function ButtonStateLab() {
+  const [priority, setPriority] = useState('primary');
+  const [tone, setTone] = useState('neutral');
+  const [size, setSize] = useState('medium');
+  const [outcome, setOutcome] = useState('success');
+  const [fullWidth, setFullWidth] = useState(false);
+  const [disabled, setDisabled] = useState(false);
+  const [phase, setPhase] = useState('ready');
+  const timerRef = useRef(null);
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  const runExample = (nextOutcome = outcome) => {
+    setPhase('loading');
+    window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(
+      () => setPhase(nextOutcome === 'failure' ? 'failed' : 'complete'),
+      2400,
+    );
+  };
+
+  const retryExample = () => {
+    setOutcome('success');
+    runExample('success');
+  };
+
+  const reset = () => {
+    window.clearTimeout(timerRef.current);
+    setPhase('ready');
+  };
+
+  const loading = phase === 'loading';
+  const label = tone === 'destructive' ? 'Delete example' : 'Save changes';
+  const actionLabel = phase === 'failed' ? 'Try again' : label;
+  const loadingLabel = tone === 'destructive' ? 'Deleting example…' : 'Saving changes…';
+
+  return (
+    <div className="docs-button-lab">
+      <div className="docs-button-lab__controls" aria-label="Button specimen controls" role="group">
+        <label>Priority<select value={priority} onChange={(event) => setPriority(event.target.value)}><option value="secondary">Secondary</option><option value="primary">Primary</option></select></label>
+        <label>Tone<select value={tone} onChange={(event) => setTone(event.target.value)}><option value="neutral">Neutral</option><option value="destructive">Destructive</option></select></label>
+        <label>Size<select value={size} onChange={(event) => setSize(event.target.value)}><option value="small">Small · 32px</option><option value="medium">Medium · 40px</option><option value="large">Large · 48px</option></select></label>
+        <label>Result path<select aria-label="Result path" value={outcome} onChange={(event) => setOutcome(event.target.value)}><option value="success">Complete</option><option value="failure">Fail, then retry</option></select></label>
+        <label className="docs-button-lab__check"><input checked={fullWidth} onChange={(event) => setFullWidth(event.target.checked)} type="checkbox" /> Full width</label>
+        <label className="docs-button-lab__check"><input checked={disabled} disabled={loading} onChange={(event) => setDisabled(event.target.checked)} type="checkbox" /> Disabled</label>
+      </div>
+      <div className="docs-button-lab__stage">
+        <Button
+          disabled={disabled}
+          fullWidth={fullWidth}
+          loading={loading}
+          loadingLabel={loadingLabel}
+          onClick={phase === 'failed' ? retryExample : () => runExample()}
+          priority={priority}
+          size={size}
+          tone={tone}
+        >
+          {actionLabel}
+        </Button>
+        <div className="docs-button-lab__result" data-phase={phase} aria-live="polite">
+          {phase === 'ready' ? <span>Ready. Activate once to inspect the loading journey.</span> : null}
+          {phase === 'loading' ? <span>Activation accepted. Repeat input is guarded while focus stays in place.</span> : null}
+          {phase === 'complete' ? <span><strong>Example complete.</strong> Outcome feedback belongs to the parent, not inside Button.</span> : null}
+          {phase === 'failed' ? <span><strong>Example failed.</strong> Nothing was saved. Recovery stays visible and explicit.</span> : null}
+        </div>
+        {phase === 'complete' ? <Button onClick={reset} size="small">Reset example</Button> : null}
+      </div>
+    </div>
+  );
+}
+
+function ButtonConfirmationDemo() {
+  const [open, setOpen] = useState(false);
+  const [result, setResult] = useState('');
+  const triggerRef = useRef(null);
+  const cancelRef = useRef(null);
+  const confirmRef = useRef(null);
+
+  const close = (message = '') => {
+    setOpen(false);
+    setResult(message);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    window.requestAnimationFrame(() => cancelRef.current?.focus());
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        close();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      if (event.shiftKey && document.activeElement === cancelRef.current) {
+        event.preventDefault();
+        confirmRef.current?.focus();
+      } else if (!event.shiftKey && document.activeElement === confirmRef.current) {
+        event.preventDefault();
+        cancelRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [open]);
+
+  return (
+    <div className="docs-button-confirmation">
+      {!open ? (
+        <Button ref={triggerRef} tone="destructive" onClick={() => { setResult(''); setOpen(true); }}>Delete example</Button>
+      ) : (
+        <div aria-labelledby="button-confirmation-title" aria-modal="true" className="docs-button-confirmation__dialog" role="dialog">
+          <p className="docs-eyebrow">Focused confirmation</p>
+          <h3 id="button-confirmation-title">Delete this harmless example?</h3>
+          <p>This demonstration changes no account, server, customer, or stored product data.</p>
+          <div className="docs-button-confirmation__actions">
+            <Button ref={cancelRef} fullWidth onClick={() => close()}>Keep example</Button>
+            <Button ref={confirmRef} fullWidth priority="primary" tone="destructive" onClick={() => close('Example deletion completed. No product data changed.')}>Delete example</Button>
+          </div>
+        </div>
+      )}
+      {result ? <p className="docs-button-confirmation__result" role="status">{result}</p> : null}
+    </div>
+  );
+}
+
+function ButtonSpecSection({ children, id, intro, number, title }) {
+  return (
+    <section aria-labelledby={`${id}-title`} className="docs-button-spec-section" id={id}>
+      <header className="docs-button-spec-section__header">
+        <span aria-hidden="true">{number}</span>
+        <div>
+          <h2 id={`${id}-title`}>{title}</h2>
+          {intro ? <p>{intro}</p> : null}
+        </div>
+      </header>
+      <div className="docs-button-spec-section__body">{children}</div>
+    </section>
+  );
+}
+
+function ButtonPage({ adjacent, currentItem, currentPath, navigate }) {
+  return (
+    <ArticleFrame adjacent={adjacent} currentItem={currentItem} currentPath={currentPath} navigate={navigate}>
+      <section aria-labelledby="button-title" className="docs-button-cover" id="overview">
+        <div className="docs-button-cover__copy">
+          <p>Component design specification</p>
+          <h1 id="button-title" tabIndex="-1">Button</h1>
+          <div>Button is a native, caller-labelled action control that keeps priority, destructive consequence, size, and progress distinct.</div>
+        </div>
+        <div aria-label="Live Button specimen" className="docs-button-cover__specimen">
+          <Button priority="primary" size="large">Save changes</Button>
+        </div>
+      </section>
+
+      <section aria-labelledby="button-glance-title" className="docs-button-glance" id="at-a-glance">
+        <header>
+          <p className="docs-button-section-kicker">Visual overview</p>
+          <h2 id="button-glance-title">Button at a glance</h2>
+          <div>The production family, shown before the specification asks you to study it.</div>
+        </header>
+        <div className="docs-button-glance__board">
+          <div aria-label="Button treatments" className="docs-button-glance__treatments">
+            <div><span>Primary</span><Button priority="primary">Save changes</Button></div>
+            <div><span>Secondary</span><Button>Review details</Button></div>
+            <div><span>Loading</span><Button loading loadingLabel="Saving changes…" priority="primary">Save changes</Button></div>
+            <div><span>Disabled</span><Button disabled>Continue</Button></div>
+            <div><span>Destructive</span><Button tone="destructive">Delete item</Button></div>
+          </div>
+          <div aria-label="Button sizes" className="docs-button-glance__sizes">
+            <div><span>Small</span><Button priority="primary" size="small">Button</Button></div>
+            <div><span>Medium</span><Button priority="primary">Button</Button></div>
+            <div><span>Large</span><Button priority="primary" size="large">Button</Button></div>
+          </div>
+        </div>
+        <p className="docs-button-glance__note">Loading and disabled are states, not intents.</p>
+      </section>
+
+      <section aria-labelledby="button-map-title" className="docs-button-map" id="specification-map">
+        <div className="docs-button-map__intro">
+          <p className="docs-button-section-kicker">Reference begins here</p>
+          <h2 id="button-map-title">Specification map</h2>
+          <p>Start with the design logic, inspect behavior, then use the implementation contract.</p>
+        </div>
+        <dl className="docs-button-map__model">
+          <div><dt>Priority</dt><dd>Primary · Secondary</dd></div>
+          <div><dt>Tone</dt><dd>Neutral · Destructive</dd></div>
+          <div><dt>State</dt><dd>Rest · Loading · Disabled</dd></div>
+          <div><dt>Size</dt><dd>Small · Medium · Large</dd></div>
+          <div><dt>Width</dt><dd>Content · Full</dd></div>
+          <div><dt>Content</dt><dd>Caller-supplied label · optional icon</dd></div>
+        </dl>
+        <nav aria-label="Button specification chapters" className="docs-button-map__links">
+          <a href="#purpose"><span>01</span>Purpose and boundaries</a>
+          <a href="#visual-system"><span>02</span>Visual system</a>
+          <a href="#states"><span>03</span>States and interaction</a>
+          <a href="#usage"><span>04</span>Usage and content</a>
+          <a href="#accessibility"><span>05</span>Accessibility and responsive</a>
+          <a href="#api"><span>06</span>API and safeguards</a>
+          <a href="#quality"><span>07</span>Quality and adoption</a>
+        </nav>
+      </section>
+
+      <ButtonSpecSection
+        id="purpose"
+        intro="One named action, with the surrounding workflow left where it belongs: in the parent."
+        number="01"
+        title="Purpose and boundaries"
+      >
+        <div className="docs-button-definition-grid">
+          <div>
+            <h3>Component definition</h3>
+            <p>Button gives a user a clear, immediate way to initiate an operation. It communicates that the action is available, expresses its local importance and consequence, provides interaction feedback, and exposes a predictable accessible control.</p>
+            <p>Primary, secondary, and destructive describe presentation. Loading and disabled describe state. Small, medium, and large describe size. Keeping those decisions separate prevents compound variants such as <code>primaryLoading</code> or <code>destructiveDisabled</code>.</p>
+          </div>
+          <div>
+            <h3>Core design thesis</h3>
+            <blockquote>A well-designed button should be obvious without being loud.</blockquote>
+            <p>Quality comes from one clear silhouette, concise wording, controlled semantic color, stable geometry, and immediate feedback—not gloss, novelty, or dramatic elevation.</p>
+          </div>
+        </div>
+
+        <div id="anatomy">
+          <h3>Anatomy</h3>
+          <div className="docs-button-anatomy-grid">
+            <pre className="docs-anatomy"><code>{`Button
+├─ native button surface
+│  └─ stable content frame
+│     ├─ progress glyph?  loading only
+│     ├─ icon?            one logical slot
+│     └─ visible label    required
+└─ focus ring?            focus-visible only`}</code></pre>
+            <div className="docs-button-ownership">
+              <div><h3>Button owns</h3><p>Native semantics, geometry, label and icon alignment, priority and tone presentation, focus, press, loading, disabled, and duplicate-activation protection.</p></div>
+              <div><h3>Parent owns</h3><p>Permissions, validation, requests, confirmation, completion, failure, recovery, persistence, analytics, and deciding which action is primary.</p></div>
+            </div>
+          </div>
+        </div>
+
+        <h3>How the design was determined</h3>
+        <div className="docs-button-decision-table" role="region" aria-label="Source to decision trace">
+          <div className="docs-button-decision-table__head"><span>Evidence</span><span>Implication</span><span>Decision</span></div>
+          <div><strong>Slate hierarchy and current action rules</strong><span>The product distinguishes preferred, quiet, and harmful actions.</span><span>Priority is primary or secondary; consequence is neutral or destructive.</span></div>
+          <div><strong>The requested five treatments</strong><span>Loading and disabled can apply across visual treatments.</span><span>They remain states instead of becoming flat variants.</span></div>
+          <div><strong>Existing compact controls</strong><span>The silhouette fits the operational product, but the default target needed more room.</span><span>Preserve the family at 32, 40, and 48px, with medium as default.</span></div>
+          <div><strong>Supplied 24-page specification</strong><span>Its progressive teaching sequence is stronger than a fact-heavy gallery.</span><span>Adopt identity → visual family → reference, while retaining Slate.</span></div>
+        </div>
+        <Callout title="Boundary test">Button acts in the current interface. Links navigate, ToggleButton preserves selection, MenuButton opens choices, IconButton provides a square glyph-only action, and ButtonGroup arranges several actions.</Callout>
+      </ButtonSpecSection>
+
+      <ButtonSpecSection
+        id="visual-system"
+        intro="One rounded-rectangle family carries importance, consequence, availability, progress, and density without changing identity."
+        number="02"
+        title="Visual system"
+      >
+        <div className="docs-button-visual-principles">
+          <div><span>Silhouette</span><strong>Rounded, never pill-shaped by default</strong><p>Enough straight edge remains for the control to read as a purposeful action.</p></div>
+          <div><span>Typography</span><strong>Clear, medium-weight, sentence case</strong><p>The visible verb phrase is the primary communication layer.</p></div>
+          <div><span>Hierarchy</span><strong>Fill and contrast do the work</strong><p>Routine shadows, gradients, glow, and glass are deliberately excluded.</p></div>
+        </div>
+
+        <h3>Priority and consequence</h3>
+        <div className="docs-button-priority-table">
+          <div><strong>Primary · neutral</strong><p>The strongest ordinary action in one immediate decision group.</p><Button priority="primary">Save changes</Button></div>
+          <div><strong>Secondary · neutral</strong><p>Available and clearly interactive without competing with the preferred route.</p><Button>Review details</Button></div>
+          <div><strong>Secondary · destructive</strong><p>A harmful action that remains visible without becoming the visual destination.</p><Button tone="destructive">Remove access</Button></div>
+          <div><strong>Primary · destructive</strong><p>Reserved for a focused confirmation where consequence and cancel route are explicit.</p><Button priority="primary" tone="destructive">Delete project</Button></div>
+        </div>
+
+        <h3>Governed size system</h3>
+        <div className="docs-button-token-table">
+          <div><strong>Small</strong><span>32px height</span><span>14px padding</span><span>6px radius</span><span>Dense pointer-first tools</span></div>
+          <div><strong>Medium</strong><span>40px height</span><span>18px padding</span><span>8px radius</span><span>Default application action</span></div>
+          <div><strong>Large</strong><span>48px height</span><span>22px padding</span><span>10px radius</span><span>Touch-first and spacious flows</span></div>
+        </div>
+        <p>Button is content-width by default. <code>fullWidth</code> changes placement, never importance or size. Exact colors come from semantic Slate tokens so light, dark, forced-color, hover, pressed, focus, and disabled relationships remain intentional.</p>
+      </ButtonSpecSection>
+
+      <ButtonSpecSection
+        id="states"
+        intro="Feedback changes immediately; dimensions, action meaning, and keyboard location remain stable."
+        number="03"
+        title="States and interaction"
+      >
+        <div className="docs-button-interaction-row" aria-label="Interaction sequence">
+          <div><span>01</span><strong>Rest</strong><p>Clear action silhouette.</p></div>
+          <div><span>02</span><strong>Hover</strong><p>Small tonal preview.</p></div>
+          <div><span>03</span><strong>Focus-visible</strong><p>Separated outer ring.</p></div>
+          <div><span>04</span><strong>Pressed</strong><p>Immediate compression.</p></div>
+        </div>
+        <p className="docs-button-interaction-note">The live control below uses the production component. Change its inputs, activate it once, and inspect loading, completion, failure, recovery, and focus continuity. It makes no network request and stores no data.</p>
+        <ButtonStateLab />
+        <div className="docs-button-state-matrix">
+          <div><strong>Rest</strong><p>Named action, available, no motion.</p></div>
+          <div><strong>Hover</strong><p>Tonal preview; never the only affordance.</p></div>
+          <div><strong>Focus-visible</strong><p>Obvious, separated, and unclipped on every approved surface.</p></div>
+          <div><strong>Pressed</strong><p>One-pixel compression without delaying the action.</p></div>
+          <div><strong>Loading</strong><p>Focusable, busy, stable in width, and guarded against repeat activation.</p></div>
+          <div><strong>Disabled</strong><p>Native unavailability with readable purpose-built tokens.</p></div>
+          <div><strong>Completed</strong><p>Button returns to rest; the parent preserves the result.</p></div>
+          <div><strong>Failed</strong><p>The parent explains the failure and restores a specific retry action.</p></div>
+        </div>
+        <Callout title="Loading is not disabled" tone="warning">Loading means the application accepted the action and is working. It remains focusable with <code>aria-busy</code>. Native disabled means no activation is available and leaves normal focus order.</Callout>
+      </ButtonSpecSection>
+
+      <ButtonSpecSection
+        id="usage"
+        intro="Good Button use begins with a precise verb, a truthful local hierarchy, and a disciplined component boundary."
+        number="04"
+        title="Usage and content"
+      >
+        <DoAvoid
+          doItems={['Use one primary action in an immediate decision group.', 'Begin with a specific verb: “Save changes,” “Try again,” or “Remove access.”', 'Use secondary destructive outside focused confirmation.', 'Supply action-specific loading wording from the parent.']}
+          avoid={['Generic “Submit,” “Proceed,” “Yes,” or “Click here” labels.', 'Several blue actions competing inside one decision group.', 'Using danger to make an ordinary action feel important.', 'Putting routing, status, confirmation, network, or analytics logic inside Button.']}
+        />
+        <div className="docs-button-content-grid">
+          <div><h3>Labels</h3><p>Use concise, specific verb phrases. The component never rewrites case, invents business wording, or truncates a consequence silently.</p></div>
+          <div><h3>Icons</h3><p>One optional passive SVG may reinforce recognition or direction. Icon-only actions belong to IconButton.</p></div>
+          <div><h3>Long wording</h3><p>Improve copy or provide more width first. Controlled wrapping is safer than hiding action meaning with ellipsis.</p></div>
+          <div><h3>Action groups</h3><p>The parent owns order, spacing, equal widths, and responsive stacking. Button never reorders siblings.</p></div>
+        </div>
+        <h3>Destructive escalation</h3>
+        <p>Destructive is normally secondary. A filled destructive Button becomes primary only after the user enters a focused confirmation with a clear consequence and safe cancel route.</p>
+        <Specimen label="Safe confirmation pattern" description="Escape and either action restore focus to the invoking control. This fixture has no external side effect."><ButtonConfirmationDemo /></Specimen>
+      </ButtonSpecSection>
+
+      <ButtonSpecSection
+        id="accessibility"
+        intro="Native semantics establish the baseline; focus, progress, wording, contrast, motion, and narrow layouts complete it."
+        number="05"
+        title="Accessibility and responsive behavior"
+      >
+        <div className="docs-button-access-grid">
+          <div><h3>Keyboard</h3><p>Enter and Space activate exactly once. Focus-visible remains unmistakable. Loading keeps focus; native disabled leaves the tab order.</p></div>
+          <div><h3>Accessible name</h3><p>The required visible string is the name. Icons and progress glyph are decorative. Destructive wording carries meaning beyond red.</p></div>
+          <div><h3>Announcements</h3><p>Button exposes busy state without a chattering live region. Completion and failure announcements belong to the parent.</p></div>
+          <div><h3>Contrast and zoom</h3><p>Text, boundaries, disabled treatment, and focus survive approved surfaces, forced colors, and 200% browser zoom.</p></div>
+        </div>
+        <h3>Exactly 390px</h3>
+        <div className="docs-button-mobile-proof">
+          <div><span>Action pair</span><Button fullWidth priority="primary">Save changes</Button><Button fullWidth>Cancel</Button></div>
+          <div><span>Controlled sizes</span><Button size="small">Small 32px</Button><Button>Medium 40px</Button><Button size="large">Large 48px</Button></div>
+          <div><span>Long localized wording</span><Button fullWidth>Review all pending changes before continuing to reconciliation</Button></div>
+        </div>
+        <p>Touch-first layouts normally choose medium or large. Parent layouts stack action groups and opt into full width. Logical icon placement follows writing direction, and no expanded state may create horizontal page overflow.</p>
+        <h3>Reduced motion</h3>
+        <p>Reduced motion removes press transforms and spinner rotation. A static dashed progress glyph, active wording, busy semantics, stable focus, and tonal feedback preserve the full meaning without movement.</p>
+      </ButtonSpecSection>
+
+      <ButtonSpecSection
+        id="api"
+        intro="The public contract exposes recurring semantic choices and closes visual or behavioral escape hatches."
+        number="06"
+        title="React API and safeguards"
+      >
+        <div className="docs-button-code-pair">
+          <CodeBlock code={BUTTON_MINIMAL} label="Minimal valid use" />
+          <CodeBlock code={BUTTON_COMPLETE} label="Complete controlled use" />
+        </div>
+        <PropTable caption="Button props" rows={BUTTON_CONTRACT.props.map((prop) => [prop.name, prop.values, prop.default, prop.purpose])} />
+        <h3>Behavioral safeguards</h3>
+        <ul className="docs-check-list docs-button-safeguards">
+          <li>An empty visible label renders no control and warns in development.</li>
+          <li>Unsupported controlled values use documented safe fallbacks.</li>
+          <li>Loading plus disabled warns; loading takes precedence so accepted work remains identifiable and focused.</li>
+          <li>Repeat activation is blocked in behavior, not merely through pointer CSS.</li>
+          <li>Resting and loading content share one grid cell, preserving the larger measurement so the control does not shift.</li>
+          <li>The icon slot accepts only one passive inline SVG tree and rejects interactive descendants.</li>
+          <li><code>onClick</code> is the sole action handler; raw styling, polymorphism, role changes, tab-order changes, component-owned ARIA, and alternate action handlers are rejected.</li>
+          <li>The ref and approved native form, data, identity, value, and descriptive ARIA attributes pass through safely.</li>
+          <li>Native type defaults to button; submit and reset remain explicit caller choices.</li>
+        </ul>
+        <Callout title="No styling back door">If a feature repeatedly needs a semantic choice the API cannot express, bring evidence back to the contract. Wrappers own margins and placement; raw color, radius, shadow, internal slots, and polymorphism do not bypass the library.</Callout>
+      </ButtonSpecSection>
+
+      <ButtonSpecSection
+        id="quality"
+        intro="The component is available as a governed primitive; replacing legacy feature buttons remains separate migration work."
+        number="07"
+        title="Quality, adoption, and tradeoffs"
+      >
+        <div className="docs-button-quality-strip">
+          <div><span>Source</span><strong>Production export available</strong></div>
+          <div><span>Contract</span><strong>Colocated explanation complete</strong></div>
+          <div><span>Documentation</span><strong>Live specification page</strong></div>
+          <div><span>Adoption</span><strong>Legacy migration pending</strong></div>
+        </div>
+        <div className="docs-button-boundary-list">
+          <div><strong>IconButton</strong><span>Square glyph-only action with a mandatory accessible name.</span></div>
+          <div><strong>ButtonGroup</strong><span>Spacing, order, alignment, equal widths, and responsive stacking.</span></div>
+          <div><strong>LinkButton</strong><span>Navigation that preserves anchor semantics.</span></div>
+          <div><strong>ToggleButton</strong><span>Persistent selected or pressed state.</span></div>
+          <div><strong>MenuButton</strong><span>Popup ownership, expanded state, keyboard opening, and focus transfer.</span></div>
+          <div><strong>Dialog</strong><span>Confirmation wording, consequence, cancel route, and focus restoration.</span></div>
+        </div>
+        <h3>Acceptance standard</h3>
+        <ul className="docs-check-list">
+          <li>Primary, secondary, loading, disabled, and destructive treatments remain one coherent silhouette.</li>
+          <li>Priority, tone, state, size, and width remain independent decisions.</li>
+          <li>Loading preserves dimensions, focus, meaningful wording, busy semantics, and one activation.</li>
+          <li>Desktop and exactly 390px show no clipping, overflow, false hierarchy, or console errors.</li>
+          <li>Keyboard focus, reduced motion, forced colors, long labels, native form behavior, and invalid combinations are verified.</li>
+          <li>Production source, tests, explanation, registry, docs, prototype, evidence, and release record agree.</li>
+        </ul>
+        <h3>Independent critique</h3>
+        <p>Separating priority from tone is more accurate than one familiar <code>variant</code> prop, but callers must learn two concepts and reviewers must enforce the contextual primary-destructive boundary. Keeping loading focusable is more work than native disabling, yet it prevents keyboard users from losing their position. The closed styling contract reduces feature freedom, but it is what keeps one shared component visually and semantically trustworthy.</p>
+        <p className="docs-button-definition"><strong>Released decision.</strong> Button is content-width, medium 40px, neutral, secondary, native, caller-labelled, and flat by default. Primary emphasis, destructive tone, 32/48px sizes, one icon, loading, disabled, and full width are controlled extensions.</p>
+      </ButtonSpecSection>
+    </ArticleFrame>
+  );
+}
+
 function ReleaseChecklistPage({ adjacent, currentItem, currentPath, navigate }) {
   return (
     <ArticleFrame adjacent={adjacent} currentItem={currentItem} currentPath={currentPath} navigate={navigate}>
@@ -914,6 +1369,7 @@ const PAGE_COMPONENTS = {
   '/docs/components/title-block': TitleBlockPage,
   '/docs/components/status-indicator': StatusIndicatorPage,
   '/docs/components/metadata-line': MetadataLinePage,
+  '/docs/components/button': ButtonPage,
   '/docs/quality/release-checklist': ReleaseChecklistPage,
 };
 

@@ -326,7 +326,7 @@ export default function DocsApp() {
   };
 
   return (
-    <div className="docs-root">
+    <div className="docs-root" data-current-path={currentPath}>
       <a className="docs-skip-link" href="#docs-main">Skip to documentation</a>
       <header className="docs-topbar">
         <div className="docs-topbar-inner">

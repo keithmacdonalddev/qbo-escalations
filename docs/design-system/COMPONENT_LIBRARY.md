@@ -2,12 +2,12 @@
 
 **Status:** Canonical, evolving component contract
 
-**Current components:** 01 `TitleBlock`, 02 `StatusIndicator`, 03 `MetadataLine`
+**Current components:** 01 `TitleBlock`, 02 `StatusIndicator`, 03 `MetadataLine`, 04 `Button`
 
 **Production source:** `client/src/components/design-system/`
 **Visual language:** Slate, defined by `DESIGN.md` and tokens in `client/src/App.css`
 
-This document is the formal source of truth for reusable interface components in QBO Escalations. It is deliberately stricter than a gallery of attractive examples. Each entry defines the component's job, its limits, its visual reasoning, its public API, its accessibility behavior, and the conditions under which it may be extended.
+This document is the formal registry and concise inventory for reusable interface components in QBO Escalations. The authoritative detailed contract lives beside each component as `<ComponentName>.md`; a machine-readable `<ComponentName>.contract.json` keeps public props, defaults, and behavior assertions synchronized for every component created or materially revised under the current release workflow.
 
 The library will grow one reviewed component at a time. A page-specific pattern does not become a shared component merely because two screens look similar. Shared components exist only when their meaning and behavior remain stable across domains such as QBO work, Investments, Knowledge, agents, providers, and personal workspace tools.
 
@@ -18,10 +18,12 @@ The library will grow one reviewed component at a time. A page-specific pattern 
 Use these sources in this order:
 
 1. `DESIGN.md` defines the product-wide design principles, Slate tokens, density, interaction quality, and release bar.
-2. This file defines the reusable component contracts and approved composition boundaries.
-3. The routed `/docs` experience provides plain-English guidance and live production specimens; `DESIGN.HTML` is only a migration pointer to that site.
-4. `client/src/components/design-system/` is the production implementation.
-5. Feature CSS may compose these components but may not silently redefine their anatomy or semantics.
+2. Each component folder contains `<ComponentName>.md`, the authoritative source-traceable explanation that preserves design determination, rejected alternatives, safeguards, critique, and acceptance criteria.
+3. This file is the registry and concise inventory for reusable contracts and approved composition boundaries.
+4. New or materially revised component folders contain `<ComponentName>.contract.json`, the machine-readable prop/default/assertion contract consumed by production source, live docs, and release validation.
+5. The routed `/docs/components/<slug>` experience is the polished teaching surface with live production specimens; `DESIGN.HTML` is only a migration pointer to that site.
+6. `client/src/components/design-system/` is the production implementation.
+7. Feature CSS may compose these components but may not silently redefine their anatomy or semantics.
 
 When source and documentation disagree, treat the disagreement as design-system debt. Do not pick whichever version is easier. Pause the feature integration, reconcile the component contract, then update documentation and implementation together.
 
@@ -80,7 +82,7 @@ Success color is not decoration. A green `Connected` status claims that the surr
 
 ### 3.6 Static components remain static
 
-Neither component in this foundation performs network requests, stores data, polls, retries, navigates, or invents click behavior. The parent owns state and actions. This keeps visual components predictable and prevents a harmless-looking primitive from becoming an authority boundary.
+Design-system primitives do not perform network requests, store product data, poll, retry, navigate, or invent workflow behavior. Information-display primitives remain non-interactive. Button exposes one caller-supplied native action handler but still leaves state derivation, requests, outcomes, and authority with the parent. This prevents a visually small component from becoming a hidden product or permission boundary.
 
 ### 3.7 The Apple bar is a complete-experience bar
 
@@ -901,31 +903,201 @@ A valid parent composition may contain `TitleBlock`, `StatusIndicator`, `Metadat
 
 ---
 
-## 44. Shared implementation rules
+# Component 04 — `Button`
 
-### 44.1 File ownership
+**Approved baseline:** `docs/design-system/assets/button/Button-prototype-v2.png`
+
+**Complete explanation:** `client/src/components/design-system/Button/Button.md`
+
+**Live documentation:** `/docs/components/button`
+
+**Status:** `available`
+
+**Classification:** `interactive-control`
+
+## 44. Purpose and boundary
+
+`Button` initiates one clearly named action in the current interface. It communicates local priority, destructive consequence, availability, and progress while the parent remains responsible for the surrounding workflow.
+
+Button owns native semantics, controlled geometry, the visible label and optional icon relationship, focus and press feedback, loading presentation, native disabled presentation, and duplicate-activation protection. The parent owns permissions, validation, requests, confirmation, completion, failure, recovery, persistence, analytics, and deciding which action is locally primary.
+
+Navigation is an anchor. Persistent selection belongs to ToggleButton. A popup trigger belongs to MenuButton. A glyph-only action belongs to IconButton. Layout across several actions belongs to ButtonGroup. These are related components, not Button modes.
+
+## 45. Canonical default
+
+The safe default is:
+
+```jsx
+<Button>Review details</Button>
+```
+
+It renders a content-width, medium 40px, neutral, secondary-priority native `<button type="button">`. The default has no icon, progress glyph, fixed marketing width, gradient, glow, glass, or routine shadow. A bare Button remains clearly operable without silently claiming to be the preferred action in every placement.
+
+## 46. Semantic model
+
+| Axis | Values | Meaning |
+| --- | --- | --- |
+| Priority | `primary`, `secondary` | How strongly the action competes in its immediate decision group |
+| Tone | `neutral`, `destructive` | Whether the consequence is ordinary or harmful/difficult to reverse |
+| State | rest, hover, focus-visible, pressed, `loading`, `disabled` | What the control is doing or whether it can currently act |
+| Size | `small`, `medium`, `large` | Controlled 32px, 40px, or 48px geometry without semantic change |
+| Width | content, `fullWidth` | Placement only; width never upgrades importance |
+
+Primary, secondary, loading, disabled, and destructive appear together in the requested showcase, but they are not equivalent “variants.” Loading and disabled can apply to more than one priority and tone. Keeping the axes separate prevents compound names such as `primaryLoading` or `destructiveDisabled` and makes the contract easier to reason about.
+
+## 47. Public API
+
+```jsx
+<Button
+  priority="primary"
+  tone="neutral"
+  size="medium"
+  loading={isSaving}
+  loadingLabel="Saving changes…"
+  icon={<svg viewBox="0 0 16 16"><path d={savePath} /></svg>}
+  iconPosition="leading"
+  fullWidth={false}
+  type="button"
+  onClick={saveChanges}
+>
+  Save changes
+</Button>
+```
+
+| Prop | Controlled values | Default | Contract |
+| --- | --- | --- | --- |
+| `children` | non-empty string | required | Visible action label and accessible name |
+| `priority` | `primary` \| `secondary` | `secondary` | Local action hierarchy |
+| `tone` | `neutral` \| `destructive` | `neutral` | Ordinary or harmful consequence |
+| `size` | `small` \| `medium` \| `large` | `medium` | Governed 32/40/48px geometry |
+| `loading` | boolean | `false` | Busy semantics, progress presentation, and activation guard |
+| `disabled` | boolean | `false` | Native unavailable state |
+| `loadingLabel` | non-empty string | visible label | Caller-named active operation |
+| `icon` | one passive inline SVG tree | none | Purposeful inert glyph; interactive or opaque trees are rejected |
+| `iconPosition` | `leading` \| `trailing` | `leading` | Logical icon placement |
+| `fullWidth` | boolean | `false` | Container width without semantic promotion |
+| `onClick` | function | none | Sole caller action handler, guarded while loading or unavailable |
+| `type` | `button` \| `submit` \| `reset` | `button` | Safe native form behavior |
+
+The ref plus explicit data, name/value/form, `id`, and descriptive ARIA attributes pass through. `onClick` is the sole action handler. Raw `className`, `style`, `as`, `href`, role or tab-order replacement, `aria-label`, `aria-hidden`, `aria-disabled`, alternate action handlers, and toggle/menu ARIA states are outside the governed contract and are ignored with development warnings.
+
+## 48. Visual system and sizes
+
+The Button family keeps one rounded-rectangle silhouette. Neutral primary uses the bright Slate accent with dark ink for contrast. Neutral secondary uses the raised control surface, readable primary ink, and a quiet boundary. Secondary destructive uses a restrained danger tint, danger label, and semantic border. Solid primary destructive is reserved for a focused confirmation where the harmful action is genuinely the principal decision.
+
+| Size | Height | Inline padding | Radius | Intended context |
+| --- | ---: | ---: | ---: | --- |
+| Small | 32px | 14px | 6px | Dense pointer-first tools |
+| Medium | 40px | 18px | 8px | Canonical application action |
+| Large | 48px | 22px | 10px | Touch-first or spacious flows |
+
+Size changes geometry, not wording, priority, consequence, width, or content visibility. Content width is canonical; `fullWidth` is an explicit independent layout choice.
+
+## 49. State and interaction contract
+
+- Rest presents one clear action name with no motion.
+- Hover provides a restrained tonal preview and is never the only operability signal.
+- Focus-visible uses a separated outer ring that remains visible on neutral, accent, and danger surfaces.
+- Press feedback is immediate, small, and never delays the action handler.
+- Loading keeps focus, exposes `aria-busy="true"` and unavailable semantics, blocks repeat pointer/keyboard/synthetic activation, and reserves both resting and loading measurements to prevent layout shift.
+- Disabled uses native `disabled`, leaves normal focus order, removes hover/press behavior, and uses purpose-built readable tokens instead of whole-element opacity.
+- Completion, partial success, failure, and recovery remain parent-owned workflow states. Button returns to an appropriate resting action; it does not turn itself into a permanent status indicator.
+
+If `loading` and `disabled` are supplied together, development warns and loading takes deterministic precedence. Accepted work remains identifiable and keyboard focus is preserved instead of being discarded by native disabled behavior.
+
+Under reduced motion, press transforms and spinner rotation are removed. A static dashed progress glyph, specific loading wording, busy semantics, and stable focus preserve the same meaning.
+
+## 50. Content and hierarchy rules
+
+- Use one primary action in an immediate decision group.
+- Begin with a specific verb: `Save changes`, `Try again`, `Remove access`, or `Delete project`.
+- Use secondary destructive outside a focused confirmation.
+- Use primary destructive only when consequence text and a safe cancel route establish a deliberate confirmation context.
+- Loading wording names the active operation and is supplied by the parent.
+- Do not use generic `Button`, `Submit`, `Proceed`, `Yes`, or `Click here` specimens when a concrete result can be named.
+- Do not add badges, descriptions, timestamps, keyboard hints, or status messages inside Button.
+
+## 51. Accessibility and responsive behavior
+
+The native element is `<button type="button">` unless the caller deliberately requests `submit` or `reset`. The visible string supplies the accessible name. Icons and the progress glyph are decorative. Destructive wording communicates consequence beyond color. Focus, boundary, text, disabled treatment, forced colors, browser zoom, and reduced motion are all part of acceptance.
+
+At exactly 390px, the component retains the caller's requested size and sibling order. Parent layouts normally select medium or large in touch-first contexts, stack action groups, and explicitly request full width. Button uses logical inline spacing, does not silently truncate labels, and must not create page overflow.
+
+## 52. Safeguards
+
+- Empty visible labels render no control and warn in development.
+- Unsupported controlled values use documented safe fallbacks.
+- Loading and disabled cannot silently contradict each other.
+- Loading behavior guards repeat activation even if visual CSS fails.
+- One icon slot prevents noisy double-decoration and ambiguous menu chevrons.
+- `href` and `as` are excluded so navigation cannot inherit action semantics accidentally.
+- Raw visual styling escape hatches cannot fork tokens per feature.
+- Primary destructive is a documented contextual boundary even though code cannot infer the containing confirmation.
+
+## 53. Release and migration status
+
+Button is available through the public design-system barrel and is taught with live production specimens at `/docs/components/button`. This release does not replace legacy `.btn`, feature-specific buttons, or action groups. Adoption remains a separately inventoried and approved migration scope so a component release cannot silently change existing workflows.
+
+The production implementation, focused tests, `Button.contract.json`, `Button.md`, this registry, the routed documentation page, prototype/evidence assets, and design release record form one governed release unit. A material change to any semantic axis, default, state meaning, size, invalid-combination rule, or component boundary must update all applicable surfaces together.
+
+## 54. Acceptance checklist
+
+- [x] The canonical default is neutral secondary, medium 40px, content-width, and native.
+- [x] Primary, secondary, loading, disabled, and destructive remain one coherent silhouette.
+- [x] Priority, tone, state, size, and width are independent axes.
+- [x] Small, medium, and large render at 32px, 40px, and 48px.
+- [x] Loading preserves dimensions, focus, accessible wording, busy semantics, and one activation.
+- [x] Disabled blocks activation and remains identifiable without whole-element opacity.
+- [x] Focus-visible is unmistakable and unclipped on every approved surface.
+- [x] Destructive meaning is present in wording as well as color.
+- [x] Exactly 390px has no horizontal overflow or silent label truncation.
+- [x] Reduced motion retains all semantic feedback without continuous rotation or press transform.
+- [x] Public safeguards prevent semantic and visual escape hatches.
+- [x] Production code, explanation, registry, live docs, tests, prototype, evidence, and release record agree.
+
+---
+
+## 55. Shared implementation rules
+
+### 55.1 File ownership
 
 ```text
 client/src/components/design-system/
-├─ TitleBlock.jsx
-├─ TitleBlock.css
-├─ TitleBlock.test.jsx
-├─ StatusIndicator.jsx
-├─ StatusIndicator.css
-├─ StatusIndicator.test.jsx
-├─ MetadataLine.jsx
-├─ MetadataLine.css
-├─ MetadataLine.test.jsx
+├─ Button/
+│  ├─ Button.jsx
+│  ├─ Button.css
+│  ├─ Button.test.jsx
+│  ├─ Button.md
+│  ├─ Button.contract.json
+│  └─ index.js
+├─ MetadataLine/
+│  ├─ MetadataLine.jsx
+│  ├─ MetadataLine.css
+│  ├─ MetadataLine.test.jsx
+│  ├─ MetadataLine.md
+│  └─ index.js
+├─ StatusIndicator/
+│  ├─ StatusIndicator.jsx
+│  ├─ StatusIndicator.css
+│  ├─ StatusIndicator.test.jsx
+│  ├─ StatusIndicator.md
+│  └─ index.js
+├─ TitleBlock/
+│  ├─ TitleBlock.jsx
+│  ├─ TitleBlock.css
+│  ├─ TitleBlock.test.jsx
+│  ├─ TitleBlock.md
+│  └─ index.js
 └─ index.js
 ```
 
 Import through the public barrel when integrating:
 
 ```js
-import { MetadataLine, StatusIndicator, TitleBlock } from './components/design-system/index.js';
+import { Button, MetadataLine, StatusIndicator, TitleBlock } from './components/design-system/index.js';
 ```
 
-### 44.2 CSS namespace
+### 55.2 CSS namespace
 
 All design-system classes use the `qds-` prefix. The existing client has broad legacy selectors based on class-name substrings. In particular, generic words such as `title`, `badge`, `popover`, `tooltip`, and `modal` can trigger unrelated styles.
 
@@ -937,10 +1109,12 @@ The production classes therefore use collision-resistant names such as:
 - `qds-status-indicator__symbol`
 - `qds-metadata-line`
 - `qds-metadata-line__fact`
+- `qds-button`
+- `qds-button__content`
 
 Do not rename them to shorter generic classes.
 
-### 44.3 Tokens
+### 55.3 Tokens
 
 Components consume canonical variables from `client/src/App.css`:
 
@@ -955,15 +1129,17 @@ Components consume canonical variables from `client/src/App.css`:
 
 Fallbacks exist so isolated renders remain legible, but product appearance comes from the shared tokens.
 
-### 44.4 No new icon dependency
+### 55.4 No new icon dependency
 
-Standard StatusIndicator symbols use small internal SVGs with `currentColor`. TitleBlock receives an icon from its parent. Do not add an icon package merely for these primitives.
+Standard StatusIndicator symbols use small internal SVGs with `currentColor`. TitleBlock, MetadataLine, and Button receive optional icons from their parent. Do not add an icon package merely for these primitives.
 
-### 44.5 Escape hatches
+### 55.5 Escape hatches
 
 `className` and `style` exist for placement and exceptional integration—not for bypassing the contract. If multiple consumers need the same exception, stop using an escape hatch and propose a governed prop with evidence.
 
-## 45. Adding component 04 and beyond
+Button deliberately does not expose `className` or `style`; wrappers own placement and `fullWidth` covers its recurring internal width treatment. The older information-display primitives retain those compatibility props until consumer evidence justifies a separate narrowing change.
+
+## 56. Adding component 05 and beyond
 
 Every new component entry must include:
 
@@ -985,10 +1161,14 @@ Every new component entry must include:
 16. Focused verification
 17. Sanitized rendered evidence
 18. Independent release verdict when material or major
+19. A dedicated `client/src/components/design-system/<ComponentName>/` folder
+20. A complete colocated `<ComponentName>.md` explanation
+21. A machine-readable `<ComponentName>.contract.json` shared by source, docs, and release validation for every new or materially revised component
+22. A finished `/docs/components/<slug>` page using live production specimens
 
-A component is not added to the library merely by creating a JSX file. Documentation, production implementation, focused checks, and visual evidence move together.
+A component is not added to the library merely by creating a JSX file. Its folder, explanation, registry entry, live teaching page, production implementation, focused checks, rendered evidence, and required review move together.
 
-## 46. Change control
+## 57. Change control
 
 ### Minor compatible change
 
@@ -1024,7 +1204,7 @@ Examples:
 
 Breaking changes require migration planning across every consumer. Do not quietly change the primitive and repair screens opportunistically.
 
-## 47. Final release question
+## 58. Final release question
 
 For every component and every integration, ask:
 

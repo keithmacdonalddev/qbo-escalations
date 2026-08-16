@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import MetadataLine from './MetadataLine.jsx';
-import { MetadataLine as ExportedMetadataLine } from './index.js';
+import { MetadataLine as ExportedMetadataLine } from '../index.js';
 
 describe('MetadataLine', () => {
   it('renders the canonical bare facts with labels, values, and quiet separators', () => {

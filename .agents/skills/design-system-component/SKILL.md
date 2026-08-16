@@ -5,9 +5,9 @@ description: Use when creating, revising, approving, documenting, or implementin
 
 # Design System Component
 
-Create one governed, reusable interface component at a time. Treat the prototype, component contract, documentation, implementation, and real rendered result as one continuous design decision—not separate tasks that can silently drift apart.
+Create one governed, reusable interface component at a time. Treat the prototype, component contract, source-adjacent explanation, in-app documentation page, implementation, and real rendered result as one continuous design decision—not separate tasks that can silently drift apart.
 
-The user is the component's approval authority. A prototype is a decision artifact, not permission to edit production code. An approved component becomes immediately importable from the shared design-system package; it does not automatically replace similar feature UI across the app.
+The user is the component's approval authority. A prototype is a decision artifact, not permission to edit production code. Approval freezes the design contract; only a separately authorized, implemented, verified, and `available` component becomes importable from the shared design-system package. Availability does not automatically replace similar feature UI across the app.
 
 ## Required sources
 
@@ -16,7 +16,7 @@ Before designing, read these sources completely:
 1. `DESIGN.md`
 2. `docs/design-system/COMPONENT_LIBRARY.md`
 3. `.agents/skills/design-experience-gate/SKILL.md`
-4. The existing files under `client/src/components/design-system/`
+4. The target component folder when it exists, the public design-system barrel, shared files, and only the neighboring components needed to decide a boundary; do not read the whole library mechanically as it grows
 5. The relevant shared tokens in `client/src/App.css`
 6. Any user-supplied image, explanation, critique, or approved precedent for this component
 
@@ -25,7 +25,7 @@ Before producing the first prototype, read these files completely:
 - `references/component-workflow-contract.md` for the full component contract, prototype rules, explanation structure, documentation matrix, and implementation acceptance criteria; and
 - `examples/button-component-design-explanation.md` for the minimum acceptable depth and evidence quality of a user-facing explanation.
 
-The example is a quality floor, not a template or ceiling. Every live result must improve on it in at least one substantive, named way—such as fresher evidence, a clearer contract, a newly resolved contradiction, stronger safeguards, or tighter prototype agreement—while meeting every other quality category. Extra length is not an improvement. Do not inflate the response with generic design prose.
+The example is a quality floor, not a template or ceiling. Every live result must improve on it in at least one substantive, named way—such as fresher evidence, a clearer contract, a newly resolved contradiction, stronger safeguards, or tighter prototype agreement—while meeting every other quality category. Improvement never means adding unsupported API, visual novelty, or extra variants merely to look different. Extra length is not an improvement. Do not inflate the response with generic design prose.
 
 ## Workflow
 
@@ -104,6 +104,8 @@ Alongside the image, provide the complete decision rationale required by `refere
 
 Create `%USERPROFILE%\Desktop\<ComponentName>-prototype-v<N>-explanation.md` beside the default prototype, or an equivalent Markdown file beside a user-requested output. Present the same complete explanation in chat; a short summary or handoff block is never a substitute.
 
+When production implementation is authorized, the explanation also becomes a required living file at `client/src/components/design-system/<ComponentName>/<ComponentName>.md`. This is not an abbreviated README. It preserves the full validated explanation—including evidence, rejected alternatives, boundaries, state model, API safeguards, critique, decision summary, and acceptance criteria—beside the code it governs. Update it whenever the component contract changes. The colocated explanation, component registry, and in-app page must agree; none may silently become a competing contract.
+
 The explanation must:
 
 - declare `Component type: primitive | composition | interactive-control | workflow-pattern` immediately below its title;
@@ -158,21 +160,32 @@ Copy the sanitized approved baseline into `docs/design-system/assets/<component-
 
 Update documentation and implementation as one change:
 
-- `docs/design-system/COMPONENT_LIBRARY.md` — full canonical component contract and library inventory;
-- `DESIGN.HTML` — plain-English visual specimen and approved variants;
+- `docs/design-system/COMPONENT_LIBRARY.md` — concise canonical registry, contract inventory, and links to deeper sources;
+- `client/src/components/design-system/<ComponentName>/<ComponentName>.md` — the complete source-traceable component explanation;
+- `/docs/components/<component-slug>` under `client/src/docs/` — a complete polished teaching page using the real production export;
+- `DESIGN.HTML` — update only when it is still the active visual guide rather than a migration pointer to `/docs`;
 - `DESIGN.md` — only when the component establishes or changes a durable app-wide rule;
 - design-system exports and nearby usage examples; and
 - any component status, adoption, or migration record that already governs the library.
 
-Do not duplicate the full component contract into agent prompts, hooks, or multiple provider skills. This skill routes agents to the canonical documents.
+The in-app component page is mandatory for every new production component and every material component revision. A route, title, or specimen gallery alone is incomplete. The page must teach purpose, boundary, anatomy, design determination, canonical default, approved semantic axes, all material states, sizing, interaction, content rules, accessibility, responsive and reduced-motion behavior, public API, invalid combinations, safeguards, neighboring components, availability/adoption status, tradeoffs, and acceptance evidence. Put a live production specimen and minimal valid example in the first useful viewport. Use the exported component itself—never duplicate its appearance with documentation-only CSS.
+
+Translate strong reference-document information architecture into the current Slate documentation experience; do not copy an unrelated theme or create a wall of cards. Prefer one chaptered article with clear sections, restrained specimen/code/callout surfaces, useful on-page navigation, desktop and exactly 390px behavior, and sanitized fixture content. The page must be directly routed, searchable, included in component navigation, covered by focused documentation tests, and rendered during release verification.
+
+When the user supplies a PDF, screenshot set, or other designed specification as the quality benchmark, inspect its rendered sequence at original resolution before designing the page. Record what the reference deliberately shows first, what its next visual chapter adds, and where detailed reading begins. Preserve that staged cognitive load unless the user approves another direction: a calm identity-first cover cannot be replaced by breadcrumbs, status badges, facts, code, navigation, or multiple specimens merely because those items are required somewhere on the complete page. Map every required topic into the later teaching sequence, and treat “all content exists” as a failed substitute for matching the reference's information hierarchy, visual breathing room, and reading progression.
+
+Do not duplicate the full component contract into agent prompts, hooks, or multiple provider skills. The source-adjacent Markdown is the authoritative detailed contract, the in-app page teaches it through live examples, and `COMPONENT_LIBRARY.md` is a concise inventory/status/API summary that links to the detailed contract. Any disagreement is a release failure; do not conceal it with source-precedence language.
+
+The page may explain hover, focus, pressed, loading, or other states, but documentation CSS must not force or recreate internal production styles. Prove interaction appearance through the actual exported component, real browser interaction, and sanitized rendered evidence. Clearly label any non-live diagram as explanatory rather than authoritative.
 
 ### 9. Implement the approved reusable component
 
-Build under `client/src/components/design-system/` using the established `qds-` namespace and shared Slate tokens.
+Build each component in its own `client/src/components/design-system/<ComponentName>/` folder using the established `qds-` namespace and shared Slate tokens. Folder names use the exported PascalCase component name. Do not add new component files at the design-system root; that root owns only the public barrel and shared files that genuinely apply to more than one component.
 
 The implementation must include:
 
 - a focused React component with one stable job;
+- `<ComponentName>.jsx`, `<ComponentName>.css`, `<ComponentName>.test.jsx`, `<ComponentName>.md`, `<ComponentName>.contract.json`, and an optional local `index.js` inside the component folder; the JSON manifest is the machine-readable identity/status/classification, exact governed-prop/default, rejected-source-boundary, and non-empty behavior-assertion contract shared by source, live docs, and the release validator, while Markdown remains the authoritative human explanation;
 - controlled semantic props and safe defaults;
 - complete supported states and optional-content behavior;
 - correct semantic HTML and assistive-technology relationships;
@@ -182,18 +195,31 @@ The implementation must include:
 - focused component tests for the public contract; and
 - examples that demonstrate valid use without binding the primitive to one feature.
 
+Source syntax and docs file layout are implementation choices, not component semantics. A component may use a named function or arrow function, with or without `forwardRef`; the governed props must remain statically inspectable. Its docs page may live in the shared pages module or a dedicated module, and component-specific docs CSS is optional. The release gate discovers the route's page, focused tests, and docs CSS files and must not require Button's file layout.
+
 The component must not fetch, poll, store, navigate, or mutate external state unless that behavior is the explicitly approved purpose of the component. Parents own feature data and side effects by default.
 
 `className`, `style`, `aria-*`, and `data-*` may support placement and integration, but cannot become an ungoverned alternate styling API. If a requested use case changes the component's purpose, create a composition or a separate component instead of adding another catch-all slot.
 
 ### 10. Compare the implementation with the approval
 
-Run the smallest focused checks that prove the new public contract. Then render the actual production component in an isolated specimen and compare it with the approved prototype.
+Before claiming `available`, perform a prototype-to-production reconciliation. Re-read the implementation, colocated explanation, registry, routed page, tests, and release record from disk; remove proposal-only or provisional wording that is no longer true; resolve every behavioral/default/API disagreement; and check every release acceptance item. An unchecked item blocks `available` unless the release record names a justified deferment and uses a truthful earlier status.
+
+Run both validators. The explanation validator checks depth and structure. The release validator checks the component release graph and fails missing files, exports, route/search/docs-test registration, live specimen use, public-prop disagreement, unchecked available-state criteria, missing desktop/390 evidence, or a missing release-quality record:
+
+```powershell
+node .agents/skills/design-system-component/scripts/validate-component-explanation.mjs client/src/components/design-system/<ComponentName>/<ComponentName>.md
+node .agents/skills/design-system-component/scripts/test-validate-component-release.mjs
+node .agents/skills/design-system-component/scripts/validate-component-release.mjs <ComponentName> <component-slug>
+```
+
+The release validator and its focused self-test are deterministic synchronization floors, not visual approval. Run both before the target validation. Then run the smallest focused checks that prove the new public contract, render the actual production component in an isolated specimen, and compare it with the approved prototype.
 
 Required visual evidence for a new component includes:
 
 - canonical desktop state;
 - exactly 390px width;
+- the complete routed `/docs/components/<component-slug>` teaching page at desktop and exactly 390px;
 - every materially distinct state or interactive disclosure;
 - keyboard focus and pressed/open behavior when interactive;
 - reduced-motion behavior when animated;
@@ -211,10 +237,13 @@ Hand off:
 - a minimal example;
 - supported props and defaults;
 - approved prototype and rendered implementation evidence;
+- the colocated complete explanation and routed component documentation page;
 - focused verification results; and
 - adoption status: `available`, `adopted in named consumers`, or `migration pending`.
 
 Do not claim app-wide adoption because a component was exported. Do not migrate existing screens unless those consumers were named in the scope lock.
+
+Existing components created before this full release contract may remain `legacy-available` only when the registry lists their missing page/evidence/reconciliation work. Moving files or adding a colocated explanation counts as a material documentation revision only for the target components named in the scope lock; it does not silently require retrofitting every legacy component. A component newly created or materially revised under this skill must pass the current full contract before it may be called `available`.
 
 ## Stop conditions
 
@@ -226,11 +255,12 @@ Pause and request direction when:
 - the user has not approved the direction and production implementation was not explicitly authorized;
 - the prototype or explanation contradicts the current design sources or each other;
 - the explanation validator or human quality rubric does not pass completely;
+- the release synchronization validator does not pass for an implementation claiming `available`;
 - the approved prototype cannot be reproduced without changing shared tokens or another component contract; or
 - adoption would require touching unnamed feature screens.
 
 ## Definition of done
 
-A component is complete only when all requested workflow stages are complete. For the full workflow, that means: explicit user approval, approved baseline stored, canonical documentation updated, production component and public export available, focused tests passing, rendered implementation compared against the approval, required design gate satisfied, and adoption scope reported truthfully.
+A component is complete only when all requested workflow stages are complete. For the full workflow, that means: explicit user approval, approved baseline stored, one component folder created, the full explanation colocated and validated, the registry updated, a finished searchable `/docs/components/<slug>` page using live production specimens, production component and public export available, focused component and documentation tests passing, desktop and exactly 390px documentation renders checked, implementation compared against the approval, all release checklist items resolved, the cross-surface release validator passing, required design gate satisfied, a completed release record stored, and adoption scope reported truthfully.
 
-A prototype is **prototype complete** only when its final bitmap passes original-resolution inspection, its complete explanation passes the deterministic validator and human quality rubric, and both artifacts agree with the current design evidence. It is still not production complete. A JSX file alone is **implemented**, not design-system complete.
+A prototype is **prototype complete** only when its final bitmap passes original-resolution inspection, its complete explanation passes the deterministic validator and human quality rubric, and both artifacts agree with the current design evidence. It is still not production complete. A JSX file, a folder, a Markdown explanation, or a documentation route alone is **partial**, not design-system complete.

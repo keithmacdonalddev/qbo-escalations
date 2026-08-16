@@ -1,0 +1,148 @@
+{
+  "name": "Button",
+  "slug": "button",
+  "classification": "interactive-control",
+  "status": "available",
+  "props": [
+    {
+      "name": "children",
+      "values": "non-empty string",
+      "default": "required",
+      "purpose": "Visible action label and accessible name."
+    },
+    {
+      "name": "priority",
+      "values": "primary | secondary",
+      "allowed": ["primary", "secondary"],
+      "default": "secondary",
+      "purpose": "Local action hierarchy."
+    },
+    {
+      "name": "tone",
+      "values": "neutral | destructive",
+      "allowed": ["neutral", "destructive"],
+      "default": "neutral",
+      "purpose": "Ordinary or harmful consequence."
+    },
+    {
+      "name": "size",
+      "values": "small | medium | large",
+      "allowed": ["small", "medium", "large"],
+      "default": "medium",
+      "purpose": "Governed 32/40/48px geometry."
+    },
+    {
+      "name": "loading",
+      "values": "boolean",
+      "default": "false",
+      "purpose": "Busy semantics, progress presentation, and repeat guard."
+    },
+    {
+      "name": "disabled",
+      "values": "boolean",
+      "default": "false",
+      "purpose": "Native unavailable state."
+    },
+    {
+      "name": "loadingLabel",
+      "values": "non-empty string",
+      "default": "visible label",
+      "purpose": "Caller-named active operation."
+    },
+    {
+      "name": "icon",
+      "values": "one passive inline SVG tree",
+      "default": "none",
+      "purpose": "Purposeful inert glyph; interactive or opaque trees are rejected."
+    },
+    {
+      "name": "iconPosition",
+      "values": "leading | trailing",
+      "allowed": ["leading", "trailing"],
+      "default": "leading",
+      "purpose": "Logical icon placement."
+    },
+    {
+      "name": "fullWidth",
+      "values": "boolean",
+      "default": "false",
+      "purpose": "Container width without semantic promotion."
+    },
+    {
+      "name": "onClick",
+      "values": "function",
+      "default": "none",
+      "purpose": "Sole caller action handler; guarded while loading or unavailable."
+    },
+    {
+      "name": "type",
+      "values": "button | submit | reset",
+      "allowed": ["button", "submit", "reset"],
+      "default": "button",
+      "purpose": "Safe native form behavior."
+    }
+  ],
+  "blockedProps": [
+    "className",
+    "style",
+    "as",
+    "href",
+    "role",
+    "aria-label",
+    "aria-disabled",
+    "aria-pressed",
+    "aria-expanded",
+    "aria-haspopup"
+  ],
+  "assertions": [
+    {
+      "id": "empty-label",
+      "sourceIncludes": "children must be a visible, non-empty string",
+      "testIncludes": "requires visible text",
+      "docsIncludes": "An empty visible label renders no control and warns in development.",
+      "explanationIncludes": "renders nothing, and never attaches the action handler"
+    },
+    {
+      "id": "loading-precedence",
+      "sourceIncludes": "const isDisabled = !isLoading && Boolean(disabled)",
+      "testIncludes": "gives loading precedence",
+      "docsIncludes": "Loading plus disabled warns; loading takes precedence",
+      "explanationIncludes": "Loading takes deterministic precedence"
+    },
+    {
+      "id": "passive-icon",
+      "sourceIncludes": "isSafeSvgTree(icon, true)",
+      "testIncludes": "rejects interactive, focusable, event-bearing, or opaque component icon trees",
+      "docsIncludes": "The icon slot accepts only one passive inline SVG tree",
+      "explanationIncludes": "passive inline SVG tree"
+    },
+    {
+      "id": "closed-pass-through",
+      "sourceIncludes": "SAFE_NATIVE_PROPS",
+      "testIncludes": "ignores styling and semantic escape hatches",
+      "docsIncludes": "<code>onClick</code> is the sole action handler",
+      "explanationIncludes": "onClick` is the sole action handler"
+    },
+    {
+      "id": "native-keyboard",
+      "sourceIncludes": "<button",
+      "testIncludes": "native Enter and Space activation",
+      "docsIncludes": "Enter and Space activate exactly once.",
+      "explanationIncludes": "Enter and Space activation"
+    },
+    {
+      "id": "native-form",
+      "sourceIncludes": "type={resolvedType}",
+      "testIncludes": "native submit and reset behavior",
+      "docsIncludes": "Native type defaults to button; submit and reset remain explicit caller choices.",
+      "explanationIncludes": "type=\"submit\"` or `type=\"reset\""
+    },
+    {
+      "id": "width-reservation",
+      "sourceIncludes": "renderLabel(resolvedLoadingLabel, 'loading')",
+      "testIncludes": "renders both width-reservation states",
+      "docsIncludes": "Resting and loading content share one grid cell",
+      "explanationIncludes": "preserves the larger of its resting and loading measurements"
+    }
+  ]
+}

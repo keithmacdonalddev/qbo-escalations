@@ -94,6 +94,11 @@ body.docs-overlay-open {
   backdrop-filter: blur(14px);
 }
 
+.docs-root[data-current-path='/docs/components/button'] .docs-topbar {
+  background: var(--bg-sidebar, #12141c);
+  backdrop-filter: none;
+}
+
 .docs-topbar-inner {
   display: flex;
   width: 100%;

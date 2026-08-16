@@ -1,0 +1,203 @@
+.qds-button {
+  --qds-button-height: 40px;
+  --qds-button-padding-inline: 18px;
+  --qds-button-radius: var(--radius-md, 8px);
+  --qds-button-font-size: var(--text-sm, 13px);
+  --qds-button-icon-size: 16px;
+  --qds-button-gap: 7px;
+  --qds-button-fill: var(--bg-elevated, #242a38);
+  --qds-button-fill-hover: var(--bg-floating, #2e3446);
+  --qds-button-fill-pressed: var(--bg-raised, #1a1e2a);
+  --qds-button-border: var(--line-strong, rgba(255, 255, 255, 0.14));
+  --qds-button-ink: var(--ink, #e4e4e8);
+
+  appearance: none;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 0;
+  max-width: 100%;
+  min-height: var(--qds-button-height);
+  padding: 0 var(--qds-button-padding-inline);
+  border: 1px solid var(--qds-button-border);
+  border-radius: var(--qds-button-radius);
+  background: var(--qds-button-fill);
+  color: var(--qds-button-ink);
+  font: inherit;
+  font-size: var(--qds-button-font-size);
+  font-weight: 650;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--duration-fast, 120ms) var(--ease-standard, ease),
+    border-color var(--duration-fast, 120ms) var(--ease-standard, ease),
+    color var(--duration-fast, 120ms) var(--ease-standard, ease),
+    transform var(--duration-fast, 120ms) var(--ease-standard, ease);
+}
+
+.qds-button[data-size='small'] {
+  --qds-button-height: 32px;
+  --qds-button-padding-inline: 14px;
+  --qds-button-radius: var(--radius-sm, 6px);
+  --qds-button-font-size: var(--text-xs, 11px);
+  --qds-button-icon-size: 14px;
+  --qds-button-gap: 6px;
+}
+
+.qds-button[data-size='large'] {
+  --qds-button-height: 48px;
+  --qds-button-padding-inline: 22px;
+  --qds-button-radius: 10px;
+  --qds-button-font-size: var(--text-base, 14px);
+  --qds-button-icon-size: 18px;
+  --qds-button-gap: 8px;
+}
+
+.qds-button[data-priority='primary'][data-tone='neutral'] {
+  --qds-button-fill: var(--accent, #6ea1f7);
+  --qds-button-fill-hover: var(--accent-hover, #8bb7ff);
+  --qds-button-fill-pressed: var(--accent-emphasis, #5088e0);
+  --qds-button-border: transparent;
+  --qds-button-ink: var(--bg, #0a0a0f);
+}
+
+.qds-button[data-priority='secondary'][data-tone='destructive'] {
+  --qds-button-fill: var(--danger-subtle, rgba(240, 96, 96, 0.1));
+  --qds-button-fill-hover: color-mix(in srgb, var(--danger, #f06060) 16%, transparent);
+  --qds-button-fill-pressed: color-mix(in srgb, var(--danger, #f06060) 22%, transparent);
+  --qds-button-border: color-mix(in srgb, var(--danger, #f06060) 46%, transparent);
+  --qds-button-ink: var(--danger, #f06060);
+}
+
+.qds-button[data-priority='primary'][data-tone='destructive'] {
+  --qds-button-fill: var(--danger, #f06060);
+  --qds-button-fill-hover: color-mix(in srgb, var(--danger, #f06060) 82%, white);
+  --qds-button-fill-pressed: color-mix(in srgb, var(--danger, #f06060) 82%, black);
+  --qds-button-border: transparent;
+  --qds-button-ink: var(--bg, #0a0a0f);
+}
+
+.qds-button:hover:not(:disabled):not([data-loading='true']) {
+  background: var(--qds-button-fill-hover);
+}
+
+.qds-button:active:not(:disabled):not([data-loading='true']) {
+  background: var(--qds-button-fill-pressed);
+  transform: translateY(1px) scale(0.99);
+}
+
+.qds-button:focus-visible {
+  outline: 2px solid var(--accent, #6ea1f7);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 2px var(--bg, #0a0a0f);
+}
+
+.qds-button[data-tone='destructive']:focus-visible {
+  outline-color: var(--danger, #f06060);
+}
+
+.qds-button:disabled {
+  --qds-button-fill: color-mix(in srgb, var(--bg-elevated, #242a38) 74%, var(--bg, #0a0a0f));
+  --qds-button-border: var(--line-subtle, rgba(255, 255, 255, 0.05));
+  --qds-button-ink: var(--ink-secondary, #8888a0);
+  cursor: not-allowed;
+}
+
+.qds-button[data-loading='true'] {
+  cursor: progress;
+}
+
+.qds-button[data-full-width='true'] {
+  width: 100%;
+}
+
+.qds-button__content,
+.qds-button__state {
+  display: grid;
+  grid-area: 1 / 1;
+}
+
+.qds-button__content {
+  place-items: center;
+}
+
+.qds-button__state {
+  grid-auto-flow: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--qds-button-gap);
+}
+
+.qds-button__state[aria-hidden='true'] {
+  visibility: hidden;
+}
+
+.qds-button__label {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.qds-button__icon {
+  display: grid;
+  place-items: center;
+  width: var(--qds-button-icon-size);
+  height: var(--qds-button-icon-size);
+  pointer-events: none;
+}
+
+.qds-button__icon > svg {
+  width: 100%;
+  height: 100%;
+}
+
+.qds-button__progress {
+  width: var(--qds-button-icon-size);
+  height: var(--qds-button-icon-size);
+  border: 2px solid currentColor;
+  border-inline-end-color: transparent;
+  border-radius: 50%;
+  animation: qds-button-progress 720ms linear infinite;
+}
+
+@keyframes qds-button-progress {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qds-button {
+    transition: none;
+  }
+
+  .qds-button:active:not(:disabled):not([data-loading='true']) {
+    transform: none;
+  }
+
+  .qds-button__progress {
+    border-style: dashed;
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .qds-button {
+    border-color: ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
+    forced-color-adjust: auto;
+  }
+
+  .qds-button:focus-visible {
+    outline-color: Highlight;
+    box-shadow: none;
+  }
+
+  .qds-button:disabled {
+    color: GrayText;
+  }
+}

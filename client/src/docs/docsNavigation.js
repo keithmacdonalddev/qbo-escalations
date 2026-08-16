@@ -87,6 +87,13 @@ export const DOC_GROUPS = [
         searchTerms: ['metadata', 'facts', 'timestamp', 'observed', 'fetched', 'context'],
         status: 'Available',
       },
+      {
+        path: '/docs/components/button',
+        title: 'Button',
+        description: 'Initiate one named action with priority, consequence, and progress kept distinct.',
+        searchTerms: ['button', 'action', 'primary', 'secondary', 'destructive', 'loading', 'disabled', 'sizes'],
+        status: 'Available',
+      },
     ],
   },
   {

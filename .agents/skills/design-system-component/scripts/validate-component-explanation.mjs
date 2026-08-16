@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { BROAD_REACT_PROP_TYPE_PATTERN } from './component-validator-shared.mjs';
 
 const REQUIRED_SECTIONS = [
   'Component definition',
@@ -335,7 +336,7 @@ function validate(markdown) {
   if (apiFences.some((fence) => /\bstyle\??\s*:/.test(fence) && !/\bstyle\??\s*:\s*never\b/.test(fence))) {
     add('api-inline-style-escape', 'A governed component API cannot expose an unrestricted inline style prop while claiming to exclude arbitrary visual styling.');
   }
-  const inheritedAttributePattern = /(?:React\.)?(?:[A-Za-z]+)?HTMLAttributes|(?:React\.)?ComponentProps(?:WithoutRef|WithRef)?\s*<\s*['"][^'"]+['"]|JSX\.IntrinsicElements\s*\[/;
+  const inheritedAttributePattern = BROAD_REACT_PROP_TYPE_PATTERN;
   for (const fence of apiFences.filter((candidate) => inheritedAttributePattern.test(candidate))) {
     const usesOmit = /\bOmit\s*</.test(fence);
     const explicitlyOmitsStyle = usesOmit && /['"]style['"]/.test(fence);

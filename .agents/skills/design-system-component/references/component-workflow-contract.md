@@ -252,7 +252,7 @@ The image is not a catalog of every prop. More variants do not mean more reuse.
 
 ## 6. Detailed explanation template
 
-The explanation must be specific to the proposed component. Do not produce generic praise. `examples/button-component-design-explanation.md` establishes the minimum acceptable reasoning quality. Every live result must name at least one substantive improvement over that example, such as fresher evidence, a clearer contract, a newly resolved contradiction, stronger safeguards, or tighter prototype agreement. Repetition and increased word count do not qualify.
+The explanation must be specific to the proposed component. Do not produce generic praise. `examples/button-component-design-explanation.md` establishes the minimum acceptable reasoning quality. Every live result must name at least one substantive improvement over that example, such as fresher evidence, a clearer contract, a newly resolved contradiction, stronger safeguards, or tighter prototype agreement. Improvement must not come from unsupported API, visual novelty, or extra variants added merely to look different. Repetition and increased word count do not qualify.
 
 ### 6.1 Practical definition
 
@@ -437,31 +437,61 @@ Before production work, restate the frozen contract in a short approval record. 
 
 | Source | Update when | Required content |
 | --- | --- | --- |
-| `docs/design-system/COMPONENT_LIBRARY.md` | Every approved new component or material change | Inventory, purpose, boundary, anatomy, rationale, API, variants, states, content, accessibility, responsive behavior, do/don't, acceptance. |
+| `docs/design-system/COMPONENT_LIBRARY.md` | Every approved new component or material change | Concise inventory, purpose, boundary, semantic model, API summary, truthful status, and links to the authoritative detailed contract and teaching page. |
+| `client/src/components/design-system/<ComponentName>/<ComponentName>.md` | Every production component or material change | Full validated source-traceable explanation: evidence, rejected alternatives, anatomy, ownership, visual system, states, API, safeguards, accessibility, responsive behavior, tradeoffs, decision, and acceptance. |
+| `/docs/components/<component-slug>` in `client/src/docs/` | Every production component or material change | Polished routed teaching page with live production specimens, minimal example in the first useful viewport, complete behavior/API/accessibility/boundary guidance, search/navigation integration, and desktop/390px verification. |
 | `docs/design-system/assets/<component>/` | Every approved visual baseline | Sanitized approved image and reproducibility source when applicable. |
-| `DESIGN.HTML` | Every approved component | Plain-English visual specimen using the canonical default and legitimate variants. |
+| `DESIGN.HTML` | Only while it remains the active visual guide | Plain-English specimen; do not duplicate the routed docs when the file is a migration pointer. |
 | `DESIGN.md` | Only for a durable cross-component rule | New product-wide rule, token, motion principle, density rule, or changed release standard. |
 | `client/src/components/design-system/index.js` | Every production component | Public export. |
 | Component tests | Every production component | Focused public-contract evidence. |
 | Feature documentation | Only for approved adoption | How the feature composes the shared component; no duplicate component contract. |
 
-Do not update every design document mechanically. “Relevant docs fully” means one canonical contract plus only the indexes, visual guides, and global rules that truly changed.
+Do not update every design document mechanically. “Relevant docs fully” means the complete colocated explanation, concise registry, routed teaching page, and only the additional indexes, visual guides, and global rules that truly changed. The colocated Markdown is the authoritative detailed contract. The registry is an index/status/API summary, and the routed page is its live teaching expression. Those surfaces have different jobs but one contract; disagreement is a release failure rather than a precedence question.
+
+### 8.1 Complete routed-page acceptance contract
+
+Every new or materially revised production component requires a direct, searchable `/docs/components/<component-slug>` page using the public production export. A title or gallery alone is incomplete. The page must teach purpose, boundary, anatomy, evidence and design determination, canonical default, semantic axes, all material states, sizing, interaction, content rules, accessibility, responsive and reduced-motion behavior, public API, invalid combinations, safeguards, neighboring components, adoption status, tradeoffs, and acceptance evidence. Put a live production specimen and minimal valid example in the first useful viewport. Use one coherent chaptered article rather than a wall of disconnected cards.
+
+If a user-supplied designed specification is the page-quality benchmark, render and inspect its complete sequence before implementation and document its cognitive-load progression in the Product/UX brief. The routed page must preserve the reference's deliberate order of comprehension—especially the boundary between identity, visual overview, and detailed reference material—while translating its craft into Slate. Do not overload the first viewport with later-required metadata, code, navigation, status, or secondary specimens. Completeness is judged across the whole page; it does not authorize presenting everything at once.
+
+Documentation-only CSS must not recreate or force the production component's hover, focus, pressed, open, loading, or other internal styles. Use real interaction on the exported component and sanitized rendered evidence. Any explanatory diagram must be clearly non-authoritative. Cover the route, navigation/search registration, first-viewport specimen, state fixture, and failure/recovery or confirmation fixture when applicable with focused docs tests. Render the page at desktop and exactly 390px; verify readable tables/code, no horizontal overflow, keyboard focus, reduced motion, material disclosures, and clean console output.
+
+### 8.2 Release reconciliation and checklist semantics
+
+Before an implementation may be called `available`, re-read the implementation, authoritative Markdown, registry, routed page, tests, evidence, and release record from disk. Remove proposal-only and no-longer-provisional wording. Resolve every disagreement in defaults, props, states, safeguards, and status. Release acceptance checkboxes are evidence assertions: every item must be checked, or the component must retain an earlier truthful status and the release record must name the deferment. Unchecked boxes cannot coexist with `available`.
+
+Run both deterministic floors:
+
+```powershell
+node .agents/skills/design-system-component/scripts/validate-component-explanation.mjs client/src/components/design-system/<ComponentName>/<ComponentName>.md
+node .agents/skills/design-system-component/scripts/test-validate-component-release.mjs
+node .agents/skills/design-system-component/scripts/validate-component-release.mjs <ComponentName> <component-slug>
+```
+
+The release validator checks the folder/file set, public export, registry, routed navigation/search entry, live documentation specimen and docs test, public-prop agreement, resolved acceptance items, desktop/390 evidence, approved baseline, and completed release record. It cannot judge taste; original-resolution inspection and the independent design release review remain mandatory.
+
+The durable release record path is `docs/design-system/assets/<component-slug>/release-record.md`, following `docs/agent-harness/DESIGN_RELEASE_RECORD_TEMPLATE.md`. It must name the approved baseline, Product/UX brief, effective roles/capability, focused checks, sanitized evidence, exact independent verdict, correction history, reconciliation result, and exactly one adoption status: `available; no legacy consumers`, `adopted in <named consumers>`, `migration pending`, or `legacy-available; <explicit registry gap>`.
 
 ## 9. Production implementation contract
 
 ### 9.1 File set
 
-Typical component files:
+Required component folder:
 
 ```text
 client/src/components/design-system/
-├─ ComponentName.jsx
-├─ ComponentName.css
-├─ ComponentName.test.jsx
+├─ ComponentName/
+│  ├─ ComponentName.jsx
+│  ├─ ComponentName.css
+│  ├─ ComponentName.test.jsx
+│  ├─ ComponentName.md
+│  ├─ ComponentName.contract.json
+│  └─ index.js              optional local export
 └─ index.js
 ```
 
-Add a fixture or specimen only when it has a maintained purpose. Keep prototypes out of production paths until approval.
+Folder names use the exported PascalCase component name. The design-system root owns the public barrel and only genuinely shared files; do not place new component JSX, CSS, tests, or explanations flat at the root. The colocated Markdown is a full living explanation, not a short README. The contract JSON contains the machine-readable component name/slug/status/classification, the exact governed prop names/values/defaults/purposes, the source-rejected prop boundary, and non-empty behavior assertions shared by source, live docs, tests, and release validation; it does not replace the Markdown rationale. The release validator must compare prop sets symmetrically, reconcile status/classification, inspect the manifest import rather than prescribe a component-specific variable name, and pass a non-Button positive fixture. Named functions and arrow functions, with or without a forwarded ref, are valid when their prop boundary is statically inspectable. A routed docs page may be monolithic or a separate module and may use only shared docs CSS; validation discovers the actual page, test, and CSS files instead of imposing Button's organization. Add a fixture or specimen only when it has a maintained purpose. Keep prototypes out of production paths until approval.
 
 ### 9.2 React contract
 
@@ -624,6 +654,7 @@ The standard is not copied Apple branding. It is an immediate, evidence-supporte
 - `proposed` — contract or prototype not yet approved.
 - `approved` — user approved the design direction; production may not exist.
 - `available` — production component is exported and documented.
+- `legacy-available` — older exported component remains usable, but its explicit registry entry lists missing current-contract reconciliation or evidence work.
 - `adopted` — used by named approved consumers.
 - `migration pending` — existing consumers are intentionally not yet moved.
 - `deprecated` — replacement and migration path documented.
@@ -641,6 +672,10 @@ New prop, state, variant, size, default, anatomy, motion, or announcement behavi
 Removed or renamed prop, changed state meaning, changed ownership, static-to-interactive conversion, or removed variant. Requires consumer inventory, migration plan, and explicit authorization.
 
 Do not silently fix all consumers while changing the primitive. Preserve working pages until the migration scope is approved.
+
+### Legacy transition
+
+A component created before this full contract may be listed as `legacy-available` only with an explicit registry migration gap. Moving or documenting named components is material only for those named targets; it does not authorize a library-wide retrofit. Any component newly created or materially revised under this workflow must satisfy the current complete release contract before it can be `available`.
 
 ## 14. Common failure modes
 
@@ -699,6 +734,8 @@ Component: <name>
 Status: available | adopted in <consumers> | migration pending
 Import: <exact import>
 Minimal example: <code>
+Colocated explanation: <path>
+Documentation page: </docs/components/<slug>>
 Approved baseline: <path>
 Rendered evidence: <paths>
 Focused checks: <commands and results>
