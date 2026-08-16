@@ -639,7 +639,7 @@ async function saveConfirmedOutputFromResult(result, body = {}) {
   const query = ImageParserFixtureBaseline.findOneAndUpdate(
     { fixtureName },
     { $set: update },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true }
   );
   const saved = query && typeof query.lean === 'function' ? await query.lean() : await query;
   return {
@@ -1256,7 +1256,7 @@ router.patch('/parser-results/:id', async (req, res) => {
     operatorNote: safeString(req.body?.operatorNote, ''),
   };
 
-  const result = await ImageParserTestResult.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
+  const result = await ImageParserTestResult.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' }).lean();
   if (!result) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Parser test result not found.' });
   }
@@ -1461,7 +1461,7 @@ router.post('/parser-results/:id/programmatic-check', async (req, res) => {
     update.reviewedAt = new Date();
   }
 
-  const savedResult = await ImageParserTestResult.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
+  const savedResult = await ImageParserTestResult.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' }).lean();
 
   return res.json({
     ok: true,

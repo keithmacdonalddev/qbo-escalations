@@ -20,7 +20,7 @@ function createSnapshotRepository(options = {}) {
         $set: { label: account.label, accountType: account.accountType, lastSeenAt: account.lastSeenAt },
         $setOnInsert: { accountKey: account.accountKey, provider: account.provider, sourceMode: account.sourceMode, sourceRef: account.sourceRef },
       },
-      { new: true, upsert: true, setDefaultsOnInsert: true },
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     ).lean().exec();
   }
 
@@ -41,7 +41,7 @@ function createSnapshotRepository(options = {}) {
   }
 
   async function updateRun(runId, changes) {
-    return runModel.findOneAndUpdate({ runId }, { $set: changes }, { new: true }).lean().exec();
+    return runModel.findOneAndUpdate({ runId }, { $set: changes }, { returnDocument: 'after' }).lean().exec();
   }
 
   async function latestSnapshot(accountKey = '') {

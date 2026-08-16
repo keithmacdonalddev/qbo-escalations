@@ -451,7 +451,7 @@ router.patch('/results/:id', async (req, res) => {
     operatorNote: safeString(req.body?.operatorNote, ''),
   };
 
-  const result = await TriageTestResult.findByIdAndUpdate(req.params.id, update, { new: true }).lean();
+  const result = await TriageTestResult.findByIdAndUpdate(req.params.id, update, { returnDocument: 'after' }).lean();
   if (!result) {
     return res.status(404).json({ ok: false, code: 'NOT_FOUND', error: 'Triage test result not found.' });
   }

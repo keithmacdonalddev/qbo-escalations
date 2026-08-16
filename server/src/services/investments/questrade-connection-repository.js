@@ -28,7 +28,7 @@ function createQuestradeConnectionRepository(options = {}) {
     return model.findOneAndUpdate(
       { provider: 'questrade' },
       updateDocument,
-      { new: true, upsert: true, setDefaultsOnInsert: true },
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true },
     ).lean().exec();
   }
 
