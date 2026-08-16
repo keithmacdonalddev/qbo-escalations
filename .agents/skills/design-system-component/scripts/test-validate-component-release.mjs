@@ -27,7 +27,7 @@ function fixture() {
     copy(`client/src/docs/${file}`, path.join(root, `client/src/docs/${file}`));
   }
   copy('docs/design-system/COMPONENT_LIBRARY.md', path.join(root, 'docs/design-system/COMPONENT_LIBRARY.md'));
-  for (const file of ['Button-prototype-v2.png', 'Button-docs-v4-cover-desktop-1322.png', 'Button-docs-v4-cover-390.png', 'release-record.md']) {
+  for (const file of ['Button-prototype-v2.png', 'Button-docs-v5-cover-desktop-1534.png', 'Button-docs-v5-cover-390.png', 'release-record.md']) {
     copy(`docs/design-system/assets/button/${file}`, path.join(root, `docs/design-system/assets/button/${file}`));
   }
   return root;
@@ -186,7 +186,7 @@ withFixture('actual route-map binding', (root) => {
 
 withFixture('exact 390 evidence', (root) => {
   const directory = path.join(root, 'docs/design-system/assets/button');
-  fs.renameSync(path.join(directory, 'Button-docs-v4-cover-390.png'), path.join(directory, 'Button-docs-v4-cover-mobile.png'));
+  fs.renameSync(path.join(directory, 'Button-docs-v5-cover-390.png'), path.join(directory, 'Button-docs-v5-cover-mobile.png'));
 }, 'MOBILE_EVIDENCE');
 
 withFixture('alternate unchecked checklist syntax', (root) => {

@@ -61,10 +61,10 @@
   width: 100%;
   margin-top: clamp(48px, 6svh, 62px);
   padding: clamp(44px, 5vw, 58px) clamp(44px, 6vw, 66px) clamp(38px, 5vw, 52px);
-  border: 1px solid rgba(214, 222, 235, .96);
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, .14));
   border-radius: 28px;
-  background: #f7f8fb;
-  color: #536077;
+  background: var(--bg-raised, #1a1e2a);
+  color: color-mix(in srgb, var(--ink-secondary, #8888a0) 78%, white);
 }
 
 .docs-button-cover__action {
@@ -90,13 +90,13 @@
   display: flex;
   min-height: 38px;
   padding: 8px 18px;
-  border: 1px solid #d6deeb;
+  border: 1px solid var(--line-strong, rgba(255, 255, 255, .14));
   border-radius: 999px;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  background: #fbfcfe;
-  color: #5d6980;
+  background: var(--bg-elevated, #242a38);
+  color: color-mix(in srgb, var(--ink-secondary, #8888a0) 78%, white);
   font-size: 13px;
   line-height: 1.35;
   text-align: center;
@@ -108,7 +108,7 @@
 }
 
 .docs-button-cover__summary strong {
-  color: #44516a;
+  color: var(--ink, #e4e4e8);
   font-weight: 650;
 }
 
