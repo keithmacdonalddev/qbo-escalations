@@ -322,7 +322,7 @@ function AppContent() {
         return (
           <Profiler id="Settings" onRender={flame.onRender}>
           <motion.div key="settings" {...motionProps} style={{ height: '100%' }}>
-            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ sidebarHoverExpand, setSidebarHoverExpand, sidebarShowLabels, setSidebarShowLabels, ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devToolsEnabled, setDevToolsEnabled }} />
+            <Settings themeProps={themeProps} aiProps={aiProps} layoutProps={{ ledIntensity, setLedIntensity, ledMode, setLedMode, ledSpeed, setLedSpeed, waterfallView, setWaterfallView, flameBarEnabled, setFlameBarEnabled, networkTabEnabled, setNetworkTabEnabled, devToolsEnabled, setDevToolsEnabled }} />
           </motion.div>
           </Profiler>
         );
@@ -394,7 +394,9 @@ function AppContent() {
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed(prev => !prev)}
         hoverExpand={forceCompactSidebar ? false : sidebarHoverExpand}
+        onHoverExpandChange={setSidebarHoverExpand}
         showLabels={sidebarShowLabels}
+        onShowLabelsChange={setSidebarShowLabels}
         badges={sidebarBadges}
       />
 

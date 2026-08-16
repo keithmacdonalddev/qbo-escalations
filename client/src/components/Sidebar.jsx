@@ -1,5 +1,6 @@
 import './Sidebar.css';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useId, useLayoutEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { onCircuitChange } from '../api/http.js';
 import { transitions } from '../utils/motion.js';
@@ -21,13 +22,31 @@ const NAV_ITEMS = [
   { hash: '#/rooms', label: 'Rooms', short: 'Rm', icon: IconRooms },
 ];
 
-export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onToggleCollapse, hoverExpand, showLabels, extraNavItems = [], badges = {} }) {
+export default function Sidebar({
+  currentRoute,
+  isOpen,
+  onClose,
+  collapsed,
+  onToggleCollapse,
+  hoverExpand,
+  onHoverExpandChange,
+  showLabels,
+  onShowLabelsChange,
+  extraNavItems = [],
+  badges = {},
+}) {
   const [hoverExpanded, setHoverExpanded] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsPosition, setSettingsPosition] = useState(null);
   const hoverTimerRef = useRef(null);
   const mouseOverRef = useRef(false);
   const collapsibleRef = useRef(null);
+  const settingsTriggerRef = useRef(null);
+  const settingsFlyoutRef = useRef(null);
+  const settingsFlyoutId = useId();
   const [circuitState, setCircuitState] = useState({ status: 'closed', failures: 0 });
   const navItems = [...NAV_ITEMS, ...extraNavItems.map((item) => ({ ...item, icon: item.icon || IconTerminal }))];
+  const visuallyExpanded = hoverExpanded || settingsOpen;
 
   const handleMouseEnter = useCallback(() => {
     mouseOverRef.current = true;
@@ -39,8 +58,9 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
   const handleMouseLeave = useCallback(() => {
     mouseOverRef.current = false;
     clearTimeout(hoverTimerRef.current);
+    if (settingsOpen) return;
     hoverTimerRef.current = setTimeout(() => setHoverExpanded(false), 300);
-  }, []);
+  }, [settingsOpen]);
 
   // When collapsed changes, reset hover state or re-trigger if mouse is still over
   useEffect(() => {
@@ -54,11 +74,109 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
 
   useEffect(() => onCircuitChange(setCircuitState), []);
 
+  useEffect(() => {
+    if (settingsOpen || mouseOverRef.current) return;
+    clearTimeout(hoverTimerRef.current);
+    setHoverExpanded(false);
+  }, [settingsOpen]);
+
+  useLayoutEffect(() => {
+    if (!settingsOpen) {
+      setSettingsPosition(null);
+      return undefined;
+    }
+
+    const updatePosition = () => {
+      const trigger = settingsTriggerRef.current;
+      const flyout = settingsFlyoutRef.current;
+      if (!trigger || !flyout) return;
+
+      const triggerRect = trigger.getBoundingClientRect();
+      const flyoutRect = flyout.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const edge = 12;
+      const gap = 8;
+      const isMobileDrawer = viewportWidth <= 900;
+      const width = isMobileDrawer
+        ? Math.min(triggerRect.width, viewportWidth - (edge * 2))
+        : Math.min(272, viewportWidth - (edge * 2));
+      const measuredHeight = flyoutRect.height;
+      const maxTop = Math.max(edge, viewportHeight - measuredHeight - edge);
+      const top = Math.min(Math.max(edge, triggerRect.bottom - measuredHeight), maxTop);
+
+      if (isMobileDrawer) {
+        const drawerTop = Math.min(
+          Math.max(edge, triggerRect.top - measuredHeight - gap),
+          maxTop,
+        );
+        setSettingsPosition({
+          left: Math.min(Math.max(edge, triggerRect.left), viewportWidth - width - edge),
+          top: drawerTop,
+          width,
+          placement: 'drawer',
+        });
+        return;
+      }
+
+      const preferredRight = triggerRect.right + gap;
+      const preferredLeft = triggerRect.left - width - gap;
+      const left = preferredRight + width <= viewportWidth - edge
+        ? preferredRight
+        : Math.max(edge, preferredLeft);
+      setSettingsPosition({ left, top, width, placement: 'side' });
+    };
+
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [settingsOpen, visuallyExpanded]);
+
+  useEffect(() => {
+    if (!settingsOpen) return undefined;
+
+    const focusFirstItem = window.requestAnimationFrame(() => {
+      settingsFlyoutRef.current?.querySelector('[role^="menuitem"]')?.focus();
+    });
+    const closeWithoutFocusReturn = () => setSettingsOpen(false);
+    const handlePointerDown = (event) => {
+      if (settingsTriggerRef.current?.contains(event.target) || settingsFlyoutRef.current?.contains(event.target)) return;
+      closeWithoutFocusReturn();
+    };
+    const handleFocusIn = (event) => {
+      if (settingsTriggerRef.current?.contains(event.target) || settingsFlyoutRef.current?.contains(event.target)) return;
+      closeWithoutFocusReturn();
+    };
+    const handleKeyDown = (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setSettingsOpen(false);
+      window.requestAnimationFrame(() => settingsTriggerRef.current?.focus());
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('focusin', handleFocusIn, true);
+    document.addEventListener('keydown', handleKeyDown, true);
+    window.addEventListener('hashchange', closeWithoutFocusReturn);
+    return () => {
+      window.cancelAnimationFrame(focusFirstItem);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('focusin', handleFocusIn, true);
+      document.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('hashchange', closeWithoutFocusReturn);
+    };
+  }, [settingsOpen]);
+
   // Finding 4: Remove collapsed sidebar from tab order using inert attribute.
   // React doesn't support inert as a JSX prop, so we use a ref-based approach.
   useEffect(() => {
     if (collapsibleRef.current) {
-      if (collapsed && !hoverExpanded) {
+      if (collapsed && !visuallyExpanded) {
         collapsibleRef.current.setAttribute('inert', '');
         collapsibleRef.current.setAttribute('aria-hidden', 'true');
       } else {
@@ -66,14 +184,90 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
         collapsibleRef.current.removeAttribute('aria-hidden');
       }
     }
-  }, [collapsed, hoverExpanded]);
+  }, [collapsed, visuallyExpanded]);
+
+  const closeForDestination = () => {
+    setSettingsOpen(false);
+    onClose?.();
+  };
+
+  const handleSettingsMenuKeyDown = (event) => {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = [...(settingsFlyoutRef.current?.querySelectorAll('[role^="menuitem"]') || [])];
+    if (items.length === 0) return;
+    event.preventDefault();
+    const currentIndex = items.indexOf(document.activeElement);
+    let nextIndex = currentIndex;
+    if (event.key === 'Home') nextIndex = 0;
+    if (event.key === 'End') nextIndex = items.length - 1;
+    if (event.key === 'ArrowDown') nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % items.length;
+    if (event.key === 'ArrowUp') nextIndex = currentIndex < 0 ? items.length - 1 : (currentIndex - 1 + items.length) % items.length;
+    items[nextIndex]?.focus();
+  };
+
+  const settingsFlyout = settingsOpen ? createPortal(
+    <div
+      ref={settingsFlyoutRef}
+      id={settingsFlyoutId}
+      className="sidebar-settings-flyout"
+      role="menu"
+      aria-label="Sidebar settings"
+      data-placement={settingsPosition?.placement || 'side'}
+      onKeyDown={handleSettingsMenuKeyDown}
+      style={{
+        left: settingsPosition ? `${settingsPosition.left}px` : '0px',
+        top: settingsPosition ? `${settingsPosition.top}px` : '0px',
+        width: settingsPosition ? `${settingsPosition.width}px` : '272px',
+        visibility: settingsPosition ? undefined : 'hidden',
+      }}
+    >
+      <a
+        className={`sidebar-settings-action${currentRoute === '#/settings' ? ' is-current' : ''}`}
+        href="#/settings"
+        role="menuitem"
+        aria-current={currentRoute === '#/settings' ? 'page' : undefined}
+        onClick={closeForDestination}
+      >
+        <span className="sidebar-settings-action-icon"><IconSliders size={16} /></span>
+        <span>Open Settings</span>
+      </a>
+      <a className="sidebar-settings-action" href="/docs" role="menuitem" onClick={closeForDestination}>
+        <span className="sidebar-settings-action-icon"><IconBook size={16} /></span>
+        <span>Design system</span>
+      </a>
+      <div className="sidebar-settings-separator" role="separator" />
+      <div className="sidebar-settings-group-label">Sidebar</div>
+      <button
+        type="button"
+        className="sidebar-settings-action"
+        role="menuitemcheckbox"
+        aria-checked={hoverExpand}
+        onClick={() => onHoverExpandChange?.(!hoverExpand)}
+      >
+        <span className="sidebar-settings-check" aria-hidden="true">{hoverExpand ? <IconCheck size={15} /> : null}</span>
+        <span>Expand on hover</span>
+      </button>
+      <button
+        type="button"
+        className="sidebar-settings-action"
+        role="menuitemcheckbox"
+        aria-checked={showLabels}
+        onClick={() => onShowLabelsChange?.(!showLabels)}
+      >
+        <span className="sidebar-settings-check" aria-hidden="true">{showLabels ? <IconCheck size={15} /> : null}</span>
+        <span>Show collapsed labels</span>
+      </button>
+    </div>,
+    document.body,
+  ) : null;
 
   return (
-    <aside
-      className={`sidebar${isOpen ? ' is-open' : ''}${collapsed ? ' is-collapsed' : ''}${hoverExpanded ? ' is-hover-expanded' : ''}`}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
+    <>
+      <aside
+        className={`sidebar${isOpen ? ' is-open' : ''}${collapsed ? ' is-collapsed' : ''}${visuallyExpanded ? ' is-hover-expanded' : ''}${settingsOpen ? ' is-settings-open' : ''}`}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
       <div className="sidebar-header">
         <svg aria-hidden="true" focusable="false" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
@@ -85,10 +279,11 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
           className="sidebar-collapse-btn"
           onClick={() => {
             if (hoverExpanded) setHoverExpanded(false);
+            if (settingsOpen) setSettingsOpen(false);
             onToggleCollapse();
           }}
-          aria-label={collapsed && !hoverExpanded ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed && !hoverExpanded ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={collapsed && !visuallyExpanded ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed && !visuallyExpanded ? 'Expand sidebar' : 'Collapse sidebar'}
           type="button"
         >
           <svg aria-hidden="true" focusable="false" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -96,7 +291,7 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
             <rect x="3" y="3" width="18" height="18" rx="2" />
             {/* Sidebar divider */}
             <line x1="9" y1="3" x2="9" y2="21" />
-            {collapsed && !hoverExpanded ? (
+            {collapsed && !visuallyExpanded ? (
               /* Expand arrow in content area */
               <polyline points="13 10 16 12 13 14" strokeWidth="2" />
             ) : (
@@ -147,7 +342,7 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
                   {badgeCount > 99 ? '99+' : badgeCount}
                 </span>
               )}
-              {collapsed && showLabels && !hoverExpanded && (
+              {collapsed && showLabels && !visuallyExpanded && (
                 <span className="sidebar-nav-short-label">{item.short}</span>
               )}
             </a>
@@ -177,7 +372,27 @@ export default function Sidebar({ currentRoute, isOpen, onClose, collapsed, onTo
           </span>
         </div>
       )}
-    </aside>
+
+      <div className="sidebar-settings-footer">
+        <button
+          ref={settingsTriggerRef}
+          type="button"
+          className={`sidebar-settings-trigger${settingsOpen ? ' is-open' : ''}`}
+          aria-label="Open sidebar settings menu"
+          aria-haspopup="menu"
+          aria-expanded={settingsOpen}
+          aria-controls={settingsFlyoutId}
+          title="Settings"
+          onClick={() => setSettingsOpen((current) => !current)}
+        >
+          <IconSettings size={17} />
+          <span className="sidebar-settings-trigger-label">Settings</span>
+          <IconChevronRight className="sidebar-settings-trigger-chevron" size={15} />
+        </button>
+      </div>
+      </aside>
+      {settingsFlyout}
+    </>
   );
 }
 
@@ -274,6 +489,45 @@ function IconDollar({ size = 16 }) {
     </svg>
   );
 }
+
+function IconSettings({ size = 16 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.86 2.86-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21H9.55v-.1A1.7 1.7 0 0 0 8.4 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.86-2.86.06-.06A1.7 1.7 0 0 0 4 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H2V9.55h.3A1.7 1.7 0 0 0 4 8.4a1.7 1.7 0 0 0-.34-1.88l-.06-.06L6.46 3.6l.06.06A1.7 1.7 0 0 0 8.4 4a1.7 1.7 0 0 0 1-.6A1.7 1.7 0 0 0 9.8 2H14v.3A1.7 1.7 0 0 0 15 4a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.86 2.86-.06.06A1.7 1.7 0 0 0 19.4 8.4a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.3V14h-.3a1.7 1.7 0 0 0-1.7 1Z" />
+    </svg>
+  );
+}
+
+function IconSliders({ size = 16 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="18" x2="20" y2="18" />
+      <circle cx="9" cy="6" r="2" fill="var(--bg-floating)" />
+      <circle cx="15" cy="12" r="2" fill="var(--bg-floating)" />
+      <circle cx="11" cy="18" r="2" fill="var(--bg-floating)" />
+    </svg>
+  );
+}
+
+function IconCheck({ size = 16 }) {
+  return (
+    <svg aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="5 12.5 9.5 17 19 7.5" />
+    </svg>
+  );
+}
+
+function IconChevronRight({ size = 16, className = '' }) {
+  return (
+    <svg className={className} aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 5 16 12 9 19" />
+    </svg>
+  );
+}
+
 
 function IconTerminal({ size = 16 }) {
   return (

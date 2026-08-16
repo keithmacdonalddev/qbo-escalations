@@ -40,7 +40,7 @@ const SETTINGS_SECTIONS = [
   { id: 'ai-management', label: 'AI Management', desc: 'Providers, models, keys, and releases', icon: 'cpu', keywords: 'api key model catalog enable disable dynamic discovery' },
   { id: 'accounts', label: 'Connected Accounts', desc: 'Google and Questrade', icon: 'link', keywords: 'gmail email send oauth account calendar questrade investments margin portfolio' },
   { id: 'ai-safety', label: 'AI Safety & Context', desc: 'Cost, context, memory, and diagnostics', icon: 'shield', keywords: 'budget token retrieval guardrail debug memory' },
-  { id: 'display', label: 'Display & Navigation', desc: 'Readability, sidebar, and hints', icon: 'display', keywords: 'text size tooltip sidebar labels hover accessibility' },
+  { id: 'display', label: 'Display & Navigation', desc: 'Readability, hints, and header layout', icon: 'display', keywords: 'text size tooltip hints accessibility clock header' },
   { id: 'advanced', label: 'Developer Tools', desc: 'Performance and network diagnostics', icon: 'tools', keywords: 'waterfall flame led speed intensity diagnostics' },
 ];
 
@@ -234,7 +234,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
     return (
       <div className="settings-v2-panel">
         <header className="settings-v2-heading">
-          <div><h2>Display &amp; Navigation</h2><p>Text, hints, and sidebar behavior.</p></div>
+          <div><h2>Display &amp; Navigation</h2><p>Text, hints, and header layout.</p></div>
         </header>
         <section className="settings-v2-card settings-v2-control-list">
           <div className="settings-v2-control-group">
@@ -262,11 +262,6 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
               ))}
             </div>
           </div>
-          {layoutProps && <div className="settings-v2-control-group">
-            <div className="settings-v2-control-heading"><div><strong>Sidebar</strong><span>Behavior when the main navigation is collapsed.</span></div></div>
-            <label className="settings-v2-check"><input type="checkbox" checked={layoutProps.sidebarHoverExpand} onChange={(event) => layoutProps.setSidebarHoverExpand(event.target.checked)} /><span><strong>Expand on hover</strong><small>Temporarily reveal the full sidebar when the pointer moves over it.</small></span></label>
-            <label className="settings-v2-check"><input type="checkbox" checked={layoutProps.sidebarShowLabels} onChange={(event) => layoutProps.setSidebarShowLabels(event.target.checked)} /><span><strong>Show collapsed labels</strong><small>Keep short text labels under navigation icons.</small></span></label>
-          </div>}
         </section>
       </div>
     );
