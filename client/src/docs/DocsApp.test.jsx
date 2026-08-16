@@ -33,9 +33,14 @@ describe('DocsApp', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Button' })).toBeVisible();
     const cover = document.querySelector('.docs-button-cover');
     expect(within(cover).getByText('Component design specification')).toBeVisible();
-    expect(within(cover).getByText(/communicating its priority, consequence, availability, and progress/)).toBeVisible();
+    expect(within(cover).getByText(/generic, accessible action primitive with restrained semantic intent/)).toBeVisible();
     expect(within(cover).getAllByRole('button')).toHaveLength(1);
-    expect(within(cover).getByRole('button', { name: 'Save changes' })).toBeVisible();
+    expect(within(cover).getByRole('button', { name: 'Button' })).toHaveAttribute('data-docs-cover-specimen');
+    const summary = within(cover).getByRole('list', { name: 'Button design summary' });
+    expect(within(summary).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(summary).getByText(/primary \/ secondary \/ destructive/)).toBeVisible();
+    expect(within(summary).getByText(/rest \/ hover \/ pressed \/ focus \/ loading \/ disabled/)).toBeVisible();
+    expect(within(summary).getByText(/small \/ medium \/ large/)).toBeVisible();
     expect(within(cover).queryByRole('navigation')).not.toBeInTheDocument();
     expect(within(cover).queryByText(/Available|Import|Canonical default/)).not.toBeInTheDocument();
 

@@ -31,46 +31,85 @@
 
 /* Identity: the first viewport contains only the component's name, definition, and one live specimen. */
 .docs-button-cover {
-  display: flex;
-  min-height: min(680px, calc(100svh - 116px));
-  padding: clamp(62px, 9svh, 92px) 0 clamp(78px, 11svh, 112px);
+  min-height: min(720px, calc(100svh - 88px));
+  padding: clamp(50px, 7svh, 72px) 0 clamp(76px, 9svh, 96px);
   border-bottom: 1px solid var(--line, rgba(255, 255, 255, .08));
-  align-items: center;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
 }
 
 .docs-button-cover__copy {
-  max-width: 790px;
+  max-width: 820px;
 }
 
 .docs-content-frame[data-page='/docs/components/button'] .docs-button-cover h1 {
   max-width: none;
-  margin: 18px 0 0;
-  font-size: clamp(64px, 7.2vw, 88px);
+  margin: 20px 0 0;
+  font-size: clamp(60px, 7vw, 82px);
   font-weight: 740;
-  letter-spacing: -.06em;
-  line-height: .92;
+  letter-spacing: -.055em;
+  line-height: .94;
 }
 
 .docs-button-cover__definition {
-  max-width: 740px;
-  margin-top: 28px;
+  max-width: 800px;
+  margin: 26px 0 0;
   color: color-mix(in srgb, var(--ink-secondary, #8888a0) 82%, white);
-  font-size: clamp(19px, 2vw, 23px);
-  line-height: 1.46;
+  font-size: clamp(18px, 2vw, 22px);
+  line-height: 1.5;
 }
 
 .docs-button-cover__specimen {
-  display: flex;
   width: 100%;
-  margin-top: clamp(46px, 7svh, 66px);
-  justify-content: center;
+  margin-top: clamp(48px, 6svh, 62px);
+  padding: clamp(44px, 5vw, 58px) clamp(44px, 6vw, 66px) clamp(38px, 5vw, 52px);
+  border: 1px solid rgba(214, 222, 235, .96);
+  border-radius: 28px;
+  background: #f7f8fb;
+  color: #536077;
 }
 
 .docs-button-cover__action {
-  width: clamp(220px, 24vw, 268px);
+  width: 100%;
+}
+
+/* The supplied cover reference demonstrates its canonical action with inverse ink. */
+[data-docs-cover-specimen][data-priority='primary'][data-tone='neutral'][data-size='large'] {
+  --qds-button-ink: #fff;
+  color: var(--qds-button-ink);
+}
+
+.docs-button-cover__summary {
+  display: grid;
+  max-width: 780px;
+  margin: clamp(34px, 4vw, 44px) auto 0;
+  grid-template-columns: max-content max-content;
+  justify-content: center;
+  gap: 14px 20px;
+}
+
+.docs-button-cover__summary > div {
+  display: flex;
+  min-height: 38px;
+  padding: 8px 18px;
+  border: 1px solid #d6deeb;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  background: #fbfcfe;
+  color: #5d6980;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+}
+
+.docs-button-cover__summary > div:last-child {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
+.docs-button-cover__summary strong {
+  color: #44516a;
+  font-weight: 650;
 }
 
 /* Visual family: examples first, explanatory prose deliberately minimal. */
@@ -842,7 +881,7 @@
   }
 
   .docs-button-cover {
-    min-height: min(640px, calc(100svh - 96px));
+    min-height: min(700px, calc(100svh - 76px));
   }
 
   .docs-button-glance__treatments {
@@ -902,27 +941,45 @@
   }
 
   .docs-button-cover {
-    min-height: min(610px, calc(100svh - 74px));
-    padding: 56px 0 72px;
+    min-height: 0;
+    padding: 42px 0 62px;
   }
 
   .docs-content-frame[data-page='/docs/components/button'] .docs-button-cover h1 {
     margin-top: 14px;
-    font-size: clamp(54px, 17vw, 68px);
+    font-size: clamp(52px, 16vw, 64px);
   }
 
   .docs-button-cover__definition {
-    margin-top: 22px;
+    margin-top: 20px;
     font-size: 17px;
-    line-height: 1.5;
+    line-height: 1.52;
   }
 
   .docs-button-cover__specimen {
-    margin-top: 42px;
+    margin-top: 36px;
+    padding: 28px 18px 26px;
+    border-radius: 22px;
   }
 
   .docs-button-cover__action {
-    width: min(100%, 248px);
+    width: 100%;
+  }
+
+  .docs-button-cover__summary {
+    margin-top: 26px;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .docs-button-cover__summary > div,
+  .docs-button-cover__summary > div:last-child {
+    width: 100%;
+    min-height: 36px;
+    padding: 8px 10px;
+    grid-column: auto;
+    justify-self: stretch;
+    font-size: 11px;
   }
 
   .docs-button-glance {

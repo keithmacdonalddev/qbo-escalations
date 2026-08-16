@@ -1053,11 +1053,16 @@ function ButtonPage({ adjacent, currentItem, currentPath, navigate }) {
         <div className="docs-button-cover__copy">
           <p className="docs-button-cover__kicker">Component design specification</p>
           <h1 id="button-title" tabIndex="-1">Button</h1>
-          <p className="docs-button-cover__definition">Button lets people initiate an action while communicating its priority, consequence, availability, and progress.</p>
+          <p className="docs-button-cover__definition">A generic, accessible action primitive with restrained semantic intent, predictable states, and a scalable size system.</p>
         </div>
         <div aria-label="Live Button specimen" className="docs-button-cover__specimen">
           <div className="docs-button-cover__action">
-            <Button fullWidth priority="primary" size="large">Save changes</Button>
+            <Button data-docs-cover-specimen="" fullWidth priority="primary" size="large">Button</Button>
+          </div>
+          <div aria-label="Button design summary" className="docs-button-cover__summary" role="list">
+            <div role="listitem"><strong>Intent:</strong><span>primary / secondary / destructive</span></div>
+            <div role="listitem"><strong>State:</strong><span>rest / hover / pressed / focus / loading / disabled</span></div>
+            <div role="listitem"><strong>Size:</strong><span>small / medium / large</span></div>
           </div>
         </div>
       </section>
