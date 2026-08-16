@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import Sidebar from './Sidebar.jsx';
@@ -59,15 +59,31 @@ it('opens a bottom settings flyout without navigating and exposes settings and d
   expect(screen.getByRole('menuitem', { name: 'Design system' })).toHaveAttribute('href', '/docs');
 });
 
-it('pins the full sidebar while the menu is open without duplicating collapsed short labels', async () => {
-  const user = userEvent.setup();
-  const { container } = renderSidebar({ collapsed: true, showLabels: true });
-  expect(container.querySelectorAll('.sidebar-nav-short-label').length).toBeGreaterThan(0);
+it('keeps a collapsed sidebar at the same width while the settings menu opens and closes', async () => {
+  vi.useFakeTimers();
+  try {
+    const { container } = renderSidebar({ collapsed: true, showLabels: true });
+    const sidebar = container.querySelector('.sidebar');
+    const trigger = screen.getByRole('button', { name: 'Open sidebar settings menu' });
+    const shortLabelCount = container.querySelectorAll('.sidebar-nav-short-label').length;
+    expect(shortLabelCount).toBeGreaterThan(0);
 
-  await user.click(screen.getByRole('button', { name: 'Open sidebar settings menu' }));
+    fireEvent.mouseEnter(sidebar);
+    fireEvent.click(trigger);
+    await act(async () => vi.advanceTimersByTimeAsync(250));
 
-  expect(container.querySelector('.sidebar')).toHaveClass('is-hover-expanded', 'is-settings-open');
-  expect(container.querySelectorAll('.sidebar-nav-short-label')).toHaveLength(0);
+    expect(sidebar).toHaveClass('is-collapsed', 'is-settings-open');
+    expect(sidebar).not.toHaveClass('is-hover-expanded');
+    expect(container.querySelectorAll('.sidebar-nav-short-label')).toHaveLength(shortLabelCount);
+
+    fireEvent.click(trigger);
+
+    expect(sidebar).toHaveClass('is-collapsed');
+    expect(sidebar).not.toHaveClass('is-hover-expanded', 'is-settings-open');
+    expect(container.querySelectorAll('.sidebar-nav-short-label')).toHaveLength(shortLabelCount);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it('keeps sidebar preferences in the flyout and leaves it open while a preference changes', async () => {

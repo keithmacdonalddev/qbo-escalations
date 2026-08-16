@@ -3,10 +3,10 @@
 ## Direction
 
 - Work and route: persistent application-sidebar Settings flyout with destinations at `#/settings` and `/docs`
-- Classification: major
+- Classification: major original feature; material owner-directed interaction correction
 - User request: add a bottom-of-sidebar Settings control that opens only a VS Code-like flyout, place the documentation link there, and move the two sidebar-specific preferences out of the main Settings view
-- Product/UX direction: a compact Slate-native footer menu with explicit Settings/docs destinations, local menu checkboxes, stable expanded/collapsed anchoring, exact-390px drawer placement, complete keyboard behavior, and reduced motion
-- Direction identifier/date: `sidebar-settings-flyout`, 2026-08-16
+- Product/UX direction: a compact Slate-native footer menu with explicit Settings/docs destinations, local menu checkboxes, a sidebar width that remains unchanged while the menu opens or closes, stable expanded/collapsed anchoring, exact-390px drawer placement, complete keyboard behavior, and reduced motion
+- Direction identifier/date: `sidebar-settings-static-width`, 2026-08-16 (supersedes the original collapsed-sidebar expansion behavior after direct owner feedback)
 - Scope: sidebar footer and flyout, existing preference wiring, removal of duplicated Settings controls and stale copy, focused tests, and rendered desktop/mobile acceptance
 - Approval triggers: renew approval before removing the header Settings control, changing preference semantics/defaults/storage keys, adding menu commands, changing destination behavior, or widening this into shared menu infrastructure
 
@@ -24,7 +24,7 @@ Gate unavailable reason, if any: none.
 
 | Check | Result | Evidence reference |
 | --- | --- | --- |
-| Focused behavior/accessibility checks | pass | `npm --prefix client test -- src/components/Sidebar.test.jsx`; six opening, link, checkbox, collapsed-frame, keyboard, Escape, and outside-dismissal checks |
+| Focused behavior/accessibility checks | pass | `npm --prefix client test -- src/components/Sidebar.test.jsx`; six checks, including a fake-timer regression proving that clicking Settings cancels pending hover expansion and preserves the collapsed frame through open and close |
 | Production client build | pass | `npm --prefix client run build` |
 | Overflow/clipping measurement | pass | desktop constrained height 1024x600 and exact mobile 390x844 both measured zero page-level horizontal overflow; the menu remained inside every viewport |
 | Browser console | clean | no console messages or page errors after the focused interaction path |
@@ -37,38 +37,38 @@ The review captures replaced live sidebar counts with neutral fixture values. No
 
 | Required view/state | Sanitized? | Evidence reference | Result or n/a reason |
 | --- | --- | --- | --- |
-| Overview/entry and first action | yes | `tmp-sidebar-settings-desktop-full-sanitized.png` | full 1440x900 frame showed the persistent footer trigger and complete open menu |
-| Important disclosure or primary action | yes | same desktop frame | Settings and documentation destinations were immediately visible before the preference group |
+| Overview/entry and first action | yes | `tmp-sidebar-static-collapsed-closed-sanitized.png`; `tmp-sidebar-static-collapsed-open-sanitized.png` | the closed 48px rail opened its complete menu without changing width |
+| Important disclosure or primary action | yes | collapsed open frame | Settings and documentation destinations were immediately visible before the preference group |
 | Loading/waiting | n/a | fixed local menu | no request or asynchronous content is required to open the menu or read the preferences |
-| Success feedback | yes | desktop and mobile open frames | checked state changed immediately and remained legible without a toast or layout jump |
-| Completed resting state | yes | `tmp-sidebar-settings-collapsed-bottom-full-sanitized.png` | the collapsed 48px rail kept the gear 4px from the viewport bottom |
+| Success feedback | yes | collapsed, expanded, and mobile open frames | checked state changed immediately and remained legible without a toast or layout jump |
+| Completed resting state | yes | `tmp-sidebar-static-collapsed-closed-sanitized.png` | the collapsed sidebar remained a 48px rail with the footer trigger at the bottom |
 | Partial state | n/a | fixed local menu | the menu has no partial remote result; local preference setters remain usable for the current visit |
 | Error and recovery | n/a | fixed local menu | destination errors belong to their routes; the menu itself makes no fallible remote request |
 | Confirmation/destructive flow | n/a | no destructive action | links and display preferences cannot delete user data |
-| Desktop | yes | `tmp-sidebar-settings-desktop-full-sanitized.png` | the flyout was compact, anchored, and fully inside the 1440x900 frame |
-| Collapsed desktop | yes | `tmp-sidebar-settings-collapsed-open-full-sanitized.png` | the collapsed entry expanded into a stable pinned frame and kept the flyout at the same bottom anchor |
-| Main Settings cleanup | yes | `tmp-sidebar-settings-main-settings-sanitized.png` | Display & Navigation retained text, hints, and header layout without duplicated sidebar preferences |
-| 390px mobile | yes | `tmp-sidebar-settings-mobile-full-sanitized.png` | full exact-390x844 frame; flyout bounds x=12..211 and zero horizontal page overflow |
-| Keyboard focus/path | yes | `tmp-sidebar-settings-keyboard-nav-full-sanitized.png`; `tmp-sidebar-settings-escape-return-full-sanitized.png` | Arrow navigation produced a clear focus ring; Escape dismissed and restored focus to Settings |
-| Outside dismissal | yes | `tmp-sidebar-settings-outside-dismiss-full-sanitized.png` | an outside pointer interaction closed the menu without moving focus back over the clicked content |
-| Expanded-state overflow/clipping | yes | desktop, constrained-height, and mobile frames | menu remained clamped to the viewport and was not clipped by sidebar overflow |
-| Reduced motion | yes | `tmp-sidebar-settings-reduced-motion-full-sanitized.png` | open state remained complete while meaningful reveal motion was disabled |
+| Desktop | yes | `tmp-sidebar-static-collapsed-open-sanitized.png`; `tmp-sidebar-static-expanded-open-sanitized.png` | the flyout was compact and anchored while collapsed width stayed 48px and expanded width stayed 216px |
+| Collapsed desktop | yes | collapsed closed/open frames | measured 48px before opening, 48px while open, and 48px after closing; the menu appeared immediately to the rail's right |
+| Main Settings cleanup | yes | retained accepted implementation | the earlier removal of duplicated sidebar preferences was unaffected by this interaction correction |
+| 390px mobile | yes | `tmp-sidebar-static-mobile-open-sanitized.png` | full exact-390x844 frame; the 216px drawer remained unchanged and page-level horizontal overflow measured zero |
+| Keyboard focus/path | yes | `tmp-sidebar-static-keyboard-sanitized.png` | Arrow navigation produced a clear focus ring; Escape dismissed, restored focus to Settings, and left width unchanged |
+| Outside dismissal | yes | direct rendered interaction | an outside pointer interaction closed the menu without changing the sidebar frame |
+| Expanded-state overflow/clipping | yes | collapsed, expanded, and exact-mobile frames | menu remained inside the viewport and was not clipped by sidebar overflow |
+| Reduced motion | yes | `tmp-sidebar-static-reduced-motion-sanitized.png` | the open collapsed frame remained 48px with menu reveal animation disabled |
 
 - Temporary private evidence used locally: yes, for the initial self-review only
 - Private evidence committed: no
-- Temporary evidence cleanup/status: all raw and sanitized `tmp-sidebar-settings-*` captures were deleted after the independent verdict and were not committed
+- Temporary evidence cleanup/status: the six sanitized `tmp-sidebar-static-*` captures were deleted after the independent verdict and were not committed
 
 ## Independent verdict
 
 - Exact reviewer first line: `YES — RELEASE QUALITY`
-- Concise evidence: the persistent footer remains stable in collapsed and expanded states; the flyout opens from the same bottom anchor, fits exact mobile, has clear keyboard focus and dismissal, respects reduced motion, and does not duplicate sidebar controls in Settings
-- Correction boundary if rejected: the first round requested full-frame state evidence; the second identified and limited correction to pinning the collapsed gear at the bottom
-- Focused correction rounds used: 2
+- Concise evidence: the Settings trigger now behaves as a pure disclosure; collapsed and expanded widths remain stable, the anchored menu fits exact mobile without overflow, keyboard focus and Escape return are preserved, and reduced motion adds no width transition
+- Correction boundary if rejected: n/a; the owner-directed static-width correction passed the independent review on its initial round
+- Focused correction rounds used: 0 for this owner-directed correction; the earlier acceptance was invalidated and superseded by direct owner feedback
 - Direct user rejection unresolved: no
 
 ## Baseline and completion
 
 - Accepted sanitized desktop/mobile baseline retained or replaced: not retained; the temporary sanitized review captures were deleted after the verdict because they are evidence, not product assets
-- Regression comparison result: existing preference keys/defaults, sidebar navigation, header Settings behavior, and same-site documentation route remain unchanged
+- Regression comparison result: collapsed width remains 48px and expanded width remains 216px through menu open and close; existing preference keys/defaults, sidebar navigation, header Settings behavior, and same-site documentation route remain unchanged
 - Open design risk or evidence gap: browser-storage failure was not force-injected because no development-only failure control exists; the existing state setter still applies the choice for the current visit
 - Main-agent completion decision: release quality and ready to use

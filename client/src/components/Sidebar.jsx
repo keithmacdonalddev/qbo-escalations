@@ -46,7 +46,7 @@ export default function Sidebar({
   const settingsFlyoutId = useId();
   const [circuitState, setCircuitState] = useState({ status: 'closed', failures: 0 });
   const navItems = [...NAV_ITEMS, ...extraNavItems.map((item) => ({ ...item, icon: item.icon || IconTerminal }))];
-  const visuallyExpanded = hoverExpanded || settingsOpen;
+  const visuallyExpanded = hoverExpanded;
 
   const handleMouseEnter = useCallback(() => {
     mouseOverRef.current = true;
@@ -189,6 +189,11 @@ export default function Sidebar({
   const closeForDestination = () => {
     setSettingsOpen(false);
     onClose?.();
+  };
+
+  const toggleSettingsMenu = () => {
+    clearTimeout(hoverTimerRef.current);
+    setSettingsOpen((current) => !current);
   };
 
   const handleSettingsMenuKeyDown = (event) => {
@@ -383,7 +388,7 @@ export default function Sidebar({
           aria-expanded={settingsOpen}
           aria-controls={settingsFlyoutId}
           title="Settings"
-          onClick={() => setSettingsOpen((current) => !current)}
+          onClick={toggleSettingsMenu}
         >
           <IconSettings size={17} />
           <span className="sidebar-settings-trigger-label">Settings</span>
