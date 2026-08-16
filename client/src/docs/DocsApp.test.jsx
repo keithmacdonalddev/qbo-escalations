@@ -33,7 +33,7 @@ describe('DocsApp', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Button' })).toBeVisible();
     const cover = document.querySelector('.docs-button-cover');
     expect(within(cover).getByText('Component design specification')).toBeVisible();
-    expect(within(cover).getByText(/keeps priority, destructive consequence, size, and progress distinct/)).toBeVisible();
+    expect(within(cover).getByText(/communicating its priority, consequence, availability, and progress/)).toBeVisible();
     expect(within(cover).getAllByRole('button')).toHaveLength(1);
     expect(within(cover).getByRole('button', { name: 'Save changes' })).toBeVisible();
     expect(within(cover).queryByRole('navigation')).not.toBeInTheDocument();

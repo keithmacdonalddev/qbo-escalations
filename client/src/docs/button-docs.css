@@ -19,7 +19,7 @@
 }
 
 .docs-button-section-kicker,
-.docs-button-cover__copy > p {
+.docs-button-cover__kicker {
   margin: 0 !important;
   color: var(--accent, #6ea1f7) !important;
   font-size: 11px;
@@ -31,43 +31,46 @@
 
 /* Identity: the first viewport contains only the component's name, definition, and one live specimen. */
 .docs-button-cover {
-  display: grid;
-  min-height: calc(100svh - 156px);
-  padding: 20px 0 64px;
-  grid-template-rows: auto minmax(250px, 1fr);
-  gap: 48px;
+  display: flex;
+  min-height: min(680px, calc(100svh - 116px));
+  padding: clamp(62px, 9svh, 92px) 0 clamp(78px, 11svh, 112px);
+  border-bottom: 1px solid var(--line, rgba(255, 255, 255, .08));
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
 }
 
 .docs-button-cover__copy {
-  max-width: 680px;
+  max-width: 790px;
 }
 
 .docs-content-frame[data-page='/docs/components/button'] .docs-button-cover h1 {
   max-width: none;
-  margin: 14px 0 0;
-  font-size: clamp(56px, 7vw, 82px);
-  font-weight: 750;
-  letter-spacing: -.055em;
-  line-height: .94;
+  margin: 18px 0 0;
+  font-size: clamp(64px, 7.2vw, 88px);
+  font-weight: 740;
+  letter-spacing: -.06em;
+  line-height: .92;
 }
 
-.docs-button-cover__copy > div {
-  max-width: 650px;
-  margin-top: 22px;
+.docs-button-cover__definition {
+  max-width: 740px;
+  margin-top: 28px;
   color: color-mix(in srgb, var(--ink-secondary, #8888a0) 82%, white);
-  font-size: clamp(17px, 2vw, 21px);
-  line-height: 1.55;
+  font-size: clamp(19px, 2vw, 23px);
+  line-height: 1.46;
 }
 
 .docs-button-cover__specimen {
-  display: grid;
-  min-height: 250px;
-  padding: 44px;
-  overflow: hidden;
-  border: 1px solid var(--line-strong, rgba(255, 255, 255, .14));
-  border-radius: 10px;
-  place-items: center;
-  background: var(--bg-raised, #1a1e2a);
+  display: flex;
+  width: 100%;
+  margin-top: clamp(46px, 7svh, 66px);
+  justify-content: center;
+}
+
+.docs-button-cover__action {
+  width: clamp(220px, 24vw, 268px);
 }
 
 /* Visual family: examples first, explanatory prose deliberately minimal. */
@@ -839,7 +842,7 @@
   }
 
   .docs-button-cover {
-    min-height: calc(100svh - 126px);
+    min-height: min(640px, calc(100svh - 96px));
   }
 
   .docs-button-glance__treatments {
@@ -899,26 +902,27 @@
   }
 
   .docs-button-cover {
-    min-height: calc(100svh - 100px);
-    padding: 14px 0 38px;
-    grid-template-rows: auto minmax(190px, 1fr);
-    gap: 34px;
+    min-height: min(610px, calc(100svh - 74px));
+    padding: 56px 0 72px;
   }
 
   .docs-content-frame[data-page='/docs/components/button'] .docs-button-cover h1 {
-    margin-top: 11px;
-    font-size: clamp(50px, 17vw, 66px);
+    margin-top: 14px;
+    font-size: clamp(54px, 17vw, 68px);
   }
 
-  .docs-button-cover__copy > div {
-    margin-top: 16px;
-    font-size: 16px;
-    line-height: 1.48;
+  .docs-button-cover__definition {
+    margin-top: 22px;
+    font-size: 17px;
+    line-height: 1.5;
   }
 
   .docs-button-cover__specimen {
-    min-height: 190px;
-    padding: 30px 22px;
+    margin-top: 42px;
+  }
+
+  .docs-button-cover__action {
+    width: min(100%, 248px);
   }
 
   .docs-button-glance {

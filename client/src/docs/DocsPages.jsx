@@ -1051,12 +1051,14 @@ function ButtonPage({ adjacent, currentItem, currentPath, navigate }) {
     <ArticleFrame adjacent={adjacent} currentItem={currentItem} currentPath={currentPath} navigate={navigate}>
       <section aria-labelledby="button-title" className="docs-button-cover" id="overview">
         <div className="docs-button-cover__copy">
-          <p>Component design specification</p>
+          <p className="docs-button-cover__kicker">Component design specification</p>
           <h1 id="button-title" tabIndex="-1">Button</h1>
-          <div>Button is a native, caller-labelled action control that keeps priority, destructive consequence, size, and progress distinct.</div>
+          <p className="docs-button-cover__definition">Button lets people initiate an action while communicating its priority, consequence, availability, and progress.</p>
         </div>
         <div aria-label="Live Button specimen" className="docs-button-cover__specimen">
-          <Button priority="primary" size="large">Save changes</Button>
+          <div className="docs-button-cover__action">
+            <Button fullWidth priority="primary" size="large">Save changes</Button>
+          </div>
         </div>
       </section>
 
