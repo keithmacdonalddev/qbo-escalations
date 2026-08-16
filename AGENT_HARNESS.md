@@ -11,7 +11,7 @@ This document explains how Claude Code and Codex are configured for this reposit
 | Skills | Reusable project, planning, review, browser, and harness-audit workflows | `.agents/skills/`, `.claude/skills/` |
 | Claude specialists | Worker, researcher, implementation reviewer, and harness auditor | `.claude/agents/` |
 | Optional external agent tools | User-level MCP connections that let one coding agent give another a bounded task | Personal client configuration such as `~/.claude.json`; not committed |
-| Hooks | Prompt reinforcement, service protection, workspace protection, and freshness warnings | `.claude/hooks/`, `.codex/hooks/` |
+| Hooks | Prompt reinforcement, service protection, workspace protection, browser ownership/cleanup, and freshness warnings | `.claude/hooks/`, `.codex/hooks/`, `scripts/agent-harness/` |
 | Curated memory | Small reviewed project overview and Codex handoff | `.claude/memory/`, `.codex/memory/` |
 | Automatic Claude agent memory | Local per-agent learning managed by Claude Code | `.claude/agent-memory/`, Gitignored |
 | Local operational records | Raw sessions, hook logs, temporary state, and process IDs | Gitignored under `.claude/` and `.codex/` |
@@ -32,6 +32,7 @@ Memory helps recall; it never overrides current evidence or grants permission.
 - Design governance is reinforced at every layer: root and scoped instructions require a design-impact classification for every task, user-visible work follows `DESIGN.md` and the local Apple research method, PM hooks repeat the rendered acceptance gate, and curated memory preserves the preference without outranking current evidence.
 - The Claude runtime guard blocks attempts to take over long-running services.
 - The Claude workspace guard blocks destructive Git operations and direct full-file reads of common secret files.
+- The shared browser-session guard requires unique named sessions, records exact turn ownership, closes only owned sessions before completion, and retries records older than two hours after a crash. Broad `close --all` cleanup is blocked.
 - The session-start freshness hook reports instruction-map drift, missing harness files, and visibly stale curated memory.
 - Codex and Claude share a conditional startup-maintenance contract: when runtime-facing services, schedulers, ports, dependencies, readiness, or shutdown behavior changes, the friendly `npm run dev` service inventory, status/remediation language, focused tests, preview, and development-startup documentation must change together. Unrelated feature work does not trigger this obligation.
 - When Codex is run directly, it defaults to the main conversation and exposes only two bounded optional specialists: implementation review and harness audit.

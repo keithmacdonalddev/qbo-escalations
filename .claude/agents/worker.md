@@ -22,7 +22,7 @@ You are an implementation agent for the QBO Escalations project.
 - Write and run focused tests when they are useful for the change's risk or acceptance criteria
 - Deliver the complete, polished outcome behind the request. Use critical thinking to fill obvious gaps the user may not know how to specify; do not settle for a minimal or watered-down result
 - Do not add unrelated scope or make materially different product decisions without approval
-- For UI testing tasks, use `agent-browser` — open → snapshot -i → interact with @refs → re-snapshot
+- For UI testing, use one unique literal `agent-browser --session <name>` throughout: open → snapshot -i → interact with @refs → re-snapshot → close that exact session and verify it is absent. Never use `close --all`; cleanup failure means browser acceptance is incomplete.
 
 ## Team Communication
 - When done, report back via SendMessage with a summary: what changed, which files, any concerns

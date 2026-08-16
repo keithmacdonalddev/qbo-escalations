@@ -26,6 +26,7 @@ const REQUIRED_HARNESS_FILES = [
   '.claude/memory/project-overview.md',
   '.codex/config.toml',
   '.codex/hooks/pm-rules.ps1',
+  'scripts/agent-harness/browser-session-guard.mjs',
   '.codex/memory/PROJECT_MEMORY.md',
   '.codex/memory/AGENT_HANDOFF.md',
   'docs/agent-harness/HOOK_REGISTRY.md',

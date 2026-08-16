@@ -142,10 +142,12 @@ Use `agent-browser` for web automation. Run `agent-browser --help` for all comma
 
 Core workflow:
 
-1. `agent-browser open <url>` - Navigate to page
-2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
-3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
-4. Re-snapshot after page changes
+1. Choose a unique literal session name and use `agent-browser --session <name>` for every browser command. Unnamed sessions are blocked.
+2. Open the page, snapshot with `snapshot -i`, interact using the returned refs, and re-snapshot after page changes.
+3. Before finishing, close the exact session with `agent-browser --session <name> close` and verify it is absent from `agent-browser session list --json`.
+4. Never use `close --all`; it can stop another agent's browser. If exact cleanup cannot be verified, report browser acceptance as incomplete.
+
+The shared browser-session guard records exact ownership, closes owned sessions at `Stop`/`SubagentStop`, and retries expired records after a crash.
 ### Development Commands and Environment
 
 - Root commands:

@@ -195,7 +195,7 @@ Copy `server/.env.example` to `server/.env`:
 ## Agent Browser
 
 `agent-browser` (v0.24.0) is installed globally for browser automation: visual UI testing at `localhost:5174`, accessibility-tree snapshots, element interaction via `@ref`s, screenshots and PDFs.
-Workflow: `open URL → snapshot -i → interact with @refs → re-snapshot after navigation`.
+Workflow: choose one unique literal `--session <name>` → open URL → snapshot -i → interact with @refs → re-snapshot after navigation → close that exact session and verify it is absent. Never use `close --all`; cleanup failure means browser acceptance is incomplete. The shared lifecycle guard enforces named ownership and end-of-turn cleanup.
 Skill: `~/.claude/skills/agent-browser/` (auto-triggers). Full docs: `C:/Users/NewAdmin/Desktop/PROJECTS/tools/agent-browser/`.
 
 ## Memory

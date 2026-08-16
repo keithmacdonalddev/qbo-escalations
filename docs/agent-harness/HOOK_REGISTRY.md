@@ -1,6 +1,6 @@
 # Coding-Agent Hook Registry
 
-Last verified: 2026-08-14.
+Last verified: 2026-08-16.
 
 | Hook | Provider/event | Purpose | Side effects | Failure behavior |
 | --- | --- | --- | --- | --- |
@@ -8,6 +8,7 @@ Last verified: 2026-08-14.
 | `.claude/hooks/runtime-guard.mjs` | Claude `PreToolUse` for shell tools | Blocks common service start, restart, and kill commands | None | Fails open on malformed input |
 | `.claude/hooks/workspace-guard.mjs` | Claude `PreToolUse` for shell tools | Blocks destructive Git commands and direct full reads of common secret files | None | Fails open on malformed input |
 | `.claude/hooks/config-freshness.mjs` | Claude `SessionStart` | Warns about documented architecture drift, missing harness files, and stale curated memory | None | Silent on internal errors |
+| `scripts/agent-harness/browser-session-guard.mjs` | Claude and Codex `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop`, `SessionStart`, and `SessionEnd`; Claude also uses `PostToolUseFailure` and `StopFailure` | Requires unique named agent-browser sessions, records exact ownership, closes owned sessions before completion, and retries records older than two hours after crashes | Writes temporary ownership records under the operating-system temp directory; closes only recorded sessions | Blocks unsafe unnamed or broad cleanup; one failed stop pass continues the agent, then reports cleanup incomplete if it still cannot close |
 | `.codex/hooks/pm-rules.ps1` | Codex `UserPromptSubmit` | Repeats critical behavior, communication, design-impact classification, Apple-research method, and rendered UI/UX acceptance rules | Appends timestamp only to `.codex/logs/pm-rules.log` | Root rules remain authoritative |
 
 ## Hook Change Checklist

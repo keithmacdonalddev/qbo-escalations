@@ -12,6 +12,54 @@ command = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& (Join-Path
 timeout = 5
 statusMessage = "Codex PM rules loaded"
 
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "node \"$(git rev-parse --show-toplevel)/scripts/agent-harness/browser-session-guard.mjs\""
+timeout = 5
+statusMessage = "Checking browser session ownership"
+
+[[hooks.PostToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "node \"$(git rev-parse --show-toplevel)/scripts/agent-harness/browser-session-guard.mjs\""
+timeout = 5
+
+[[hooks.Stop]]
+
+[[hooks.Stop.hooks]]
+type = "command"
+command = "node \"$(git rev-parse --show-toplevel)/scripts/agent-harness/browser-session-guard.mjs\""
+timeout = 30
+statusMessage = "Closing owned browser sessions"
+
+[[hooks.SubagentStop]]
+
+[[hooks.SubagentStop.hooks]]
+type = "command"
+command = "node \"$(git rev-parse --show-toplevel)/scripts/agent-harness/browser-session-guard.mjs\""
+timeout = 30
+
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "node \"$(git rev-parse --show-toplevel)/scripts/agent-harness/browser-session-guard.mjs\""
+timeout = 30
+statusMessage = "Checking expired browser sessions"
+
+[[hooks.SessionEnd]]
+
+[[hooks.SessionEnd.hooks]]
+type = "command"
+command = "node \"$(git rev-parse --show-toplevel)/scripts/agent-harness/browser-session-guard.mjs\""
+timeout = 3
+
 [features]
 multi_agent = true
 
