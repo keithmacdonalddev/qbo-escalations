@@ -3,15 +3,16 @@
 - **Reviewed:** 2026-08-15
 - **Plan reviewed:** `clock-pill-header.md`
 - **Plan SHA-256:** `5F5880D164F0C705C361C3648FB8957B17E217989AB88E84B62D1633AB25401B`
-**Review basis:** the current working tree, including concurrent uncommitted work
+- **User clarification:** the new Clock Pill replaces the existing status pill
+- **Review basis:** the current working tree, including concurrent uncommitted work
 
 ## Verdict
 
 **Revise before implementation.**
 
-The chosen direction can produce a calmer and more useful header, and the plan contains good thinking about honest data, capability parity, accessibility, reduced motion, stable geometry, and real-browser checks. It is not implementation-ready, however. The current app already has a top-centre clock/status pill with much of the proposed behavior, the effective header height is not the value assumed by the plan, the rollback promise contradicts the deletion stages, and several major Product/UX decisions are postponed until after implementation begins.
+The replacement direction can produce a calmer and more useful header, and the plan contains good thinking about honest data, capability parity, accessibility, reduced motion, stable geometry, and real-browser checks. It is not implementation-ready, however. The plan does not yet include the existing status pill in its replacement boundary or map its behavior into the new pill; the effective header height is not the value assumed by the plan; the rollback promise contradicts the deletion stages; and several major Product/UX decisions are postponed until after implementation begins.
 
-Executing the 16 stages as written would risk two competing status pills, duplicate timers and provider polling, inaccessible mobile controls, and a feature flag that cannot actually restore the old header.
+Executing the 16 stages as written would risk mounting old and replacement status systems during rollout or dropping current alert/history behavior during cutover, as well as duplicate timers and provider polling, inaccessible mobile controls, and a feature flag that cannot actually restore the old header.
 
 ## What the plan gets right
 
@@ -24,18 +25,21 @@ Executing the 16 stages as written would risk two competing status pills, duplic
 
 ## Blocking findings
 
-### 1. The plan duplicates an existing clock/status system instead of deciding how to consolidate it
+### 1. The replacement decision is clear, but the plan does not encode the replacement boundary
 
-The plan's problem statement says the app has no clock and no single status location, then proposes a new permanent clock, interrupt layer, live region, chevron, portalled panel, and status history. Current source already mounts `HealthBanner` on every route (`client/src/App.jsx:366`). That component describes itself as a permanent top-centre status pill, shows local time, schedules a minute-aligned timeout, temporarily replaces the clock with problem/recovery messages, exposes one polite live region, and opens a portalled history panel (`client/src/components/HealthBanner.jsx:8-15`, `145-190`, `612-620`). Its CSS fixes the pill at the top centre and already contains a measured 390px layout (`client/src/components/HealthBanner.css:12-29`, `550-614`).
+The user has clarified that the new Clock Pill replaces the existing status pill. Current source mounts that legacy surface as `HealthBanner` on every route (`client/src/App.jsx:366`). It shows local time, schedules a minute-aligned timeout, temporarily replaces the clock with problem/recovery messages, exposes one polite live region, and opens a portalled alert-history panel (`client/src/components/HealthBanner.jsx:8-15`, `145-190`, `612-620`). Its CSS fixes the pill at the top centre and contains measured 390px behavior (`client/src/components/HealthBanner.css:12-29`, `550-614`).
 
-**Why this matters:** leaving `HealthBanner` mounted while adding `ClockPill` produces two clocks, two status narratives, two interrupt systems, and two disclosure panels. Removing it without migration would discard request-failure history and recovery behavior that the new plan does not list in its parity contract.
+The plan's removal scope names the provider button, agent strip, and Refresh All, but it does not name the `HealthBanner` mount or map its behaviors into the replacement. That makes the implementation boundary incomplete even though the product direction is now settled.
 
-**Required correction:** make an explicit product decision before implementation:
+**Why this matters:** leaving `HealthBanner` mounted on the new-pill branch produces two clocks, two status narratives, two interrupt systems, and two disclosure panels. Removing it without a behavior migration would discard request-failure history and recovery behavior that the new plan does not list in its parity contract.
 
-1. Evolve the existing `HealthBanner` into the selected header pill and merge agent/provider capability into it; or
-2. Replace it, while carrying its request-alert/history behavior into the new architecture and removing the old mount only behind the same rollback boundary.
+**Required correction:** make the replacement explicit in scope, files, stages, and acceptance criteria:
 
-The revised acceptance criteria should require exactly one global clock/status pill, one owner for temporary status messages, and one polite announcement region. It must also decide how `AgentHealthBanner` and `HealthToast` coexist with that owner. This cannot remain an open Stage 12 question.
+- List `HealthBanner`, its `App.jsx` mount, CSS, tests, and alert-history dependency as legacy replacement inputs.
+- Add a behavior-migration table: current behavior, new Clock Pill owner, cutover stage, and focused proof. It must cover the clock, request failure/recovery messages, alert history, clear-history action, portalled panel, keyboard/focus path, single live region, and 390px behavior.
+- Under the rollout flag, render exactly one status pill: flag off means the complete legacy pill; flag on means the complete replacement. Never show both for comparison in the live header.
+- Remove the old mount and legacy files only after the replacement has passed the full parity, design, and user-acceptance gates.
+- Require exactly one global clock/status pill, one owner for temporary status messages, and one polite announcement region. Define how `AgentHealthBanner` and `HealthToast` coexist with the replacement; this cannot remain an open Stage 12 question.
 
 ### 2. The plan is based on the wrong effective header height and an incomplete CSS map
 
@@ -68,7 +72,7 @@ The design gate requires the Product/UX brief before major implementation and re
 
 **Required correction:** add a Stage 0 approval gate before code. The Product/UX designer must inspect the current rendered header and existing health pill, receive the source prototype, and resolve at least:
 
-- the one status owner and panel information architecture;
+- the replacement pill's complete panel information architecture and migration from the old pill;
 - exact default left/right content and why each deserves permanent header space;
 - the relationship to mail, Live Work, request alerts, agent alerts, and toasts;
 - the desktop and exact 390px hierarchy;
@@ -95,7 +99,7 @@ The proposed modification list contains only `AppHeader.jsx`, `App.css`, and `us
 - `App.jsx` mounts both the existing `HealthBanner` and `AppHeader` (`client/src/App.jsx:366`, `403`).
 - `Settings` must be changed to host the Stage 11 picker.
 - `overhaul.css` contains the effective header geometry and responsive rules.
-- `HealthBanner.jsx`, `HealthBanner.css`, its tests, and possibly `useAlertHistory.js` are in the consolidation boundary.
+- `HealthBanner.jsx`, `HealthBanner.css`, its tests, and possibly `useAlertHistory.js` are in the replacement/migration boundary.
 - No durable Design Release Record path is named.
 
 **Required correction:** expand the plan's source map before implementation. At minimum, account for `App.jsx`, the relevant Settings component and tests, `overhaul.css`, the existing health-pill files and tests, an `AppHeader` characterization test, `testing/app-capabilities.json`, and a named Design Release Record. This is an impact map, not advance permission to edit every file.
@@ -178,10 +182,10 @@ Treat those formulas as a hypothesis. Record the exact internal grid/track model
 
 ## Recommended replacement sequence
 
-1. **Stage 0 — evidence and decisions:** attach/hash the prototype, inspect the current rendered header and health pill, invoke the Product/UX designer, approve defaults/mobile/status ownership, and complete the Product/UX brief.
+1. **Stage 0 — evidence and decisions:** attach/hash the prototype, inspect the current rendered header and legacy health pill, invoke the Product/UX designer, approve defaults/mobile/replacement behavior mapping, and complete the Product/UX brief.
 2. **Stage 1 — no-visual-change foundation:** add characterization tests, define aggregation and interrupt contracts, and extract one shared controller without changing the rendered shell.
 3. **Stage 2 — isolated prototype:** build under `prototypes/clock-pill-header/` or use a correctly gated React preview; use sanitized fixture states.
-4. **Stage 3 — flagged complete slice:** integrate a responsive pill with the legacy header and existing health surface still available behind one off-by-default flag. Complete panel parity, real slots, interrupts, keyboard, reduced motion, and all applicable states before deleting controls.
+4. **Stage 3 — flagged complete slice:** integrate a responsive replacement with the legacy status pill available only on the flag-off branch, never simultaneously. Complete panel parity, real slots, interrupts, keyboard, reduced motion, and all applicable states before deleting controls.
 5. **Stage 4 — evidence and independent decision:** run focused tests and reproducible geometry/console checks, complete the Design Release Record, and give the cold reviewer only the approved brief plus sanitized rendered evidence. Only `YES — RELEASE QUALITY` advances.
 6. **Stage 5 — user-approved cutover:** after reviewer and user acceptance, switch the default and retain an explicit rollback window.
 7. **Stage 6 — cleanup:** separately approve deletion of the legacy header/health implementation and removal of the rollout flag; update capability mapping and retained baselines.
@@ -190,7 +194,7 @@ Treat those formulas as a hypothesis. Record the exact internal grid/track model
 
 Implementation should not begin until all of these are true:
 
-- [ ] One current status/clock owner is selected; `HealthBanner`, `AgentHealthBanner`, and `HealthToast` responsibilities are documented.
+- [ ] The Clock Pill is recorded as the single replacement owner; every `HealthBanner` behavior and the remaining `AgentHealthBanner`/`HealthToast` responsibilities are mapped.
 - [ ] The source prototype is accessible and hashed.
 - [ ] The Product/UX brief fixes default slot content, mobile hierarchy, status panel structure, height, and state matrix.
 - [ ] The effective 44px header and late CSS overrides are reflected in the source map.
@@ -205,4 +209,4 @@ Implementation should not begin until all of these are true:
 
 ## Bottom line
 
-Keep the direction, but rewrite the plan around consolidation rather than addition. The safest and clearest implementation starts from the status pill that already exists, establishes one state/controller owner, resolves the mobile and default-content decisions before coding, and preserves a real rollback path until the complete rendered experience is accepted.
+Keep the replacement direction, but rewrite the plan as an explicit migration and cutover rather than a parallel addition. Treat the existing status pill as the behavior inventory and rollback branch, establish the new Clock Pill as the single state/controller owner, resolve the mobile and default-content decisions before coding, and preserve the old branch until the complete rendered replacement is accepted.
