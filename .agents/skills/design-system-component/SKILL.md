@@ -1,6 +1,6 @@
 ---
 name: design-system-component
-description: Use when creating, revising, approving, documenting, or implementing a reusable QBO Escalations design-system component. Produces a component-only prototype image, evidence-based design rationale, a controlled semantic contract, an explicit user-approval checkpoint, canonical documentation, production React/CSS/exports/focused tests, and rendered implementation evidence. Do not use it merely to restyle one page-specific feature.
+description: Use when creating, revising, approving, documenting, or implementing a reusable QBO Escalations design-system component. Produces a production-faithful component-only prototype, a source-traceable professional design explanation, a controlled semantic contract, an explicit user-approval checkpoint, canonical documentation, production React/CSS/exports/focused tests, and rendered implementation evidence. Do not use it merely to restyle one page-specific feature.
 ---
 
 # Design System Component
@@ -20,7 +20,12 @@ Before designing, read these sources completely:
 5. The relevant shared tokens in `client/src/App.css`
 6. Any user-supplied image, explanation, critique, or approved precedent for this component
 
-For the full component-contract checklist, prototype requirements, explanation structure, documentation matrix, and implementation acceptance criteria, read `references/component-workflow-contract.md` completely before producing the first prototype.
+Before producing the first prototype, read these files completely:
+
+- `references/component-workflow-contract.md` for the full component contract, prototype rules, explanation structure, documentation matrix, and implementation acceptance criteria; and
+- `examples/button-component-design-explanation.md` for the minimum acceptable depth and evidence quality of a user-facing explanation.
+
+The example is a quality floor, not a template or ceiling. Every live result must improve on it in at least one substantive, named way—such as fresher evidence, a clearer contract, a newly resolved contradiction, stronger safeguards, or tighter prototype agreement—while meeting every other quality category. Extra length is not an improvement. Do not inflate the response with generic design prose.
 
 ## Workflow
 
@@ -42,6 +47,7 @@ Search the current library and relevant consumers before naming or drawing anyth
 
 - a **primitive** with one stable job;
 - a **composition** of existing primitives;
+- an **interactive control** with a complete local input and state contract;
 - a **workflow pattern** with state and actions; or
 - page-specific UI that should remain owned by its feature.
 
@@ -51,7 +57,7 @@ If the request is not a valid reusable component, say so plainly and propose the
 
 ### 3. Define the contract before drawing
 
-Write a compact internal contract covering:
+Write a complete working contract covering:
 
 - purpose and user question answered;
 - non-goals and composition boundary;
@@ -67,9 +73,15 @@ Write a compact internal contract covering:
 
 Prefer the smallest truthful object. Optional anatomy must disappear structurally when omitted. Semantic props express intent; arbitrary styling knobs are not a substitute for design decisions.
 
+This contract cannot remain hidden in private notes. Its decisions, evidence, rejected alternatives, and tradeoffs must appear in the user-facing explanation.
+
 ### 4. Produce the component-only prototype image
 
-Create a bitmap prototype using the available image-generation capability. If image generation is unavailable, create an isolated HTML/CSS specimen outside production paths and render it to PNG.
+Choose the medium that can reproduce the proposed component most faithfully:
+
+1. Use isolated HTML/CSS and render it to PNG for geometry-heavy interface components, text, exact spacing, controlled states, theme tokens, and side-by-side variants. This is the default for buttons, fields, menus, indicators, metadata, cards, and other deterministic UI.
+2. Use image generation only for exploratory visual direction that benefits from synthesis, or when the user explicitly requests it. Never prefer generative variation over reproducible UI geometry.
+3. Keep prototype source outside production paths and follow the repository's prototype-isolation rules.
 
 The prototype must:
 
@@ -82,15 +94,39 @@ The prototype must:
 - avoid page chrome, fake navigation, unrelated controls, and decorative labels unless requested; and
 - be saved to the user's requested path, or to `%USERPROFILE%\Desktop\<ComponentName>-prototype-v<N>.png` when no path is specified.
 
+Inspect the final bitmap at original resolution before presenting it. Compare it line by line with the contract and current Slate sources. If theme, anatomy, labels, hierarchy, variants, spacing, or states contradict the contract, the prototype fails: revise it before handoff. A caveat does not make a visibly wrong prototype approval-ready.
+
 Do not run application tests or invoke a release reviewer for a prototype-only request. The user judges the direction first.
 
 ### 5. Explain the design with professional depth
 
-Alongside the image, provide the decision rationale required by `references/component-workflow-contract.md`. Explain what the component is for, why its hierarchy and anatomy work, what is optional, how it behaves, how it remains accessible, how it compresses, where it should not be used, and what the future React API implies.
+Alongside the image, provide the complete decision rationale required by `references/component-workflow-contract.md`. Explain what the component is for, how the design was determined from current evidence, why its hierarchy and anatomy work, what is optional, how it behaves through every applicable state, how it remains accessible, how it compresses, where it should not be used, and what the future React API implies.
+
+Create `%USERPROFILE%\Desktop\<ComponentName>-prototype-v<N>-explanation.md` beside the default prototype, or an equivalent Markdown file beside a user-requested output. Present the same complete explanation in chat; a short summary or handoff block is never a substitute.
+
+The explanation must:
+
+- declare `Component type: primitive | composition | interactive-control | workflow-pattern` immediately below its title;
+- use every required section in the reference's explanation quality gate;
+- include a source-to-decision table with exact current repository evidence, the resulting design decision, and at least one rejected alternative;
+- separate semantic intent, transient/persistent state, size/density, and layout options instead of flattening combinations into one `variant` prop;
+- distinguish what the component owns from what parents, workflows, or neighboring primitives own;
+- define invalid combinations and failure prevention, not merely valid examples;
+- make provisional measurements visibly provisional and tie final values to tokens or rendered validation;
+- identify at least one genuine weakness or tradeoff in the proposal; and
+- contain no unsupported claims, generic praise, simulated business schema, or invented app precedent.
 
 Be intellectually independent. Identify weak ideas, redundant cues, conflicting requirements, and over-generalization even when they came from a reference the user supplied. Do not agree merely to be agreeable.
 
 Provide decision rationale and observable tradeoffs. Do not claim to reveal private hidden chain-of-thought.
+
+Before handoff, run:
+
+```powershell
+node .agents/skills/design-system-component/scripts/validate-component-explanation.mjs <absolute-explanation-path>
+```
+
+The validator is a minimum structure and evidence check, not proof of quality. After it reports `STRUCTURE PASS`, apply the human quality rubric and original-resolution prototype audit in the reference. All categories must pass at the highest level. In the decision summary, name the substantive way this result improves on the example; word count never qualifies.
 
 ### 6. Iterate without losing accepted decisions
 
@@ -188,6 +224,8 @@ Pause and request direction when:
 - making it reusable requires a materially broader abstraction than requested;
 - an existing canonical component already owns the job but the requested design conflicts with its approved contract;
 - the user has not approved the direction and production implementation was not explicitly authorized;
+- the prototype or explanation contradicts the current design sources or each other;
+- the explanation validator or human quality rubric does not pass completely;
 - the approved prototype cannot be reproduced without changing shared tokens or another component contract; or
 - adoption would require touching unnamed feature screens.
 
@@ -195,4 +233,4 @@ Pause and request direction when:
 
 A component is complete only when all requested workflow stages are complete. For the full workflow, that means: explicit user approval, approved baseline stored, canonical documentation updated, production component and public export available, focused tests passing, rendered implementation compared against the approval, required design gate satisfied, and adoption scope reported truthfully.
 
-A polished prototype alone is **prototype complete**, not production complete. A JSX file alone is **implemented**, not design-system complete.
+A prototype is **prototype complete** only when its final bitmap passes original-resolution inspection, its complete explanation passes the deterministic validator and human quality rubric, and both artifacts agree with the current design evidence. It is still not production complete. A JSX file alone is **implemented**, not design-system complete.

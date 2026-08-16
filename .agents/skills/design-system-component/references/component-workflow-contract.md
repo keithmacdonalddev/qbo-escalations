@@ -185,7 +185,26 @@ Explain how this component differs from its nearest alternatives. Examples:
 
 This prevents a library where every component slowly becomes the same catch-all panel.
 
+### 4.11 Evidence and design determination
+
+Record how the design was derived before presenting conclusions. At minimum, trace:
+
+- the user's requested jobs, examples, and criticism;
+- current `DESIGN.md` principles;
+- current token and shared-control evidence from `client/src/App.css` and `client/src/design-system.css` when present;
+- existing library components and adjacent contracts;
+- current consumers that reveal recurring needs or compatibility constraints; and
+- accessibility and native-platform behavior that constrain the design.
+
+For every material design decision, state the evidence, the implication for this component, and the strongest rejected alternative. A list of sources is not enough. The explanation must show how those sources changed the design.
+
 ## 5. Prototype image contract
+
+### 5.0 Choose a production-faithful medium
+
+Use deterministic HTML/CSS rendering by default for components whose quality depends on exact geometry, text, theme tokens, spacing, alignment, or state comparison. Use image generation for exploratory synthesis only when it can improve the decision or when the user explicitly requests it. Availability alone is not a reason to use a less controllable medium.
+
+The prototype source must remain isolated from production code until approval. Regardless of medium, inspect the final bitmap at original resolution. Do not present a prototype that contains a known contradiction and attempt to repair trust with a written caveat.
 
 ### 5.1 What the image must prove
 
@@ -233,7 +252,7 @@ The image is not a catalog of every prop. More variants do not mean more reuse.
 
 ## 6. Detailed explanation template
 
-The explanation must be specific to the proposed component. Do not produce generic praise.
+The explanation must be specific to the proposed component. Do not produce generic praise. `examples/button-component-design-explanation.md` establishes the minimum acceptable reasoning quality. Every live result must name at least one substantive improvement over that example, such as fresher evidence, a clearer contract, a newly resolved contradiction, stronger safeguards, or tighter prototype agreement. Repetition and increased word count do not qualify.
 
 ### 6.1 Practical definition
 
@@ -323,6 +342,73 @@ End with:
 - non-goals;
 - open decisions requiring user approval; and
 - whether implementation is authorized yet.
+
+### 6.14 Mandatory user-facing structure
+
+Immediately below the title, declare one taxonomy value:
+
+```text
+Component type: primitive | composition | interactive-control | workflow-pattern
+```
+
+Then use the following exact level-two headings in every prototype explanation so completeness can be checked mechanically. A simple static primitive may state concisely that interaction sections are not applicable, but it must still explain why and define ownership. Combine no headings, duplicate none, preserve the order, and omit none.
+
+1. `## Component definition`
+2. `## Evidence and design determination`
+3. `## Component boundary`
+4. `## Anatomy`
+5. `## Core design thesis`
+6. `## Canonical default`
+7. `## Variant, state, and size architecture`
+8. `## Visual system`
+9. `## Interaction and state journey`
+10. `## Responsive behavior`
+11. `## Accessibility`
+12. `## Content guidance`
+13. `## Public API`
+14. `## Invalid combinations and safeguards`
+15. `## Relationship to neighboring components`
+16. `## Do / don't guidance`
+17. `## Acceptance criteria`
+18. `## Independent critique`
+19. `## Decision summary`
+20. `## One-sentence definition`
+
+These headings are the delivery skeleton, not the reasoning itself. Each section must make component-specific decisions. Do not satisfy the structure with one generic sentence per heading.
+
+### 6.15 Required source-to-decision table
+
+Place a table like this under `Evidence and design determination`:
+
+| Current evidence | Design implication | Decision | Strongest rejected alternative |
+| --- | --- | --- | --- |
+| Exact source, token, existing contract, user requirement, or observed consumer need | What that evidence means for this component | The resulting visible, behavioral, or API choice | A plausible alternative and why it loses here |
+
+Include enough rows to cover the decisions that materially shape the component. Quote sparingly. Cite exact local files and line numbers when the explanation is delivered from a repository. Separate confirmed current evidence from provisional design judgment.
+
+### 6.16 Human quality rubric
+
+After the deterministic validator passes, score the explanation privately against this rubric. Every row must reach `2`. A self-awarded score does not compensate for missing evidence; revise the artifact until the text itself proves the score.
+
+| Category | 0 — missing | 1 — generic or partial | 2 — release-quality requirement |
+| --- | --- | --- | --- |
+| Definition and user job | Name only | Broad purpose | One precise job, use threshold, and nearest failure mode |
+| Evidence trace | No derivation | Sources listed | Current evidence visibly changes decisions and rejected alternatives |
+| Contract architecture | Flat option list | Some axes separated | Purpose, anatomy, ownership, intent/state/size/layout, and invalid combinations are coherent |
+| Visual reasoning | Adjectives | Describes appearance | Explains hierarchy, geometry, typography, color, spacing, and why alternatives lose |
+| State journey | Static samples | Common states listed | Entry through activation, waiting, outcome, failure, recovery, focus, and inapplicable states resolved |
+| Accessibility | Compliance slogan | Basic semantics | Native semantics, name, keyboard, focus, announcements, contrast, motion, and targets are designed together |
+| Responsive behavior | “Responsive” | Shrink/wrap claim | Exact compression, wrapping, prioritization, localization, and 390px behavior are defined |
+| API and safeguards | Example props | Typed API | Defaults, ownership, invalid combinations, excluded escape hatches, and compatibility implications are explicit |
+| Boundaries and critique | No downside | Generic caveat | Adjacent components, misuse, real tradeoff, and correction path are specific |
+| Prototype agreement | Not checked | Visual described | Original-resolution image visibly matches the contract and current design sources |
+| Improvement beyond the floor | No comparison | Claims “better” | Names and demonstrates at least one substantive improvement over the canonical example; extra length does not count |
+
+### 6.17 Explanation artifact and deterministic gate
+
+Save the complete explanation as Markdown beside the prototype and present the same complete rationale in chat. Run `scripts/validate-component-explanation.mjs` against the saved file. The validator checks ordered structure, component-type-aware minimum depth, a four-column evidence table with current citations, ownership, anatomy, governed tokens, state coverage, API examples and escape hatches, invalid-combination safeguards, acceptance criteria, critique, and placeholder leakage.
+
+The validator deliberately reports only `STRUCTURE PASS` or `STRUCTURE FAIL`. It cannot judge taste, factual truth, usefulness, or prototype agreement. Structure success proves only that the most damaging omissions and several known contradictions are absent. The original-resolution prototype audit and the human rubric remain mandatory before the combined quality gate can pass.
 
 ## 7. Iteration and approval rules
 
@@ -499,6 +585,8 @@ Test only the component's public contract unless a shared token/export change re
 - reduced-motion class or behavior;
 - public export.
 
+For a prototype-only stage, do not run application tests. Run the explanation validator and inspect the bitmap at original resolution; those are artifact checks, not production-code tests.
+
 ### Rendered evidence
 
 Capture the real production component, not a screenshot of the prototype. Include:
@@ -568,15 +656,21 @@ Do not silently fix all consumers while changing the primitive. Preserve working
 - **Automatic adoption:** creating a component triggers broad page rewrites without user approval.
 - **Duplicated truth:** different component rules appear in DESIGN.md, feature docs, prompts, and code without one canonical contract.
 - **Agreement without judgment:** references are copied even when they contain redundant markers, oversized surfaces, weak contrast, or unsuitable app styling.
+- **Summary substituted for rationale:** a few bullets or the prototype handoff block replace the complete user-facing explanation.
+- **Evidence without determination:** files and tokens are listed, but the explanation never shows how they produced or rejected a design decision.
+- **Known-bad prototype handoff:** the agent notices a theme, anatomy, spacing, or state contradiction and presents the image anyway with a caveat.
+- **Word-count theater:** the response is long but repeats generic praise, offers no invalid combinations, and makes no repository-specific decisions.
 
 ## 15. Handoff templates
 
 ### Prototype handoff
 
+This compact block follows the full explanation. It never replaces any required explanation section.
+
 ```text
 Prototype: <absolute path>
 Revision: v<N>
-Component type: <primitive/composition/control/pattern>
+Component type: <primitive/composition/interactive-control/workflow-pattern>
 Canonical default: <one sentence>
 Optional pieces: <list>
 Deliberate exclusions: <list>
