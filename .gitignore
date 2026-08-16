@@ -17,6 +17,7 @@ review-screenshots/
 stress-testing/reports/**/*.json
 stress-testing/reports/**/artifacts/
 test-results/app-check/
+test-results/*.png
 .claude-state/
 .claude/agent-memory/
 claude.cmd
