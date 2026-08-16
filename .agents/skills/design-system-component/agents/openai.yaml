@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design System Component"
+  short_description: "Prototype and ship reusable UI components"
+  default_prompt: "Use $design-system-component to prototype, explain, approve, document, and implement a reusable component."
