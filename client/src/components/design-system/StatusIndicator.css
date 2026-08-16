@@ -1,0 +1,104 @@
+.qds-status-indicator {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  align-items: center;
+  gap: var(--sp-2, 6px);
+  color: var(--ink, #e4e4e8);
+  font-family: var(--font-sans, Inter, system-ui, sans-serif);
+  font-weight: 600;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+.qds-status-indicator[data-size='regular'] {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.qds-status-indicator[data-size='compact'] {
+  gap: 5px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.qds-status-indicator[data-appearance='contained'] {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md, 6px);
+  background: var(--bg-raised, #1a1e2a);
+}
+
+.qds-status-indicator[data-size='compact'][data-appearance='contained'] {
+  min-height: 24px;
+  padding: 3px 6px;
+}
+
+.qds-status-indicator__symbol {
+  display: grid;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  color: var(--ink-secondary, #8888a0);
+}
+
+.qds-status-indicator[data-size='compact'] .qds-status-indicator__symbol {
+  width: 14px;
+  height: 14px;
+}
+
+.qds-status-indicator__symbol > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.qds-status-indicator__label {
+  min-width: 0;
+  color: var(--ink, #e4e4e8);
+  overflow-wrap: anywhere;
+}
+
+.qds-status-indicator[data-tone='success'] .qds-status-indicator__symbol {
+  color: var(--success, #5cd08e);
+}
+
+.qds-status-indicator[data-tone='warning'] .qds-status-indicator__symbol {
+  color: var(--warning, #f0a940);
+}
+
+.qds-status-indicator[data-tone='danger'] .qds-status-indicator__symbol {
+  color: var(--danger, #f06060);
+}
+
+.qds-status-indicator[data-tone='info'] .qds-status-indicator__symbol {
+  color: var(--info, var(--accent, #6ea1f7));
+}
+
+.qds-status-indicator[data-state='syncing'] .qds-status-indicator__symbol {
+  animation: qds-status-indicator-spin 1.6s linear infinite;
+}
+
+@keyframes qds-status-indicator-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qds-status-indicator[data-state='syncing'] .qds-status-indicator__symbol {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .qds-status-indicator__symbol,
+  .qds-status-indicator[data-tone] .qds-status-indicator__symbol {
+    color: CanvasText;
+  }
+
+  .qds-status-indicator[data-appearance='contained'] {
+    border-color: CanvasText;
+  }
+}
