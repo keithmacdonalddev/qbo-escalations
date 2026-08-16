@@ -2,7 +2,7 @@
 
 **Status:** Canonical, evolving component contract
 
-**Current components:** 01 `TitleBlock`, 02 `StatusIndicator`
+**Current components:** 01 `TitleBlock`, 02 `StatusIndicator`, 03 `MetadataLine`
 
 **Production source:** `client/src/components/design-system/`
 **Visual language:** Slate, defined by `DESIGN.md` and tokens in `client/src/App.css`
@@ -625,9 +625,285 @@ Do not fake StatusSummary by adding a description beside StatusIndicator in an u
 
 ---
 
-## 31. Shared implementation rules
+# Component 03 — `MetadataLine`
 
-### 31.1 File ownership
+**Approved baseline:** `docs/design-system/assets/metadata-line/MetadataLine-prototype-v2.png`
+
+**User approval:** August 16, 2026. The baseline records the governed anatomy and responsive intent; its large dark canvas is documentation framing, not component anatomy.
+
+## 31. Purpose
+
+`MetadataLine` answers one question:
+
+> What supporting facts help me understand the nearby object?
+
+It presents one to four quiet facts such as observation times, verification times, record counts, currencies, storage location, or access context. It is a static primitive: compact enough to remain secondary, readable enough to be trusted, and structurally independent of the page that first uses it.
+
+It is not a status, badge, title, key/value details grid, action row, or card. A parent may compose those objects beside it, but they do not become part of `MetadataLine`.
+
+## 32. Why this shape
+
+Supporting facts should be discoverable without competing with identity, state, primary values, or the next action. The canonical form therefore uses only typography and quiet punctuation. It owns no surface, border, shadow, radius, padding, semantic color, or interaction.
+
+At normal widths, complete facts read as one natural phrase separated by centered dots. Labels use readable secondary ink; values use primary ink and a slightly stronger weight. This preserves hierarchy without relying on low-contrast tertiary text at 12–13px.
+
+At a 390px viewport, the component becomes a compact label/value stack and removes separators. This is a deliberate reflow, not ordinary text wrapping: a separator must never be stranded at the beginning or end of a line. The parent supplies the labels and values; the component never rewrites `Stored on this computer` into `Storage / This computer` on its own.
+
+## 33. Anatomy
+
+```text
+MetadataLine
+├─ group icon?          optional decorative context for the entire line
+└─ facts                1–4 governed facts
+   ├─ separator?        automatic between facts at normal widths
+   ├─ label?            optional qualifying text
+   └─ value             required visible fact
+      └─ time semantics? optional machine-readable datetime
+```
+
+When the icon is omitted, its markup and gap disappear. When a fact has no label, its value occupies the complete fact unit. Separators are visual punctuation and remain hidden from assistive technology.
+
+## 34. Public API
+
+```jsx
+<MetadataLine
+  as="span"
+  size="regular"
+  items={[
+    {
+      id: 'observed',
+      label: 'Observed',
+      value: '3 min ago',
+      dateTime: '2026-08-16T10:54:00-03:00',
+    },
+    {
+      id: 'fetched',
+      label: 'Fetched',
+      value: '2 min ago',
+      dateTime: '2026-08-16T10:55:00-03:00',
+    },
+  ]}
+/>
+```
+
+| Prop | Type / values | Default | Contract |
+| --- | --- | --- | --- |
+| `items` | array of fact objects | required | One to four governed facts. Invalid facts without visible values are omitted. |
+| `as` | `span`, `div` | `span` | Root semantic element selected for the surrounding composition. |
+| `size` | `regular`, `compact` | `regular` | Controlled typography, icon, and spacing density. |
+| `icon` | React element | none | Optional decorative group icon; appropriate only when it clarifies the entire line. |
+| `id` | string | none | ID applied to the component root. |
+| `className` | string | empty | Placement hook; must not redefine anatomy or semantic contrast. |
+| `style` | object | none | Exceptional placement hook, not an alternate styling API. |
+| `aria-*`, `data-*`, `role` | safe DOM attributes | none | Passed to the root. Event handlers are intentionally not passed through. |
+
+`MetadataLine` does not accept `onClick`, status tone, custom separators, surface, border, elevation, padding, timestamp formatting, or automatic announcements.
+
+### 34.1 Fact object
+
+| Field | Type | Required | Contract |
+| --- | --- | --- | --- |
+| `value` | string or number | yes | Complete visible fact. `0` remains valid. Empty values do not render. |
+| `label` | string | no | Short qualifier such as `Observed`, `Storage`, or `Access`. |
+| `dateTime` | ISO-compatible string | no | When present, the value renders as a semantic `<time>` element. |
+| `id` | string or number | no | Stable React identity for dynamic parent collections. |
+
+The parent owns wording, order, relative-time calculation, timezone, locale, and refresh cadence. The primitive renders the supplied facts; it does not reinterpret them.
+
+### 34.2 Governed item limit
+
+One to four facts is a binding usage boundary. More facts stop behaving like one quiet supporting line and require a larger metadata or details composition.
+
+When more than four valid facts are supplied:
+
+- development emits a clear warning;
+- every fact still renders so the component never hides information; and
+- the consumer must migrate to an appropriate larger composition instead of normalizing the misuse.
+
+The implementation never silently truncates the fifth fact.
+
+## 35. Canonical forms
+
+### 35.1 Regular labeled facts
+
+```jsx
+<MetadataLine
+  items={[
+    { label: 'Observed', value: '3 min ago' },
+    { label: 'Fetched', value: '2 min ago' },
+  ]}
+/>
+```
+
+Visible result:
+
+```text
+Observed 3 min ago · Fetched 2 min ago
+```
+
+This bare, icon-free form is the canonical default.
+
+### 35.2 Compact unlabeled facts
+
+```jsx
+<MetadataLine
+  size="compact"
+  items={[
+    { value: '7 positions' },
+    { value: 'CAD and USD' },
+  ]}
+/>
+```
+
+### 35.3 Optional group icon
+
+```jsx
+<MetadataLine
+  icon={<ClockIcon />}
+  items={[
+    {
+      label: 'Last verified',
+      value: 'Aug 15, 2026, 3:54 PM',
+      dateTime: '2026-08-15T15:54:00-03:00',
+    },
+    { value: 'Local evidence' },
+  ]}
+/>
+```
+
+The clock is valid because every fact belongs to one verification-time context. Do not add an icon merely to decorate ordinary metadata.
+
+## 36. Size and hierarchy
+
+| Size | Type | Line height | Typical use |
+| --- | --- | --- | --- |
+| `regular` | 13px | 18px | Page and panel headers, provider summaries, evidence context. |
+| `compact` | 12px | 16px | Dense tables, compact list rows, narrow secondary areas. |
+
+Labels use `--ink-secondary` at regular weight. Values use `--ink` at medium/semibold weight. Separators use secondary ink and never become colored status markers.
+
+Do not use `--ink-tertiary` for visible facts at these sizes. Tertiary ink remains appropriate for nonessential documentation annotations or placeholders—not information the user may need to read.
+
+## 37. Responsive behavior
+
+### Normal widths
+
+- Facts remain complete, non-breaking units.
+- Centered dots separate facts.
+- No fixed width or trailing column is reserved.
+- The icon remains optically small and fixed in size.
+
+### Exactly 390px viewport
+
+- Separators disappear.
+- Labeled facts align in a compact two-column label/value stack.
+- Unlabeled values span the available width.
+- The parent-supplied order remains unchanged.
+- Text wraps inside its fact rather than causing horizontal overflow.
+- The component does not shrink below the compact type scale.
+
+The 390px requirement applies to the browser viewport. Actual component width may be smaller after page padding. A 320px container may be used as additional stress evidence, but it never replaces the exact-390px viewport render.
+
+## 38. Interaction, motion, and ownership
+
+`MetadataLine` is non-interactive. It has no hover, focus, pressed, selected, disabled, waiting, success, error, or recovery state.
+
+It does not:
+
+- fetch, poll, store, or format data;
+- update its own clock;
+- navigate;
+- expose actions or links;
+- claim connection health;
+- create a live region by default; or
+- animate.
+
+The parent owns product data, update timing, announcements, actions, and any workflow surrounding the facts. If a fact must be clickable, compose a real link or button beside the primitive instead of turning the line into an inconsistent control.
+
+## 39. Content guidance
+
+### Good
+
+- `Observed 3 min ago · Fetched 2 min ago`
+- `7 positions · CAD and USD`
+- `Verified just now · Local evidence`
+- `Updated Aug 15 · 3 affected agents`
+
+### Avoid
+
+- Five or more facts compressed into one line.
+- Raw IDs or payload details in ordinary product metadata.
+- `Connected` or `Failed` presented as metadata instead of truthful status.
+- Repeating the nearby title or primary value.
+- Raw machine timestamps when a readable local value is available.
+- Developer stages or fixture wording in production context.
+
+Labels should be short nouns or past-tense facts. Values should remain concise enough to scan. If a sentence explains consequences or recovery, use supporting copy or a status composition instead.
+
+## 40. Accessibility
+
+- Visible text carries the complete meaning.
+- Optional icons are decorative and hidden from assistive technology.
+- Separators are hidden so screen readers hear natural phrases without punctuation noise.
+- `dateTime` values render as semantic `<time>` elements.
+- The component does not create a tab stop.
+- Color does not carry meaning.
+- DOM order remains the visual and spoken order at every width.
+- Static metadata does not announce itself merely because it mounts.
+- A parent may deliberately apply an accessible region or announcement when a user-triggered change requires it.
+
+## 41. Adjacent components and composition boundary
+
+| Component | Question answered |
+| --- | --- |
+| `TitleBlock` | What is this area? |
+| `StatusIndicator` | What state is this in? |
+| `MetadataLine` | What supporting facts place it in context? |
+| Future `StatusSummary` | What is the state, and what one sentence explains it? |
+| Future `DetailList` or `MetadataGroup` | What larger set of labeled facts should I inspect? |
+
+A valid parent composition may contain `TitleBlock`, `StatusIndicator`, `MetadataLine`, and a primary action as siblings. None is expanded into a catch-all header.
+
+## 42. Do / do not
+
+### Do
+
+- Keep the icon absent by default.
+- Use labels when they clarify otherwise ambiguous values.
+- Use `dateTime` for machine-readable timestamps.
+- Preserve one to four facts in a stable order.
+- Let the parent control the meaning and formatting.
+- Use a larger composition when the fact set grows.
+
+### Do not
+
+- Add a card, pill, border, shadow, padding, or radius.
+- Use semantic success, warning, danger, or info color.
+- Insert actions, chevrons, menus, tooltips, or diagnostics.
+- Use tertiary ink for facts that must be read.
+- Invent labels during responsive reflow.
+- Silently drop overflow facts.
+
+## 43. Acceptance checklist
+
+- [ ] The component answers only “What supporting facts place this nearby object in context?”
+- [ ] The canonical default is bare and icon-free.
+- [ ] One to four facts are supplied in a meaningful order.
+- [ ] A fifth fact produces a development warning without data loss.
+- [ ] Labels use readable secondary ink and values use primary ink.
+- [ ] No surface, semantic color, shadow, or interaction was added.
+- [ ] Separators are visual-only and disappear at a 390px viewport.
+- [ ] Narrow label/value rows use parent-supplied wording.
+- [ ] Timestamp values use `<time>` when `dateTime` is available.
+- [ ] Optional icon and labels remove their markup and space when absent.
+- [ ] No horizontal overflow occurs at exactly 390px.
+- [ ] The parent owns formatting, state, data behavior, and announcements.
+
+---
+
+## 44. Shared implementation rules
+
+### 44.1 File ownership
 
 ```text
 client/src/components/design-system/
@@ -637,16 +913,19 @@ client/src/components/design-system/
 ├─ StatusIndicator.jsx
 ├─ StatusIndicator.css
 ├─ StatusIndicator.test.jsx
+├─ MetadataLine.jsx
+├─ MetadataLine.css
+├─ MetadataLine.test.jsx
 └─ index.js
 ```
 
 Import through the public barrel when integrating:
 
 ```js
-import { StatusIndicator, TitleBlock } from './components/design-system/index.js';
+import { MetadataLine, StatusIndicator, TitleBlock } from './components/design-system/index.js';
 ```
 
-### 31.2 CSS namespace
+### 44.2 CSS namespace
 
 All design-system classes use the `qds-` prefix. The existing client has broad legacy selectors based on class-name substrings. In particular, generic words such as `title`, `badge`, `popover`, `tooltip`, and `modal` can trigger unrelated styles.
 
@@ -656,10 +935,12 @@ The production classes therefore use collision-resistant names such as:
 - `qds-heading-block__heading`
 - `qds-status-indicator`
 - `qds-status-indicator__symbol`
+- `qds-metadata-line`
+- `qds-metadata-line__fact`
 
 Do not rename them to shorter generic classes.
 
-### 31.3 Tokens
+### 44.3 Tokens
 
 Components consume canonical variables from `client/src/App.css`:
 
@@ -674,15 +955,15 @@ Components consume canonical variables from `client/src/App.css`:
 
 Fallbacks exist so isolated renders remain legible, but product appearance comes from the shared tokens.
 
-### 31.4 No new icon dependency
+### 44.4 No new icon dependency
 
 Standard StatusIndicator symbols use small internal SVGs with `currentColor`. TitleBlock receives an icon from its parent. Do not add an icon package merely for these primitives.
 
-### 31.5 Escape hatches
+### 44.5 Escape hatches
 
 `className` and `style` exist for placement and exceptional integration—not for bypassing the contract. If multiple consumers need the same exception, stop using an escape hatch and propose a governed prop with evidence.
 
-## 32. Adding component 03 and beyond
+## 45. Adding component 04 and beyond
 
 Every new component entry must include:
 
@@ -707,7 +988,7 @@ Every new component entry must include:
 
 A component is not added to the library merely by creating a JSX file. Documentation, production implementation, focused checks, and visual evidence move together.
 
-## 33. Change control
+## 46. Change control
 
 ### Minor compatible change
 
@@ -743,7 +1024,7 @@ Examples:
 
 Breaking changes require migration planning across every consumer. Do not quietly change the primitive and repair screens opportunistically.
 
-## 34. Final release question
+## 47. Final release question
 
 For every component and every integration, ask:
 
