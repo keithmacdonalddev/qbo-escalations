@@ -49,16 +49,25 @@ const SERVER_OWNED_ROOTS = [
   path.join(SERVER_SRC, 'routes', 'investments'),
   path.join(SERVER_SRC, 'services', 'investments'),
 ];
-const SERVER_OWNED_FILES = new Set([path.join(SERVER_SRC, 'models', 'QuestradeConnection.js')]);
+const SERVER_OWNED_FILES = new Set([
+  path.join(SERVER_SRC, 'models', 'QuestradeConnection.js'),
+  path.join(SERVER_SRC, 'models', 'InvestmentAccount.js'),
+  path.join(SERVER_SRC, 'models', 'InvestmentSyncRun.js'),
+  path.join(SERVER_SRC, 'models', 'InvestmentSnapshot.js'),
+  path.join(SERVER_SRC, 'services', 'investment-account-events.js'),
+  path.join(SERVER_SRC, 'services', 'realtime-channels', 'investment-account.js'),
+]);
 const SERVER_SHARED_ALLOWLIST = new Set([path.join(SERVER_SRC, 'lib', 'field-encryption.js')]);
 
 const CLIENT_OWNED_ROOTS = [path.join(CLIENT_SRC, 'components', 'investments')];
 const CLIENT_OWNED_FILES = new Set([
   path.join(CLIENT_SRC, 'api', 'investments.js'),
   path.join(CLIENT_SRC, 'hooks', 'useQuestradeConnection.js'),
+  path.join(CLIENT_SRC, 'hooks', 'useInvestmentSnapshotWorkbench.js'),
 ]);
 const CLIENT_SHARED_ALLOWLIST = new Set([
   path.join(CLIENT_SRC, 'api', 'http.js'),
+  path.join(CLIENT_SRC, 'api', 'realtime.js'),
   path.join(CLIENT_SRC, 'components', 'connected-accounts', 'AnchoredSettingsControl.jsx'),
   path.join(CLIENT_SRC, 'components', 'connected-accounts', 'ConnectedAccountCard.jsx'),
 ]);

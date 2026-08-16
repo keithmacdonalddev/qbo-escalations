@@ -9,6 +9,9 @@ import {
   retryQuestradeRevocation,
   retryQuestradeVerification,
   selectQuestradeDevScenario,
+  deleteLocalInvestmentData,
+  getSnapshotWorkbench,
+  startSnapshotRun,
 } from './investments.js';
 
 vi.mock('./http.js', () => ({ apiFetchJson: vi.fn() }));
@@ -27,6 +30,23 @@ describe('investments API', () => {
     expect(apiFetchJson.mock.calls[2][0]).toBe('/api/investments/providers/questrade/dev-scenario');
     expect(JSON.parse(apiFetchJson.mock.calls[2][1].body)).toEqual({ scenario: 'healthy-margin' });
     expect(apiFetchJson.mock.calls[2][1].noRetry).toBe(true);
+  });
+
+  it('keeps Stage 3A reads in the Investments namespace and protects run/deletion mutations with exact intents', async () => {
+    apiFetchJson.mockImplementation(async (url) => (
+      url.endsWith('/action-intents') ? { ok: true, intent: 'stage3a-intent' } : { ok: true }
+    ));
+    await getSnapshotWorkbench('simulated');
+    await startSnapshotRun('simulated');
+    await deleteLocalInvestmentData('DELETE INVESTMENT DATA');
+
+    expect(apiFetchJson.mock.calls[0][0]).toBe('/api/investments/snapshot-workbench?source=simulated');
+    expect(JSON.parse(apiFetchJson.mock.calls[1][1].body)).toEqual({ action: 'run-snapshot' });
+    expect(JSON.parse(apiFetchJson.mock.calls[2][1].body)).toEqual({ intent: 'stage3a-intent', source: 'simulated' });
+    expect(JSON.parse(apiFetchJson.mock.calls[3][1].body)).toEqual({ action: 'delete-local-investment-data' });
+    expect(JSON.parse(apiFetchJson.mock.calls[4][1].body)).toEqual({ intent: 'stage3a-intent', confirm: 'DELETE INVESTMENT DATA' });
+    expect(apiFetchJson.mock.calls[2][1].noRetry).toBe(true);
+    expect(apiFetchJson.mock.calls[4][1].noRetry).toBe(true);
   });
 
   it('uses a one-time intent before sending a token to the local Investments route', async () => {

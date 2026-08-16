@@ -99,3 +99,50 @@ export function selectQuestradeDevScenario(scenario) {
     noRetry: true,
   }, 'The simulated Questrade state could not be changed.');
 }
+
+export function getSnapshotWorkbench(source = 'simulated') {
+  const query = new URLSearchParams({ source });
+  return apiFetchJson(`/api/investments/snapshot-workbench?${query}`, {}, 'Snapshot reconciliation could not be loaded.');
+}
+
+export function selectSnapshotDevScenario(scenario) {
+  return apiFetchJson('/api/investments/dev-snapshot-scenario', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ scenario }),
+    noRetry: true,
+  }, 'The simulated snapshot case could not be changed.');
+}
+
+export async function startSnapshotRun(source = 'simulated') {
+  const { intent } = await createQuestradeActionIntent('run-snapshot');
+  return apiFetchJson('/api/investments/snapshot-runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ intent, source }),
+    noRetry: true,
+  }, 'Snapshot verification could not be started.');
+}
+
+export function getSnapshotRun(runId) {
+  return apiFetchJson(`/api/investments/sync-runs/${encodeURIComponent(runId)}`, {}, 'Snapshot progress could not be confirmed.');
+}
+
+export async function deleteLocalInvestmentData(confirm) {
+  const { intent } = await createQuestradeActionIntent('delete-local-investment-data');
+  return apiFetchJson('/api/investments/local-data/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ intent, confirm }),
+    noRetry: true,
+  }, 'Local investment data could not be deleted.');
+}
+
+export function forceSnapshotReplayGap() {
+  return apiFetchJson('/api/investments/dev-realtime-gap', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+    noRetry: true,
+  }, 'The replay-gap check could not be started.');
+}

@@ -591,6 +591,47 @@
       "lastHumanReviewDate": "2026-08-15"
     },
     {
+      "id": "investment-portfolio-snapshot",
+      "label": "Complete investment snapshot and reconciliation",
+      "userOutcome": "The user can manually create a complete read-only Questrade portfolio snapshot, inspect safe normalized evidence in a development-only workbench, recover through socket gaps or direct polling, and delete only the locally saved Stage 3A records without disconnecting Questrade.",
+      "risk": "high",
+      "owner": "Investments",
+      "sourcePaths": [
+        "server/src/models/InvestmentAccount.js",
+        "server/src/models/InvestmentSyncRun.js",
+        "server/src/models/InvestmentSnapshot.js",
+        "server/src/routes/investments/index.js",
+        "server/src/services/investments/money.js",
+        "server/src/services/investments/snapshot-normalizers.js",
+        "server/src/services/investments/snapshot-fixtures.js",
+        "server/src/services/investments/snapshot-repository.js",
+        "server/src/services/investments/snapshot-source-provider.js",
+        "server/src/services/investments/snapshot-service.js",
+        "server/src/services/investment-account-events.js",
+        "server/src/services/realtime-channels/investment-account.js",
+        "server/src/services/realtime-server.js",
+        "client/src/api/investments.js",
+        "client/src/hooks/useInvestmentSnapshotWorkbench.js",
+        "client/src/components/investments/QuestradeSnapshotWorkbench.jsx",
+        "client/src/components/investments/questrade-snapshot-workbench.css",
+        "client/src/components/Settings.jsx",
+        "scripts/dev-launcher.js"
+      ],
+      "requiredCheckTypes": ["unit", "component", "server", "browser", "human"],
+      "evidence": [
+        { "type": "unit", "groupId": "investments-boundary", "paths": ["server/test/investments/module-boundaries.test.js"] },
+        { "type": "server", "groupId": "investments-server", "paths": ["server/test/investments/connection-routes.test.js", "server/test/investments/stage3a-snapshots.test.js", "server/test/investments/stage3a-models.test.js", "server/test/realtime-websocket.test.js"] },
+        { "type": "component", "groupId": "investments-client", "paths": ["client/src/api/investments.test.js", "client/src/hooks/useInvestmentSnapshotWorkbench.test.jsx", "client/src/components/investments/QuestradeSnapshotWorkbench.test.jsx"] },
+        { "type": "unit", "groupId": "dev-startup", "paths": ["scripts/dev-launcher.test.js"] },
+        { "type": "browser", "groupId": "investments-browser", "paths": ["scripts/investments-browser-acceptance.js", "docs/investments/stage-3a-design-release-record.md"] }
+      ],
+      "knownGaps": [
+        "Gate 3A was explicitly accepted by the user on 2026-08-15 after the user reported the acceptance journey passed, supplied rendered state evidence, and directed Stage 3B to begin.",
+        "Stage 3A deliberately adds no production Investments page, background synchronization, upstream Questrade stream, activity history, AI analysis, monitoring, market-data permission, or trading capability."
+      ],
+      "lastHumanReviewDate": "2026-08-15"
+    },
+    {
       "id": "development-startup-safety",
       "label": "Friendly and safe local development startup",
       "userOutcome": "Starting or checking the local app quickly identifies the exact code in use, reports core readiness before slower operational checks, retries only safe temporary failures once, gives one direct fix for each warning, supports quiet or browser-open startup, and confirms shutdown service by service without touching unrelated processes.",

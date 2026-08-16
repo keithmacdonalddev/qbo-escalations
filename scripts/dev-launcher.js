@@ -932,6 +932,9 @@ function emitServiceHealth(output, health) {
 
   if (health.investments) {
     const investmentTransport = health.transport?.investments;
+    const savedPortfolioState = health.investments.savedPortfolioAvailable
+      ? 'saved portfolio data available'
+      : 'no saved portfolio data';
     if (investmentTransport?.ok === false) {
       emitHealthWarning(
         output,
@@ -941,22 +944,22 @@ function emitServiceHealth(output, health) {
       );
       mark('attention', 'optional');
     } else if (health.investments.mode === 'simulated') {
-      output.success('✅ Questrade test states ready — safe Stage 2 connection and recovery states; live access off', 'invest');
+      output.success(`✅ Questrade test states ready — safe connection and snapshot states; live access off; ${savedPortfolioState}`, 'invest');
       mark('healthy', 'optional');
     } else if (health.investments.state === 'revocation-pending') {
-      output.warning('⚠️ Questrade revocation pending — local access is off; finish from Connected Accounts', 'invest');
+      output.warning(`⚠️ Questrade revocation pending — local access is off; ${savedPortfolioState}; finish from Connected Accounts`, 'invest');
       mark('attention', 'optional');
     } else if (health.investments.state === 'reauthorization-required') {
-      output.warning('⚠️ Questrade authorization needs renewal — reconnect from Connected Accounts', 'invest');
+      output.warning(`⚠️ Questrade authorization needs renewal — ${savedPortfolioState}; reconnect from Connected Accounts`, 'invest');
       mark('attention', 'optional');
     } else if (health.investments.state === 'locked' || health.investments.credentialState === 'locked') {
-      output.warning('⚠️ Questrade credential is locked for this Windows user — local access is off', 'invest');
+      output.warning(`⚠️ Questrade credential is locked for this Windows user — local access is off; ${savedPortfolioState}`, 'invest');
       mark('attention', 'optional');
     } else if (health.investments.credentialState === 'stored') {
-      output.success(`✅ Questrade authorization stored — ${health.investments.accountType || 'investment'} account; broker check deferred at startup`, 'invest');
+      output.success(`✅ Questrade authorization stored — ${health.investments.accountType || 'investment'} account; ${savedPortfolioState}; broker check deferred at startup`, 'invest');
       mark('healthy', 'optional');
     } else {
-      output.info('ℹ️ Questrade not connected — optional; live access is off', 'invest');
+      output.info(`ℹ️ Questrade not connected — optional; live access is off; ${savedPortfolioState}`, 'invest');
       mark('notConfigured', 'optional');
     }
   }

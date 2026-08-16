@@ -31,11 +31,20 @@ function createFixtureApp(env, overrides = {}) {
     retryVerification: async () => ({ ok: true, provider: 'questrade', mode: 'live', state: 'connected', readOnly: true }),
     selectAccount: async () => ({ ok: true, provider: 'questrade', mode: 'live', state: 'connected', readOnly: true }),
   };
+  const snapshotService = overrides.snapshotService || {
+    hasSavedSnapshot: async () => false,
+    getWorkbench: async ({ sourceMode }) => ({ ok: true, sourceMode, readiness: 'ready', account: null, activeRun: null, latestRun: null, latestSnapshot: null, storedCounts: { accounts: 0, runs: 0, snapshots: 0, total: 0 } }),
+    startSync: async ({ sourceMode }) => ({ reused: false, run: { runId: 'safe-route-run-01', accountKey: 'safe-route-account-01', sourceMode, status: 'running' } }),
+    getRun: async (runId) => ({ runId, accountKey: 'safe-route-account-01', status: 'completed' }),
+    getLatest: async () => null,
+    deleteLocalData: async () => ({ deleted: { accounts: 1, runs: 1, snapshots: 1, total: 3 }, remaining: { accounts: 0, runs: 0, snapshots: 0, total: 0 } }),
+  };
   const app = express();
   app.use(express.json());
   app.use('/api/investments', createInvestmentsRouter({
     env,
     connectionService,
+    snapshotService,
     getScenario: () => scenario,
     setScenario: (value) => { scenario = value; },
   }));
@@ -187,4 +196,39 @@ test('each Stage 2 lifecycle mutation requires the matching one-time intent and 
     .expect(200);
 
   assert.deepEqual(calls, ['reauthorize', 'retry-verification', 'disconnect', 'retry-revocation', 'forget-local']);
+});
+
+test('Stage 3A manual runs and bounded deletion require matching one-time intents', async () => {
+  const calls = [];
+  const app = createFixtureApp({ NODE_ENV: 'development', QUESTRADE_DEV_FIXTURES: '1' }, {
+    snapshotService: {
+      hasSavedSnapshot: async () => true,
+      getWorkbench: async ({ sourceMode }) => ({ ok: true, sourceMode, readiness: 'ready', account: null, storedCounts: { total: 0 } }),
+      startSync: async ({ sourceMode, scenario }) => {
+        calls.push(['sync', sourceMode, scenario]);
+        return { reused: false, run: { runId: 'safe-route-run-01', accountKey: 'safe-route-account-01', status: 'running' } };
+      },
+      getRun: async (runId) => ({ runId, accountKey: 'safe-route-account-01', status: 'completed' }),
+      getLatest: async () => null,
+      deleteLocalData: async () => {
+        calls.push(['delete']);
+        return { deleted: { accounts: 1, runs: 1, snapshots: 1, total: 3 }, remaining: { accounts: 0, runs: 0, snapshots: 0, total: 0 } };
+      },
+    },
+  });
+
+  await request(app).post('/api/investments/snapshot-runs').send({ source: 'simulated' }).expect(409);
+  const runIntent = await request(app).post('/api/investments/providers/questrade/action-intents').send({ action: 'run-snapshot' }).expect(200);
+  const started = await request(app).post('/api/investments/snapshot-runs').send({ intent: runIntent.body.intent, source: 'simulated' }).expect(202);
+  assert.equal(started.body.run.runId, 'safe-route-run-01');
+  await request(app).get('/api/investments/sync-runs/safe-route-run-01').expect(200);
+
+  const wrongConfirmation = await request(app).post('/api/investments/providers/questrade/action-intents').send({ action: 'delete-local-investment-data' }).expect(200);
+  await request(app).post('/api/investments/local-data/delete').send({ intent: wrongConfirmation.body.intent, confirm: 'DELETE' }).expect(400);
+  assert.deepEqual(calls.filter(([kind]) => kind === 'delete'), []);
+
+  const deleteIntent = await request(app).post('/api/investments/providers/questrade/action-intents').send({ action: 'delete-local-investment-data' }).expect(200);
+  const deleted = await request(app).post('/api/investments/local-data/delete').send({ intent: deleteIntent.body.intent, confirm: 'DELETE INVESTMENT DATA' }).expect(200);
+  assert.equal(deleted.body.deleted.snapshots, 1);
+  assert.deepEqual(calls.filter(([kind]) => kind === 'delete'), [['delete']]);
 });

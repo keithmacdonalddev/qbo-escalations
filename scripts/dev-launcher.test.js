@@ -407,9 +407,11 @@ test('startup describes local Questrade state without claiming a live broker che
   const stored = captureOutput();
   emitServiceHealth(stored.output, {
     ...baseHealth,
-    investments: { mode: 'live', state: 'connected', credentialState: 'stored', accountType: 'Margin', liveAccessEnabled: true },
+    investments: { mode: 'live', state: 'connected', credentialState: 'stored', accountType: 'Margin', liveAccessEnabled: true, savedPortfolioAvailable: true },
   });
   assert.match(stored.read(), /Questrade authorization stored.*broker check deferred at startup/);
+  assert.match(stored.read(), /saved portfolio data available/i);
+  assert.doesNotMatch(stored.read(), /snapshot-|\$|CAD|USD|position|symbol/i);
   assert.doesNotMatch(stored.read(), /connection ready/i);
 
   const pending = captureOutput();

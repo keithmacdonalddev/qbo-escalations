@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 
 const { decryptField, encryptField } = require('../../lib/field-encryption');
 const { createCredentialKeyProvider } = require('./credential-key-provider');
+const { publishInvestmentAccountEvent } = require('../investment-account-events');
 const { createQuestradeConnectionRepository } = require('./questrade-connection-repository');
 const { createLiveQuestradeAdapter } = require('./providers/questrade/live-adapter');
 const { createQuestradeOAuthClient } = require('./providers/questrade/oauth-client');
@@ -178,6 +179,7 @@ function createQuestradeConnectionService(options = {}) {
   const repository = options.repository || createQuestradeConnectionRepository();
   const oauthClient = options.oauthClient || createQuestradeOAuthClient(options.oauthOptions);
   const adapterFactory = options.adapterFactory || createLiveQuestradeAdapter;
+  const publishEvent = options.publishEvent || publishInvestmentAccountEvent;
   const randomUUID = options.randomUUID || crypto.randomUUID;
   const now = options.now || (() => new Date());
   let refreshInFlight = null;
@@ -249,7 +251,11 @@ function createQuestradeConnectionService(options = {}) {
       lastErrorCode: error?.code || 'QUESTRADE_VERIFICATION_FAILED',
     };
     if (state === 'reauthorization-required') changes.credentialState = 'renewal-required';
-    await repository.update(changes);
+    const updated = await repository.update(changes);
+    if (state === 'reauthorization-required') {
+      const accountKey = updated?.selectedAccountKey || updated?.safeAccountId;
+      if (accountKey) publishEvent({ accountKey, eventType: 'reauthorization-required', eventTime: changes.lastCheckAt, snapshotId: null });
+    }
     return state;
   }
 
@@ -297,6 +303,9 @@ function createQuestradeConnectionService(options = {}) {
       changes.credentialState = 'renewal-required';
     }
     const updated = await repository.update(changes);
+    if (state === 'reauthorization-required') {
+      publishEvent({ accountKey: account.accountKey, eventType: 'reauthorization-required', eventTime: checkedAt, snapshotId: null });
+    }
     await recordAudit('verify-services', state === 'connected' ? 'completed' : state, firstFailure?.code || null);
     return updated;
   }
@@ -325,11 +334,13 @@ function createQuestradeConnectionService(options = {}) {
         return { accessToken: rotated.accessToken, apiServer: rotated.apiServer, key, record: saved };
       } catch {
         try {
-          await repository.update({
+          const updated = await repository.update({
             state: 'reauthorization-required',
             credentialState: 'renewal-required',
             lastErrorCode: 'QUESTRADE_ROTATED_TOKEN_NOT_SAVED',
           });
+          const accountKey = updated?.selectedAccountKey || updated?.safeAccountId;
+          if (accountKey) publishEvent({ accountKey, eventType: 'reauthorization-required', eventTime: now(), snapshotId: null });
         } catch {
           // The provider already rotated the token; the safest truthful recovery is reauthorization.
         }
@@ -368,6 +379,55 @@ function createQuestradeConnectionService(options = {}) {
       await repository.update({ state: 'locked', credentialState: 'locked', lastErrorCode: 'QUESTRADE_CREDENTIAL_LOCKED' });
       throw serviceError('QUESTRADE_CREDENTIAL_LOCKED', 'The saved Questrade credential cannot be opened for the current Windows user.', 503);
     }
+  }
+
+  async function getSnapshotSource() {
+    const session = await getAuthorizedSession();
+    const accounts = Array.isArray(session.record?.accounts) ? session.record.accounts : [];
+    const account = accounts.find((candidate) => candidate.accountKey === session.record.selectedAccountKey)
+      || (accounts.length === 1 ? accounts[0] : null);
+    if (!account) {
+      throw serviceError('QUESTRADE_ACCOUNT_SELECTION_REQUIRED', 'Choose the Questrade account before running a portfolio verification.', 409);
+    }
+    const accountNumber = decryptField(account.accountNumber, session.key);
+    const adapter = adapterFactory({ accessToken: session.accessToken, apiServer: session.apiServer });
+    return {
+      provider: 'questrade',
+      sourceMode: 'live',
+      sourceRef: account.accountKey,
+      accountType: account.accountType,
+      label: account.label,
+      observedAt: now(),
+      async getAccount() {
+        return { accountType: account.accountType, label: account.label };
+      },
+      getBalances: () => adapter.getBalances(accountNumber),
+      getPositions: () => adapter.getPositions(accountNumber),
+    };
+  }
+
+  async function getSnapshotReadiness() {
+    const status = await getStatus();
+    if (status.credentialState !== 'stored' || !status.liveAccessEnabled) {
+      throw serviceError(
+        status.state === 'reauthorization-required' ? 'QUESTRADE_AUTHORIZATION_REQUIRED' : 'QUESTRADE_NOT_CONNECTED',
+        status.state === 'reauthorization-required'
+          ? 'Renew Questrade authorization before running a live portfolio verification.'
+          : 'Connect Questrade before running a live portfolio verification.',
+        409,
+      );
+    }
+    const accounts = Array.isArray(status.accounts) ? status.accounts : [];
+    const account = accounts.find((candidate) => candidate.accountKey === status.selectedAccountKey)
+      || (accounts.length === 1 ? accounts[0] : null);
+    if (!account) throw serviceError('QUESTRADE_ACCOUNT_SELECTION_REQUIRED', 'Choose the Questrade account before running a portfolio verification.', 409);
+    return {
+      provider: 'questrade',
+      sourceMode: 'live',
+      sourceRef: account.accountKey,
+      accountType: account.accountType,
+      label: account.label,
+    };
   }
 
   async function connectInternal({ refreshToken, reauthorize = false }) {
@@ -553,6 +613,8 @@ function createQuestradeConnectionService(options = {}) {
     connect,
     disconnect,
     forgetLocal,
+    getSnapshotReadiness,
+    getSnapshotSource,
     getStatus,
     reauthorize,
     retryRevocation,

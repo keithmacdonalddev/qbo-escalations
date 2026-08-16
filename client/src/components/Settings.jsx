@@ -17,7 +17,7 @@ import AiManagementSettings from './AiManagementSettings.jsx';
 import SettingsAccountsSection from './SettingsAccountsSection.jsx';
 import ConnectedAccountsPreview, { QuestradeSimulation } from './connected-accounts/ConnectedAccountsPreview.jsx';
 import { googleRecoveryMessage } from './connected-accounts/googleRecoveryMessage.js';
-import { useQuestradeConnection } from './investments/index.js';
+import { QuestradeSnapshotWorkbench, useQuestradeConnection } from './investments/index.js';
 
 function Icon({ name, size = 17 }) {
   const paths = {
@@ -302,6 +302,7 @@ export default function Settings({ themeProps, aiProps, layoutProps }) {
           </div>
           {import.meta.env.DEV && <QuestradeSimulation />}
         </section>
+        {import.meta.env.DEV && <QuestradeSnapshotWorkbench onOpenConnectedAccounts={() => setActiveSection('accounts')} />}
       </div>
     );
   }

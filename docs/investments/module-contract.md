@@ -10,10 +10,10 @@ Investments is a first-class product area for the user's personal portfolio tool
 - `server/src/routes/investments/`: Investments-only HTTP routes.
 - `server/src/services/investments/`: provider-neutral investment services.
 - `server/src/services/investments/providers/questrade/`: Questrade adapter and transport boundary.
-- `server/src/models/Questrade*`: Investments-owned stored records.
+- `server/src/models/Questrade*` and `server/src/models/Investment*`: Investments-owned stored records.
 - `server/test/investments/`: server security, route, and adapter tests.
 - `client/src/components/investments/`: Investments UI.
-- `client/src/api/investments.js` and `client/src/hooks/useQuestradeConnection.js`: client boundary.
+- `client/src/api/investments.js`, `client/src/hooks/useQuestradeConnection.js`, and `client/src/hooks/useInvestmentSnapshotWorkbench.js`: client boundary.
 - `docs/investments/`: behavior, security, and acceptance documentation.
 
 ## Shared integration points
@@ -53,6 +53,19 @@ Changes outside those paths must stay small and deliberate:
 - Safe development simulation uses its own hook and development endpoints. It is excluded from production navigation and cannot change the live connection record.
 - Startup reports only saved local state and never contacts Questrade or claims live broker health.
 - The implementation and automated safe-state checks are complete. On 2026-08-15 the user accepted Gate 2 and confirmed readiness for Stage 3A after the user-owned local Margin-account connect, revoke, and reconnect journey; no token was handled by an agent or placed in chat/source.
+
+## Stage 3A implementation boundary
+
+- Provider-neutral account, run, and snapshot records use opaque local keys. Provider account numbers, credentials, and raw Questrade payloads are never stored in these records or returned by their routes.
+- Manual verification normalizes exact decimal strings for Margin balances and positions, preserves currencies and negative values, and represents missing values as unknown. The client performs no financial arithmetic.
+- A run validates Account, Balances, Positions, and overall completeness in memory before one immutable snapshot is inserted. Failed or incomplete runs preserve the prior complete snapshot and identify it as still latest.
+- One active run is allowed per account. Concurrent requests reuse it, durable terminal state wins over stale browser responses, and authoritative REST polling backs up socket delivery even while the socket appears connected.
+- The shared `investment-account` browser channel carries only a safe account key, allowlisted event type, event time, and nullable snapshot ID. Every event causes a normal REST refetch; financial values and progress never travel in the event.
+- Reconnect, retained-event gaps, and process changes trigger authoritative refetch. Development controls can safely exercise socket drop, replay gap, and socket-disabled polling without contacting Questrade.
+- The reconciliation workbench exists only in development under Settings → Developer Tools. Production builds tree-shake its UI, fixture controls, replay-gap action, and deletion confirmation wording.
+- Local deletion requires a one-use action intent and exact typed confirmation. It removes only Stage 3A account, run, and snapshot records, then focuses the honest empty state; it does not disconnect Questrade or affect another module.
+- Startup reads only whether saved portfolio data exists. It performs no synchronization and prints no account, snapshot, holding, balance, symbol, count, timestamp, or value.
+- On 2026-08-15 the user reported the Gate 3A acceptance journey passed, supplied rendered evidence for its key states, and explicitly directed Stage 3B to begin. Stage 3A is the accepted snapshot contract for the production Investments workspace; later stages remain blocked by their own user gates.
 
 ## Cross-team rule
 

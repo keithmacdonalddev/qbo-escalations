@@ -307,3 +307,43 @@ test('concurrent expired-session checks exchange the rotating refresh token only
   assert.equal(first.state, 'connected');
   assert.equal(second.state, 'connected');
 });
+
+test('durable reauthorization transition publishes only the safe investment-account event envelope', async () => {
+  const key = crypto.randomBytes(32);
+  const repository = createMemoryRepository();
+  const events = [];
+  let authorizationExpired = false;
+  const service = createQuestradeConnectionService({
+    keyProvider: { getStatus: () => ({ available: true }), ensureKey: async () => key, loadKey: async () => key },
+    repository,
+    oauthClient: {
+      exchangeRefreshToken: async () => {
+        if (authorizationExpired) {
+          throw Object.assign(new Error('expired-canary'), { code: 'QUESTRADE_AUTHORIZATION_REJECTED' });
+        }
+        return { accessToken: 'access-canary', refreshToken: 'refresh-canary', expiresAt: new Date('2026-08-15T10:00:00.000Z'), apiServer: 'https://api01.iq.questrade.com/v1' };
+      },
+    },
+    adapterFactory: () => ({
+      getAccounts: async () => [{ number: '98765432', type: 'Margin', status: 'Active' }],
+      getBalances: async () => ({}), getPositions: async () => ({}), getOrders: async () => ({}), getExecutions: async () => ({}),
+    }),
+    publishEvent: (event) => events.push(event),
+    randomUUID: () => 'safe-account-key-reauthorization',
+    now: () => new Date('2026-08-15T09:00:00.000Z'),
+  });
+
+  await service.connect({ refreshToken: 'manual-canary' });
+  await repository.update({ tokenExpiresAt: new Date('2026-08-15T08:59:00.000Z') });
+  authorizationExpired = true;
+
+  await assert.rejects(service.retryVerification(), (error) => error?.code === 'QUESTRADE_AUTHORIZATION_REQUIRED');
+  assert.equal(repository.read().state, 'reauthorization-required');
+  assert.deepEqual(events, [{
+    accountKey: 'safe-account-key-reauthorization',
+    eventType: 'reauthorization-required',
+    eventTime: new Date('2026-08-15T09:00:00.000Z'),
+    snapshotId: null,
+  }]);
+  assert.doesNotMatch(JSON.stringify(events), /98765432|access-canary|refresh-canary|expired-canary/i);
+});

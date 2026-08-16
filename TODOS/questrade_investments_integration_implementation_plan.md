@@ -1,6 +1,6 @@
 # Questrade Investments Integration Implementation Plan
 
-**Status:** Gates 0, 1, and 2 are user-accepted. On 2026-08-15 the user accepted the complete Connected Accounts experience and then confirmed readiness to begin Stage 3A after the user-owned local Margin-account connection journey. The Stage 2 read-only connection, refresh, repair, reauthorization, disconnect/revoke, revocation-retry, and explicit local-removal lifecycle is implemented and safe-state verified. No token was handled by an agent or placed in chat/source, and automated verification makes no Questrade request. Stage 3A is now in progress; Stage 3B remains blocked until Gate 3A acceptance.
+**Status:** Gates 0 through 3A are user-accepted. On 2026-08-15 the user reported the Stage 3A acceptance journey passed, supplied rendered evidence for the healthy, negative-value, incomplete-with-preserved-evidence, recovery-control, and post-deletion states, then explicitly directed implementation to begin Stage 3B. No token was handled by an agent or placed in chat/source. Stage 3B is now in progress; Stage 3C remains blocked until Gate 3B acceptance.
 
 **Created:** 2026-08-14
 
@@ -1434,8 +1434,8 @@ This table is updated immediately when a gate changes state so the plan never ap
 | 0 | Account, scope, retention, privacy, and no-trade decisions | `user-accepted` | Official documentation rechecked; owner instructed implementation to proceed; no live secret captured |
 | 1 | Development fixtures and Connected Accounts shell | `user-accepted` | On 2026-08-15 the user accepted the compact overview, focused provider sheets, fluid transitions, anchored disclosures, and disconnected/healthy/locked Questrade simulations shown in the development app. Focused Investments server, client, and module-boundary checks pass. |
 | 2 | Live connection, token refresh, repair, and revoke | `user-accepted` | Complete read-only lifecycle and focused checks passed; on 2026-08-15 the user confirmed readiness for Stage 3A after the user-owned local Margin-account acceptance journey. No token was handled by an agent or placed in chat/source. |
-| 3A | Snapshot engine and visible reconciliation workbench | `implementation-in-progress` | Product/UX brief, fixture/partial-failure reconciliation, live comparison, realtime recovery, and local-data deletion in the dev app |
-| 3B | Investments workspace | `not-started` | Accepted desktop/mobile portfolio workspace using the Stage 3A snapshot contract |
+| 3A | Snapshot engine and visible reconciliation workbench | `user-accepted` | On 2026-08-15 the user reported the acceptance journey passed, provided rendered state evidence, and explicitly directed Stage 3B to begin |
+| 3B | Investments workspace | `implementation-in-progress` | Production desktop/mobile portfolio workspace using the accepted Stage 3A snapshot contract; user acceptance remains the gate |
 | 3C | Cross-domain Main Chat and personal-workspace shell | `not-started` | Equal QBO/Investments entry, summary/sync/deep-link behavior, domain isolation, QBO regression, optional whole-app wording decision, and desktop/mobile acceptance |
 | 4A | Activities, orders, executions, and REST history import | `not-started` | Duplicate/resume fixtures plus live activity comparison |
 | 4B | Optional Questrade order/execution notifications | `not-started` | Drop/gap/reconnect/token fixtures plus secure live handshake and REST reconciliation |
