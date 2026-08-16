@@ -26,7 +26,6 @@ import { getSidebarCurrentRoute } from './lib/appRoute.js';
 import { tel, TEL } from './lib/devTelemetry.js';
 import LiveWorkCenter from './components/live-work/LiveWorkCenter.jsx';
 
-const ChatView = lazy(() => import('./components/Chat.jsx').then(module => ({ default: module.ChatView })));
 const AgentBootOverlay = lazy(() => import('./components/AgentBootOverlay.jsx'));
 const AgentDock = lazy(() => import('./components/AgentDock.jsx'));
 const ChatMiniWidget = lazy(() => import('./components/ChatMiniWidget.jsx'));
