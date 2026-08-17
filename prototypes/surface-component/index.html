@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Surface component prototype v1</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="artboard" aria-labelledby="prototype-title">
+      <header class="prototype-header">
+        <div>
+          <p class="eyebrow">Proposed component 05</p>
+          <h1 id="prototype-title">Surface</h1>
+          <p class="summary">One quiet bordered background that keeps related content together.</p>
+        </div>
+        <dl class="contract-key" aria-label="Surface component contract">
+          <div><dt>Intent</dt><dd>neutral grouping</dd></div>
+          <div><dt>Layout</dt><dd>regular / compact / none</dd></div>
+          <div><dt>Behavior</dt><dd>static · parent-owned</dd></div>
+        </dl>
+      </header>
+
+      <section class="prototype-section prototype-section--canonical" aria-labelledby="canonical-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">Canonical default</p>
+            <h2 id="canonical-heading">Neutral boundary · regular padding</h2>
+          </div>
+          <p>Background, one-pixel border, 8px radius, no shadow.</p>
+        </div>
+
+        <div class="qds-surface qds-surface--regular canonical-surface">
+          <div class="content-heading">
+            <div>
+              <h3>Review context</h3>
+              <p>Evidence that belongs to one decision reads as a single group.</p>
+            </div>
+          </div>
+          <div class="evidence-list" aria-label="Example grouped content">
+            <div><span>Observed</span><strong>3 minutes ago</strong></div>
+            <div><span>Source</span><strong>Workspace evidence</strong></div>
+            <div><span>Next step</span><strong>Review the preserved result</strong></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="prototype-section" aria-labelledby="layout-heading">
+        <div class="section-heading">
+          <div>
+            <p class="section-label">One object, three layout needs</p>
+            <h2 id="layout-heading">Padding changes density—not meaning</h2>
+          </div>
+          <p>The border, background, radius, and static behavior stay fixed.</p>
+        </div>
+
+        <div class="comparison-grid">
+          <article class="comparison-sample">
+            <div class="sample-label"><strong>Regular</strong><span>default · 14px now</span></div>
+            <div class="qds-surface qds-surface--regular sample-surface">
+              <h3>Decision evidence</h3>
+              <p>Comfortable spacing for ordinary content groups.</p>
+              <div class="quiet-divider"></div>
+              <span class="quiet-fact">3 related items</span>
+            </div>
+          </article>
+
+          <article class="comparison-sample">
+            <div class="sample-label"><strong>Compact</strong><span>8px</span></div>
+            <div class="qds-surface qds-surface--compact sample-surface">
+              <h3>Dense evidence</h3>
+              <p>For short rows in pointer-first workspaces.</p>
+              <div class="quiet-divider"></div>
+              <span class="quiet-fact">2 related facts</span>
+            </div>
+          </article>
+
+          <article class="comparison-sample">
+            <div class="sample-label"><strong>No padding</strong><span>edge-owned content</span></div>
+            <div class="qds-surface qds-surface--none sample-surface sample-surface--rows">
+              <div><span>Observed</span><strong>Current</strong></div>
+              <div><span>Evidence</span><strong>Preserved</strong></div>
+              <div><span>Review</span><strong>Ready</strong></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <footer class="prototype-footer">
+        <span>Static container</span>
+        <span>Token-driven color</span>
+        <span>No hover or elevation</span>
+        <span>No built-in icon, heading, status, or action</span>
+      </footer>
+    </main>
+    <script src="./script.js"></script>
+  </body>
+</html>
