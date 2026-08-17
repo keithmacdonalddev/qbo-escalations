@@ -69,8 +69,8 @@ export const DOC_GROUPS = [
       {
         path: '/docs/components/title-block',
         title: 'TitleBlock',
-        description: 'Give a page, section, or compact panel a clear identity.',
-        searchTerms: ['heading', 'title', 'subtitle', 'icon', 'surface', 'page header'],
+        description: 'Name a page or meaningful section with an optional explanatory sentence.',
+        searchTerms: ['heading', 'title', 'description', 'page', 'section', 'fluid', 'typography', 'clamp'],
         status: 'Available',
       },
       {

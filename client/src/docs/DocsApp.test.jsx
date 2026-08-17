@@ -25,6 +25,22 @@ describe('DocsApp', () => {
     expect(screen.getByRole('heading', { level: 2, name: 'The Slate promise' })).toBeVisible();
   });
 
+  it('opens /docs/components/title-block with TitleBlock live production specimens and the complete contract', async () => {
+    window.history.replaceState({}, '', '/docs/components/title-block');
+    render(<DocsApp />);
+
+    const title = await screen.findByRole('heading', { level: 1, name: 'TitleBlock' });
+    expect(title).toBeVisible();
+    expect(title.closest('.qds-title-block')).toHaveAttribute('data-scale', 'fluid');
+    expect(screen.getByRole('heading', { level: 2, name: 'One anatomy, three scales' })).toBeVisible();
+    expect(screen.getByRole('navigation', { name: 'TitleBlock specification chapters' })).toBeVisible();
+    expect(screen.getByRole('table', { name: 'TitleBlock scale measurements' })).toBeVisible();
+    expect(screen.getByRole('heading', { level: 2, name: 'React API and safeguards' })).toBeVisible();
+    expect(screen.getByRole('heading', { level: 2, name: 'Quality, availability, and tradeoffs' })).toBeVisible();
+    expect(screen.getAllByText(/clamp\(34px, 4\.2vw, 50px\)/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('table', { name: 'TitleBlock props' })).toBeVisible();
+  });
+
   it('opens Button as a staged specification with live production specimens: identity, visual family, then reference', async () => {
     const user = userEvent.setup();
     window.history.replaceState({}, '', '/docs/components/button');

@@ -1,99 +1,129 @@
-import { forwardRef } from 'react';
+import titleBlockContract from './TitleBlock.contract.json';
 import './TitleBlock.css';
 
-const HEADING_ELEMENTS = new Set(['h1', 'h2', 'h3']);
-const SIZES = new Set(['page', 'section', 'compact']);
-const WIDTHS = new Set(['auto', 'full']);
-const SURFACES = new Set(['none', 'raised', 'elevated', 'floating']);
-const BORDERS = new Set(['none', 'subtle', 'strong']);
-const ELEVATIONS = new Set(['none', 'low', 'floating']);
-const PADDINGS = new Set(['none', 'compact', 'regular']);
+const CONTRACT_PROPS = new Map(titleBlockContract.props.map((prop) => [prop.name, prop]));
+const allowed = (name) => new Set(CONTRACT_PROPS.get(name).allowed);
+const defaultValue = (name) => CONTRACT_PROPS.get(name).default;
+const HEADING_LEVELS = new Set([...allowed('headingLevel')].map(Number));
+const SCALES = allowed('scale');
+const FALLBACK_HEADING_LEVEL = 2;
 
-function choose(value, allowed, fallback) {
-  return allowed.has(value) ? value : fallback;
+function warn(message) {
+  if (import.meta.env.DEV) console.warn(`[TitleBlock] ${message}`);
 }
 
-function safeDomProps(props) {
-  return Object.fromEntries(Object.entries(props).filter(([key]) => (
-    key.startsWith('aria-') || key.startsWith('data-') || key === 'role'
-  )));
+function reportError(message) {
+  if (import.meta.env.DEV) console.error(`[TitleBlock] ${message}`);
+}
+
+function hasValue(value) {
+  return value !== undefined && value !== null && value !== false;
+}
+
+function chooseScale(value) {
+  if (SCALES.has(value)) return value;
+  warn(`Unsupported scale "${String(value)}"; using "${defaultValue('scale')}".`);
+  return defaultValue('scale');
 }
 
 /**
- * TitleBlock communicates the identity of a page, section, or compact panel.
- * It deliberately does not own actions, navigation, status, or breadcrumbs.
+ * TitleBlock establishes the identity of a page or meaningful section and may
+ * add one short explanatory sentence. It never owns actions, state, or layout.
  */
-const TitleBlock = forwardRef(function TitleBlock({
-  as = 'h2',
-  border = 'none',
-  className = '',
-  elevation = 'none',
-  headingId,
-  icon = null,
-  id,
-  padding = 'none',
-  size = 'section',
-  style,
-  subtitle = null,
-  surface = 'none',
+function TitleBlock({
   title,
-  width = 'auto',
-  ...domProps
-}, ref) {
-  const Heading = choose(as, HEADING_ELEMENTS, 'h2');
-  const resolvedSize = choose(size, SIZES, 'section');
-  const resolvedWidth = choose(width, WIDTHS, 'auto');
-  const resolvedSurface = choose(surface, SURFACES, 'none');
-  const resolvedBorder = choose(border, BORDERS, 'none');
-  const requestedElevation = choose(elevation, ELEVATIONS, 'none');
-  const requestedPadding = choose(padding, PADDINGS, 'none');
-  const hasContainerTreatment = resolvedSurface !== 'none' || resolvedBorder !== 'none';
-  const resolvedPadding = hasContainerTreatment && requestedPadding === 'none'
-    ? 'regular'
-    : requestedPadding;
-  const resolvedElevation = resolvedSurface === 'none' ? 'none' : requestedElevation;
-  const classes = [
-    'qds-heading-block',
+  description,
+  headingLevel,
+  scale = defaultValue('scale'),
+  headingId,
+  className,
+  style,
+  children,
+  as,
+  icon,
+  subtitle,
+  size,
+  width,
+  surface,
+  border,
+  elevation,
+  padding,
+  onClick,
+  role,
+  id,
+  color,
+  fontFamily,
+  fontSize,
+  tone,
+  dangerouslySetInnerHTML,
+  ...unsupportedProps
+}) {
+  const resolvedTitle = typeof title === 'string' ? title.trim() : '';
+
+  if (!resolvedTitle) {
+    reportError('title must be a visible, non-empty string; no unnamed heading was rendered.');
+    return null;
+  }
+
+  const resolvedHeadingLevel = HEADING_LEVELS.has(headingLevel)
+    ? headingLevel
+    : FALLBACK_HEADING_LEVEL;
+  const resolvedScale = chooseScale(scale);
+  const suppliedDescription = typeof description === 'string' ? description.trim() : '';
+  const resolvedDescription = suppliedDescription || null;
+  const suppliedHeadingId = typeof headingId === 'string' ? headingId.trim() : '';
+  const resolvedHeadingId = suppliedHeadingId || undefined;
+  const Heading = `h${resolvedHeadingLevel}`;
+
+  if (!HEADING_LEVELS.has(headingLevel)) {
+    reportError(`headingLevel must be 1, 2, or 3; using ${FALLBACK_HEADING_LEVEL}.`);
+  }
+  if (description !== undefined && !resolvedDescription) {
+    warn('description must be a non-empty string when supplied; its paragraph and spacing were omitted.');
+  }
+  if (resolvedDescription && resolvedDescription.length > 180) {
+    warn('description is longer than 180 characters; keep it to one short sentence when possible. The text remains visible.');
+  }
+  if (headingId !== undefined && !resolvedHeadingId) {
+    warn('headingId must be a non-empty string when supplied and was ignored.');
+  }
+
+  const BLOCKED_PROP_VALUES = {
     className,
-  ].filter(Boolean).join(' ');
+    style,
+    children,
+    as,
+    icon,
+    subtitle,
+    size,
+    width,
+    surface,
+    border,
+    elevation,
+    padding,
+    onClick,
+    role,
+    id,
+    color,
+    fontFamily,
+    fontSize,
+    tone,
+    dangerouslySetInnerHTML,
+  };
 
-  if (import.meta.env.DEV && !title) {
-    console.warn('TitleBlock requires a title that remains meaningful without its icon.');
-  }
-
-  if (import.meta.env.DEV && hasContainerTreatment && requestedPadding === 'none') {
-    console.warn('TitleBlock added regular padding because bordered and surfaced treatments cannot use padding="none".');
-  }
-
-  if (import.meta.env.DEV && requestedElevation !== 'none' && resolvedSurface === 'none') {
-    console.warn('TitleBlock ignored elevation because shadows require a named surface.');
-  }
+  Object.entries(BLOCKED_PROP_VALUES).forEach(([name, value]) => {
+    if (hasValue(value)) warn(`${name} is not part of the governed TitleBlock contract and was ignored.`);
+  });
+  Object.entries(unsupportedProps).forEach(([name, value]) => {
+    if (hasValue(value)) warn(`${name} is not part of the governed TitleBlock contract and was ignored.`);
+  });
 
   return (
-    <div
-      {...safeDomProps(domProps)}
-      ref={ref}
-      id={id}
-      className={classes}
-      style={style}
-      data-size={resolvedSize}
-      data-width={resolvedWidth}
-      data-surface={resolvedSurface}
-      data-border={resolvedBorder}
-      data-elevation={resolvedElevation}
-      data-padding={resolvedPadding}
-    >
-      {icon ? (
-        <span className="qds-heading-block__icon" aria-hidden="true">
-          {icon}
-        </span>
-      ) : null}
-      <span className="qds-heading-block__copy">
-        <Heading id={headingId} className="qds-heading-block__heading">{title}</Heading>
-        {subtitle ? <span className="qds-heading-block__subtitle">{subtitle}</span> : null}
-      </span>
+    <div className="qds-title-block" data-scale={resolvedScale}>
+      <Heading id={resolvedHeadingId} className="qds-title-block__heading">{resolvedTitle}</Heading>
+      {resolvedDescription ? <p className="qds-title-block__description">{resolvedDescription}</p> : null}
     </div>
   );
-});
+}
 
 export default TitleBlock;

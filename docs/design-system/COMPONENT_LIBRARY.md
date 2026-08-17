@@ -94,257 +94,121 @@ The app retains its Slate identity. It does not copy Apple branding, materials, 
 
 # Component 01 — `TitleBlock`
 
+**Status:** `available`
+
+**Classification:** `primitive`
+
+**Detailed contract:** `client/src/components/design-system/TitleBlock/TitleBlock.md`
+
+**Live documentation:** `/docs/components/title-block`
+
 ## 4. Purpose
 
-`TitleBlock` gives a page, section, or compact panel a clear identity. It answers:
+`TitleBlock` names the current page or meaningful section and may add one short sentence explaining its purpose. It answers one stable question:
 
-> What is this area, and what short context—if any—helps me understand it?
+> What work area is this, and what is it for?
 
-Its required title creates the first visual stop. An optional icon improves recognition. An optional subtitle resolves likely uncertainty. Nothing else belongs inside the primitive.
+The primitive is deliberately text-only. It does not become a page header, card, status surface, navigation object, or action group. Those responsibilities stay with the parent so TitleBlock remains predictable across QBO work, Investments, Knowledge, agent workspaces, and future operational domains.
 
-The component is not a complete page header. A page header may compose `TitleBlock` with sibling actions, status, navigation, or metadata, but those elements remain outside the component.
+## 5. Canonical default
 
-## 5. Why this shape
+The canonical default is a transparent page-scale title with no description. The caller supplies `headingLevel` deliberately, while `scale` defaults to `page`. The component owns no outer margin, fixed width, background, border, radius, elevation, icon, or animation.
 
-The component uses a horizontal icon-and-copy arrangement because it creates a strong, reusable silhouette without binding the title to one feature. The text group remains tight so title and subtitle read as one idea. Space between the optional icon and copy is larger because they are separate visual groups.
-
-The default has no background, border, padding, or shadow. Most titles already live inside a page or panel that owns its surface. Automatically wrapping every title in a card would create nested containers, waste vertical space, and make hierarchy depend on decoration rather than typography.
-
-The optional visual treatments still exist because some legitimate placements need them:
-
-- A standalone compact identity block may need a raised surface.
-- A bounded module may need a subtle border.
-- A genuinely floating composition may need elevation.
-- A full-width title block may need consistent padding when used as a contained header.
-
-These options are controlled Slate presets, not an invitation to make every title look different.
+Page scale is 28px on desktop and 22px below 720px. Section scale is 18px. Fluid uses `clamp(34px, 4.2vw, 50px)` and a 25-character desktop measure. The app's late density stylesheet redefines the similarly named global type tokens and forces headings to 600 weight, so TitleBlock owns its approved measurements and narrowly protects its 660 weight, tracking, and ink without changing the rest of the application.
 
 ## 6. Anatomy
 
 ```text
 TitleBlock
-├─ icon?       optional decorative identity
-└─ copy
-   ├─ heading  required semantic h1, h2, or h3
-   └─ subtitle? optional supporting context
+├─ semantic heading element       required
+│  └─ visible title string        required
+└─ description paragraph          optional
+   └─ short sentence string       required when present
 ```
 
-The icon is never the only source of identity. The title must remain meaningful if the icon fails to load or is not perceived.
+When the description is absent or invalid, its paragraph and top margin disappear together. Title and description accept strings rather than arbitrary children, preventing badges, links, actions, status, and rich layout from entering the text stack.
 
 ## 7. Public API
 
 ```jsx
 <TitleBlock
-  as="h1"
-  size="page"
-  title="Workspace"
-  subtitle="Current context"
-  icon={<WorkspaceMark />}
-  width="auto"
-  surface="none"
-  border="none"
-  elevation="none"
-  padding="none"
+  headingLevel={1}
+  title="Operations workspace"
 />
 ```
 
-### 7.1 Content and semantics
-
-| Prop | Type / values | Default | Contract |
+| Prop | Values | Default | Purpose |
 | --- | --- | --- | --- |
-| `title` | React phrasing content | required | Full identity; meaningful without the icon. |
-| `as` | `h1`, `h2`, `h3` | `h2` | The caller chooses the correct document heading level. |
-| `headingId` | string | none | ID applied to the heading for `aria-labelledby` relationships. |
-| `icon` | React element | none | Decorative; the wrapper is hidden from assistive technology. |
-| `subtitle` | React phrasing content | none | One useful sentence; normally one line, at most two on narrow screens. |
-| `id` | string | none | ID applied to the component root. |
-| `className` | string | empty | Limited composition hook; must not redefine anatomy. |
-| `style` | object | none | Escape hatch for layout placement, not component restyling. |
-| `aria-*`, `data-*`, `role` | safe DOM attributes | none | Passed to the root. Event handlers are intentionally not passed through. |
+| `title` | non-empty string | required | Visible title and accessible heading name. |
+| `description` | non-empty string | none | One optional explanatory sentence. |
+| `headingLevel` | 1 \| 2 \| 3 | required | Document-outline semantics independent from visual scale. |
+| `scale` | section \| page \| fluid | page | Governed visual hierarchy without changing heading rank. |
+| `headingId` | non-empty string | none | Optional heading identifier for a parent aria-labelledby relationship. |
 
-`TitleBlock` does not accept `onClick`. If the surrounding identity opens another view, use a purpose-built interactive parent with a complete hover, focus, pressed, and keyboard contract.
+The public API excludes `children`, `className`, `style`, `as`, legacy `subtitle` and `size`, icon and container props, raw color or font controls, interaction handlers, and role replacement. A wrapper owns placement. A parent landmark may reference `headingId`, but TitleBlock does not create the landmark itself.
 
-### 7.2 Size
+## 8. Scales and layout
 
-| Value | Heading | Subtitle | Icon frame | Typical use |
+| Scale | Heading | Description | Internal gap | Intended use |
 | --- | --- | --- | --- | --- |
-| `page` | 22px / 1.15 | 13px / 1.4 | 36px | One page identity. |
-| `section` | 18px / 1.2 | 13px / 1.4 | 28px | Major section within a page. |
-| `compact` | 14px / 1.25 | 12px / 1.35 | 20px | Panel, popover, or dense module identity. |
+| `page` | 28px desktop, 22px below 720px | 14px, max 68ch | 6px | Canonical page or workspace identity |
+| `section` | 18px | 13px, max 62ch | 4px | Meaningful subdivision inside one route |
+| `fluid` | 34px–50px clamp, max 25ch on broad layouts | 15px, max 60ch | 8px | Short identity-first title with deliberate space |
 
-Visual size and semantic level are independent. A visually compact title can still be an `h2`; a page title is not automatically an `h1` unless the page hierarchy calls for it.
+Heading level and visual scale are independent. An `h1` may use section scale when the document is visually compact, and an `h2` may use fluid scale inside a larger document. Scale never changes document semantics.
 
-### 7.3 Width
+TitleBlock has no fixed outer width. Page and section titles use their parent's available width. Fluid alone has a 25ch desktop measure, released to 100% below 720px. All text remains visible, wraps naturally, and uses emergency breaking for unbroken identifiers rather than ellipsis or line clamping.
 
-| Value | Behavior |
-| --- | --- |
-| `auto` | Shrinks to its content while never exceeding the parent. Default. |
-| `full` | Fills the available parent width. |
+## 9. Visual system
 
-Arbitrary width is not a public prop. The parent controls grid or flex placement. A `style` escape hatch may be used for a necessary maximum width, but a new recurring width rule should become a governed preset.
+The heading uses `--ink` and `--font-sans`; the description uses `--ink-secondary` and the same family. Shared `--sp-1`, `--sp-2`, and `--sp-3` values control the approved internal gaps. No color or font-family prop exists, so app-wide theme changes flow through the variables while arbitrary parent inheritance cannot recolor one title into status or action emphasis.
 
-### 7.4 Surface
+The component surface is transparent. Specimen frames in the prototype and documentation are teaching scaffolding, not part of TitleBlock. Adding a surface, border, shadow, padding, icon, eyebrow, or centered marketing treatment would change the primitive's job and requires a separately approved composition.
 
-| Value | Meaning |
-| --- | --- |
-| `none` | No owned surface. Canonical default. |
-| `raised` | Standard in-flow Slate raised surface. |
-| `elevated` | Stronger in-flow separation for a real nested level. |
-| `floating` | Floating layer only, such as an established popover or modal composition. |
+## 10. Interaction, accessibility, and content
 
-Surface does not imply border or shadow. Those decisions remain explicit because they communicate different relationships.
+TitleBlock is static and non-interactive. It has no hover, focus, pressed, disabled, loading, success, error, recovery, announcement, or reduced-motion state. It never enters the tab order and never attaches event handlers. The parent owns changing workflow state and any adjacent control.
 
-### 7.5 Border
+`headingLevel` renders a native `h1`, `h2`, or `h3`. The visible title supplies the accessible name. The description follows in normal document order and is not forced into `aria-describedby`. Use direct sentence-case titles and one concise description only when it resolves uncertainty. Warnings, status, policy detail, implementation notes, and links belong outside the primitive.
 
-| Value | Meaning |
-| --- | --- |
-| `none` | No component-owned boundary. Default. |
-| `subtle` | Quiet separation using `--line`. |
-| `strong` | Deliberate boundary using `--line-strong`; use rarely. |
+## 11. Safeguards
 
-### 7.6 Elevation
+- Empty or non-string titles report a development error and render nothing.
+- Invalid heading levels report a development error and safely fall back to `h2`.
+- Unsupported scales warn and fall back to `page`.
+- Empty descriptions warn and disappear structurally; long descriptions remain visible.
+- Empty heading IDs warn and are omitted.
+- Styling, container, rich-content, semantic-replacement, and interaction escape hatches are ignored with development warnings.
+- Long and localized strings wrap without fixed height, ellipsis, or clipping.
+- Fluid keeps the exact approved clamp; callers cannot alter its bounds through props.
 
-| Value | Meaning |
-| --- | --- |
-| `none` | Flat. Default for in-flow content. |
-| `low` | Minimal functional separation on an owned surface. |
-| `floating` | Only when the component is inside a truly floating layer. |
+## 12. Availability and adoption
 
-Elevation is ignored when `surface="none"`. A shadow without a surface creates a diffuse halo around text and fails the Slate craft bar.
+TitleBlock is available from the public design-system barrel:
 
-### 7.7 Padding
-
-| Value | Meaning |
-| --- | --- |
-| `none` | Bare title content. Default. |
-| `compact` | 8px internal space. |
-| `regular` | 12px internal space. |
-
-A surface or border cannot use `padding="none"`; the implementation normalizes that invalid combination to `regular` and warns in development. This guardrail prevents text and icons from touching a visible boundary.
-
-## 8. Canonical forms
-
-### 8.1 Bare page identity
-
-```jsx
-<TitleBlock
-  as="h1"
-  size="page"
-  title="Investments"
-  subtitle="Margin account"
-  icon={<ProviderMark />}
-/>
+```js
+import { TitleBlock } from './components/design-system/index.js';
 ```
 
-The surrounding page—not `TitleBlock`—positions synchronization actions and market-data state.
-
-### 8.2 Section identity without icon
-
-```jsx
-<TitleBlock
-  as="h2"
-  size="section"
-  title="Positions"
-  subtitle="7 positions"
-/>
-```
-
-Do not render an empty icon frame simply to align this title with another component.
-
-### 8.3 Contained compact identity
-
-```jsx
-<TitleBlock
-  as="h3"
-  size="compact"
-  title="Saved evidence"
-  surface="raised"
-  border="subtle"
-  padding="compact"
-  width="full"
-/>
-```
-
-Use only when the title block itself owns the contained region. If a parent panel already has a border and background, return to the bare form.
-
-## 9. Content guidance
-
-### Title
-
-- Use sentence case.
-- Name the object or area directly.
-- Prefer one to four words.
-- Do not add decorative eyebrow copy that repeats the title.
-- Do not include status, timestamps, counts, or actions in the title string.
-
-### Subtitle
-
-- Add it only when it changes understanding.
-- Keep it specific to the current context.
-- Avoid slogans and promotional copy.
-- Avoid repeating the title in a longer sentence.
-- Do not place implementation stages or developer fixtures in production subtitles.
-
-Good:
-
-- `Investments` / `Margin account`
-- `Connected Accounts` / `Manage access to Google and Questrade`
-- `Saved evidence` / `Latest complete portfolio copy`
-
-Avoid:
-
-- `Investments Workspace` / `Welcome to your powerful personal investment workspace`
-- `Status` / `Status information`
-- `Questrade Stage 3B` / `Development-only component verification`
-
-## 10. Accessibility
-
-- Choose the heading element from the actual document outline.
-- Use only one page `h1` unless the document genuinely contains multiple independently named regions.
-- Decorative icons are hidden from assistive technology.
-- The title must carry the complete identity in text.
-- Do not truncate essential headings with ellipsis.
-- On narrow screens, allow title and subtitle to wrap naturally.
-- Use `headingId` when a region, dialog, or panel needs `aria-labelledby`.
-- `TitleBlock` is not focusable and does not invent a tab stop.
-
-## 11. Responsive behavior
-
-- The icon remains fixed in size.
-- The copy column uses `min-width: 0` so text can wrap instead of overflowing.
-- At 390px, essential text wraps; it is not removed to preserve a desktop silhouette.
-- Parent actions stack or move independently. They do not compress the title block into an unreadable strip.
-- Optional content disappears only because the caller omitted it—not because a breakpoint silently hides meaning.
-
-## 12. Do / do not
-
-### Do
-
-- Start a page with a bare page-size TitleBlock.
-- Choose heading semantics deliberately.
-- Use icons when they strengthen recognition.
-- Use one restrained subtitle when context matters.
-- Let the parent own actions and status.
-
-### Do not
-
-- Put buttons, menus, tabs, breadcrumbs, or status inside TitleBlock.
-- add a card surface by default.
-- add shadow to an in-flow page title.
-- use arbitrary colors, padding, radii, or fixed widths.
-- use the component as a clickable row.
-- create an empty icon well for alignment.
+The routed teaching page uses the production export and contract manifest. The release replaces the legacy TitleBlock implementation and its documentation-only examples. No production feature screens consumed the legacy export at replacement time, so availability does not silently migrate an operational workflow.
 
 ## 13. Acceptance checklist
 
-- [ ] The title is meaningful without its icon.
-- [ ] The heading level is correct in the full page hierarchy.
-- [ ] Optional content removes its space when absent.
-- [ ] Bare is used unless the component genuinely owns a surface.
-- [ ] No actions, status, or navigation were pushed inside.
-- [ ] No horizontal overflow occurs at 390px.
-- [ ] Essential title text remains readable without truncation.
-- [ ] The result uses Slate tokens and no page-specific color system.
+- [x] The default is page scale with title-only anatomy.
+- [x] `headingLevel` and `scale` remain independent.
+- [x] Page, section, and fluid measurements match the approved contract.
+- [x] Fluid uses the exact 34px–50px clamp and 25ch desktop measure.
+- [x] Optional description markup and spacing disappear together.
+- [x] The component has no visual container, icon, status, action, or motion.
+- [x] Shared theme roles govern font family and ink.
+- [x] The production CSS reconciles the late global token and heading overrides.
+- [x] Invalid required and controlled values have safe behavior.
+- [x] The public export remains `TitleBlock`.
+- [x] The complete contract is colocated in `TitleBlock.md`.
+- [x] The live production page is routed at `/docs/components/title-block`.
+- [x] Focused component and documentation tests pass.
+- [x] Desktop and exact-390 rendered evidence have no overflow or console errors.
+- [x] The independent Design/Experience Reviewer returns `YES — RELEASE QUALITY`.
 
 ---
 

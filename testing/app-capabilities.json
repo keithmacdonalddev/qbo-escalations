@@ -673,12 +673,15 @@
         "client/src/docs/DocsPages.jsx",
         "client/src/docs/docsNavigation.js",
         "client/src/docs/docs.css",
+        "client/src/docs/title-block-docs.css",
+        "client/src/components/design-system/TitleBlock/TitleBlock.jsx",
+        "client/src/components/design-system/TitleBlock/TitleBlock.css",
         "DESIGN.md",
         "docs/design-system/COMPONENT_LIBRARY.md"
       ],
       "requiredCheckTypes": ["component"],
       "evidence": [
-        { "type": "component", "groupId": "client-components", "paths": ["client/src/docs/DocsApp.test.jsx"] }
+        { "type": "component", "groupId": "client-components", "paths": ["client/src/docs/DocsApp.test.jsx", "client/src/components/design-system/TitleBlock/TitleBlock.test.jsx"] }
       ],
       "knownGaps": [
         "The sanitized desktop, exact-390px mobile, keyboard, reduced-motion, copy-success, specimen-fallback, search, and 404 browser evidence plus the independent release verdict are recorded in docs/design-system/docs-site-design-release-record.md. That human visual gate is not represented as a deterministic check-profile command."

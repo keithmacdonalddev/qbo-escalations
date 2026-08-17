@@ -1,0 +1,106 @@
+{
+  "name": "TitleBlock",
+  "slug": "title-block",
+  "classification": "primitive",
+  "status": "available",
+  "props": [
+    {
+      "name": "title",
+      "values": "non-empty string",
+      "default": "required",
+      "purpose": "Visible title and accessible heading name."
+    },
+    {
+      "name": "description",
+      "values": "non-empty string",
+      "default": "none",
+      "purpose": "One optional explanatory sentence."
+    },
+    {
+      "name": "headingLevel",
+      "values": "1 | 2 | 3",
+      "allowed": ["1", "2", "3"],
+      "default": "required",
+      "purpose": "Document-outline semantics independent from visual scale."
+    },
+    {
+      "name": "scale",
+      "values": "section | page | fluid",
+      "allowed": ["section", "page", "fluid"],
+      "default": "page",
+      "purpose": "Governed visual hierarchy without changing heading rank."
+    },
+    {
+      "name": "headingId",
+      "values": "non-empty string",
+      "default": "none",
+      "purpose": "Optional heading identifier for a parent aria-labelledby relationship."
+    }
+  ],
+  "blockedProps": [
+    "className",
+    "style",
+    "children",
+    "as",
+    "icon",
+    "subtitle",
+    "size",
+    "width",
+    "surface",
+    "border",
+    "elevation",
+    "padding",
+    "onClick",
+    "role",
+    "id",
+    "color",
+    "fontFamily",
+    "fontSize",
+    "tone",
+    "dangerouslySetInnerHTML"
+  ],
+  "assertions": [
+    {
+      "id": "required-title",
+      "sourceIncludes": "title must be a visible, non-empty string",
+      "testIncludes": "requires a visible title",
+      "docsIncludes": "An empty title renders nothing",
+      "explanationIncludes": "An empty title renders nothing"
+    },
+    {
+      "id": "semantic-scale-separation",
+      "sourceIncludes": "const Heading = `h${resolvedHeadingLevel}`",
+      "testIncludes": "keeps semantic heading level independent from visual scale",
+      "docsIncludes": "Heading level and visual scale stay independent.",
+      "explanationIncludes": "Heading level and visual scale stay independent."
+    },
+    {
+      "id": "optional-description",
+      "sourceIncludes": "resolvedDescription ? <p",
+      "testIncludes": "omits the optional description",
+      "docsIncludes": "Description markup and spacing disappear together",
+      "explanationIncludes": "Description markup and spacing disappear together"
+    },
+    {
+      "id": "closed-visual-contract",
+      "sourceIncludes": "BLOCKED_PROP_VALUES",
+      "testIncludes": "ignores blocked styling and interaction props",
+      "docsIncludes": "Styling and interaction escape hatches are ignored",
+      "explanationIncludes": "Styling and interaction escape hatches are ignored"
+    },
+    {
+      "id": "safe-heading-id",
+      "sourceIncludes": "id={resolvedHeadingId}",
+      "testIncludes": "normalizes invalid heading identifiers",
+      "docsIncludes": "Whitespace-only heading IDs are ignored.",
+      "explanationIncludes": "Whitespace-only heading IDs are ignored."
+    },
+    {
+      "id": "scale-fallback",
+      "sourceIncludes": "function chooseScale",
+      "testIncludes": "falls back to page scale",
+      "docsIncludes": "Unsupported scales warn and fall back to page.",
+      "explanationIncludes": "Unsupported scales warn and fall back to page."
+    }
+  ]
+}

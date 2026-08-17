@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { Button, MetadataLine, StatusIndicator, TitleBlock } from '../components/design-system/index.js';
 import BUTTON_CONTRACT from '../components/design-system/Button/Button.contract.json';
+import TITLE_BLOCK_CONTRACT from '../components/design-system/TitleBlock/TitleBlock.contract.json';
 import { DOC_GROUPS, DOC_HOME } from './docsNavigation.js';
 import { DocsLink, Icon } from './DocsApp.jsx';
 import './button-docs.css';
+import './title-block-docs.css';
 
 const PAGE_TOC = {
   '/docs': [
@@ -125,15 +127,6 @@ const PAGE_TOC = {
     ['decision', 'Release decision'],
   ],
 };
-
-function SparkIcon() {
-  return (
-    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
-      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
-      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.8" />
-    </svg>
-  );
-}
 
 function ClockIcon() {
   return (
@@ -443,7 +436,7 @@ function OnPageMobileAnchor() {
 }
 
 function UsagePage({ adjacent, currentItem, currentPath, navigate }) {
-  const compositionCode = `import { MetadataLine, StatusIndicator, TitleBlock }\n  from './components/design-system/index.js';\n\n<section aria-labelledby="account-title">\n  <TitleBlock\n    as="h2"\n    headingId="account-title"\n    title="Connected account"\n    subtitle="Read-only portfolio access"\n  />\n  <StatusIndicator state="connected" label="Questrade connected" />\n  <MetadataLine items={[\n    { label: 'Verified', value: 'just now' },\n    { value: 'Local evidence' },\n  ]} />\n</section>`;
+  const compositionCode = `import { MetadataLine, StatusIndicator, TitleBlock }\n  from './components/design-system/index.js';\n\n<section aria-labelledby="account-title">\n  <TitleBlock\n    headingId="account-title"\n    headingLevel={2}\n    title="Connected account"\n    description="Read-only portfolio access"\n  />\n  <StatusIndicator state="connected" label="Questrade connected" />\n  <MetadataLine items={[\n    { label: 'Verified', value: 'just now' },\n    { value: 'Local evidence' },\n  ]} />\n</section>`;
   return (
     <ArticleFrame adjacent={adjacent} currentItem={currentItem} currentPath={currentPath} navigate={navigate}>
       <ArticleHeader currentItem={currentItem} eyebrow="Getting started" lead="Choose by meaning, import through the public boundary, and keep product data and actions in the parent." navigate={navigate} />
@@ -459,7 +452,7 @@ function UsagePage({ adjacent, currentItem, currentPath, navigate }) {
         <CodeBlock code={compositionCode} label="React composition" />
         <Specimen label="Valid parent composition" description="Three primitives remain distinct siblings.">
           <div className="docs-composition-example">
-            <TitleBlock as="h3" title="Connected account" subtitle="Read-only portfolio access" />
+            <TitleBlock description="Read-only portfolio access" headingLevel={3} title="Connected account" />
             <StatusIndicator state="connected" label="Questrade connected" />
             <MetadataLine items={[{ label: 'Verified', value: 'just now' }, { value: 'Local evidence' }]} />
           </div>
@@ -672,73 +665,119 @@ function MotionPage({ adjacent, currentItem, currentPath, navigate }) {
   );
 }
 
-const TITLE_BLOCK_MINIMAL = `<TitleBlock\n  title="Workspace"\n/>`;
-const TITLE_BLOCK_FULL = `<TitleBlock\n  as="h1"\n  size="page"\n  title="Investments"\n  subtitle="Margin account"\n  icon={<PortfolioIcon />}\n/>`;
+const TITLE_BLOCK_MINIMAL = `<TitleBlock
+  headingLevel={1}
+  title="Operations workspace"
+/>`;
+const TITLE_BLOCK_FLUID = `<TitleBlock
+  headingId="operations-intelligence-title"
+  headingLevel={1}
+  scale="fluid"
+  title="Operational intelligence"
+  description="Understand the current situation, preserve the evidence, and move the next decision forward."
+/>`;
+const TITLE_BLOCK_COMPOSITION = `<section aria-labelledby="evidence-review-title">
+  <TitleBlock
+    headingId="evidence-review-title"
+    headingLevel={2}
+    scale="section"
+    title="Evidence review"
+    description="Compare source quality before deciding."
+  />
+  {/* Status, metadata, and actions remain siblings. */}
+</section>`;
 
 function TitleBlockPage({ adjacent, currentItem, currentPath, navigate }) {
+  const titleBlockProps = TITLE_BLOCK_CONTRACT.props.map((prop) => [
+    prop.name,
+    prop.values,
+    prop.default,
+    prop.purpose,
+  ]);
+
   return (
     <ArticleFrame adjacent={adjacent} currentItem={currentItem} currentPath={currentPath} navigate={navigate}>
-      <ArticleHeader currentItem={currentItem} eyebrow="Component 01 · Primitive" lead="TitleBlock gives a page, section, or compact panel a clear identity without turning that identity into a catch-all header." navigate={navigate} status="Available" />
-      <DocSection id="overview" title="Overview" intro="The title is the first visual stop. An optional icon improves recognition; an optional subtitle resolves one useful uncertainty.">
-        <p>The component is quiet, hierarchical, and selective about decoration. Its purpose is identity—not navigation, status, metadata, or action. Those responsibilities remain siblings in a parent composition so the title can stay stable across the platform.</p>
-        <CodeBlock code={TITLE_BLOCK_MINIMAL} label="Minimum valid usage" />
+      <section aria-labelledby="title-block-page-title" className="docs-title-block-cover" id="overview">
+        <div className="docs-title-block-cover__copy">
+          <p className="docs-title-block-kicker">Component 01 · Primitive · Available</p>
+          <TitleBlock description="A typography-led primitive that names the current work area and optionally explains its purpose." headingId="title-block-page-title" headingLevel={1} scale="fluid" title="TitleBlock" />
+        </div>
+        <div aria-label="Live TitleBlock specimen" className="docs-title-block-cover__specimen">
+          <div><span className="docs-title-block-specimen-label">Canonical default</span><TitleBlock headingLevel={2} title="Operations workspace" /></div>
+          <div aria-label="TitleBlock contract summary" className="docs-title-block-cover__summary" role="list">
+            <div role="listitem"><strong>Anatomy</strong><span>title + optional description</span></div>
+            <div role="listitem"><strong>Scale</strong><span>section / page / fluid</span></div>
+            <div role="listitem"><strong>Surface</strong><span>transparent, parent-owned</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="title-block-glance-title" className="docs-title-block-glance" id="at-a-glance">
+        <header><p className="docs-title-block-kicker">Live production specimens</p><h2 id="title-block-glance-title">One anatomy, three scales</h2><p>Every scale preserves the same reading order, color roles, omission behavior, and native heading semantics.</p></header>
+        <div className="docs-title-block-glance__board">
+          <article><span>Page · default</span><TitleBlock description="The current operational context." headingLevel={3} title="Operations workspace" /></article>
+          <article><span>Section</span><TitleBlock description="Accepted conclusions and their evidence." headingLevel={3} scale="section" title="Recent decisions" /></article>
+          <article className="docs-title-block-glance__fluid"><span>Fluid · opt in</span><TitleBlock description="Understand the situation, preserve the evidence, and move the next decision forward." headingLevel={3} scale="fluid" title="Operational intelligence" /></article>
+        </div>
+      </section>
+
+      <nav aria-label="TitleBlock specification chapters" className="docs-title-block-map" id="specification-map">
+        <strong>Specification map</strong>
+        <div><a href="#anatomy">Anatomy</a><a href="#visual-system">Visual system</a><a href="#states">States</a><a href="#usage">Usage</a><a href="#api">API</a><a href="#accessibility">Accessibility</a><a href="#quality">Quality</a></div>
+      </nav>
+
+      <DocSection id="anatomy" title="Purpose, boundary, and anatomy" intro="TitleBlock answers one question—what work area is this, and what is it for?">
+        <div className="docs-title-block-two-column">
+          <div><h3>Component owns</h3><ul><li>One native heading selected through <code>headingLevel</code>.</li><li>Title typography and natural wrapping.</li><li>One optional description and its internal gap.</li><li>Section, page, and fluid visual scales.</li><li>Safe omission and fallback behavior.</li></ul></div>
+          <div><h3>Parent owns</h3><ul><li>Outer width, placement, alignment, and margins.</li><li>Breadcrumbs, navigation, status, metadata, and actions.</li><li>Loading, failure, recovery, persistence, and announcements.</li><li>The complete document outline and labelled region.</li><li>Whether the optional sentence resolves real uncertainty.</li></ul></div>
+        </div>
+        <pre className="docs-anatomy"><code>{`TitleBlock\n├─ heading element                 required\n│  └─ visible title string        required\n└─ description paragraph?         optional\n   └─ short sentence string       required when present`}</code></pre>
+        <p>Description markup and spacing disappear together when the sentence is absent or invalid. No icon column, eyebrow, badge, action rail, surface, or placeholder remains.</p>
+        <CodeBlock code={TITLE_BLOCK_MINIMAL} label="Canonical default" />
       </DocSection>
-      <DocSection id="specimen" title="Specimens" intro="The canonical default is bare because the surrounding page or panel usually owns the surface.">
-        <Specimen>
-          <TitleBlock as="h3" size="page" title="Workspace" />
-        </Specimen>
-        <Specimen label="Optional identity treatment" description="Icon and subtitle earn their space when they improve recognition and context.">
-          <TitleBlock as="h3" icon={<SparkIcon />} size="page" subtitle="Current operational context" title="Workspace" />
-        </Specimen>
-        <Specimen label="Contained compact treatment" description="Use only when the title block itself owns this bounded region.">
-          <TitleBlock as="h3" border="subtle" padding="compact" size="compact" subtitle="Latest complete portfolio copy" surface="raised" title="Saved evidence" width="full" />
-        </Specimen>
+
+      <DocSection id="visual-system" title="Visual system and responsive geometry" intro="The hierarchy comes from governed typography—not a decorative container.">
+        <div className="docs-title-block-scale-table" role="table" aria-label="TitleBlock scale measurements">
+          <div className="docs-title-block-scale-table__header" role="row"><span role="columnheader">Scale</span><span role="columnheader">Heading</span><span role="columnheader">Description</span><span role="columnheader">Gap</span></div>
+          <div role="row"><strong role="cell">Page</strong><span role="cell">28px · 22px below 720px</span><span role="cell">14px · 68ch</span><span role="cell">6px</span></div>
+          <div role="row"><strong role="cell">Section</strong><span role="cell">18px</span><span role="cell">13px · 62ch</span><span role="cell">4px</span></div>
+          <div role="row"><strong role="cell">Fluid</strong><span role="cell">clamp(34px, 4.2vw, 50px) · 25ch</span><span role="cell">15px · 60ch</span><span role="cell">8px</span></div>
+        </div>
+        <div className="docs-title-block-two-column">
+          <div><h3>Theme roles</h3><p>The heading uses <code>--ink</code> and the description uses <code>--ink-secondary</code>. Both use <code>--font-sans</code>. There are no color or font-family props, so global theme changes remain coherent.</p></div>
+          <div><h3>Cascade reconciliation</h3><p>The late density stylesheet changes similarly named global type tokens and forces generic headings to 600. TitleBlock owns its exact sizes and uses narrowly scoped rules to preserve 660 weight and scale-specific tracking without changing unrelated screens.</p></div>
+        </div>
+        <Callout title="The frame is not the component">Borders, padding, radius, background, and outer width shown around specimens belong to this documentation page. The production TitleBlock root remains transparent and has no built-in container.</Callout>
       </DocSection>
-      <DocSection id="use" title="When to use" intro="Use TitleBlock when one stable area needs a semantic heading and, optionally, a small amount of identity context.">
-        <DoAvoid doItems={['Name a page, major section, panel, or popover.', 'Use one restrained subtitle when it changes understanding.', 'Let the parent position actions and status.']} avoid={['Build a complete PageHeader inside it.', 'Use it as a clickable row.', 'Add a surface merely to make a title feel important.']} />
+
+      <DocSection id="states" title="State and interaction contract" intro="TitleBlock is static; resting is its only intrinsic state.">
+        <p>Hover, keyboard focus, pressed, selected, disabled, loading, success, failure, recovery, confirmation, and announcements are not applicable. The component never enters the tab order, never attaches an action, and adds no transition or animation. Reduced-motion behavior therefore requires no alternate presentation.</p>
+        <p>When surrounding work loads or fails, the known title stays stable and the parent places truthful progress or recovery below it. Turning the title into a link, button, live region, skeleton, or status message would change its job and requires another component.</p>
       </DocSection>
-      <DocSection id="anatomy" title="Anatomy" intro="Only the semantic heading is required.">
-        <pre className="docs-anatomy"><code>{`TitleBlock\n├─ icon?        optional decorative identity\n└─ copy\n   ├─ heading   required h1, h2, or h3\n   └─ subtitle? optional supporting context`}</code></pre>
-        <p>When the icon or subtitle is omitted, its markup and spacing disappear. No placeholder column remains for alignment.</p>
+
+      <DocSection id="usage" title="Usage, content, and composition" intro="Use the smallest scale that truthfully matches the importance and available space.">
+        <div className="docs-title-block-usage-grid"><article><strong>Page</strong><p>The normal identity of a route or workspace. This is the canonical default.</p></article><article><strong>Section</strong><p>A substantial subdivision that benefits from the shared title-description rhythm.</p></article><article><strong>Fluid</strong><p>A short identity-first title in a broad layout with an explicit vertical-space budget.</p></article></div>
+        <DoAvoid doItems={['Use direct sentence-case nouns.', 'Add one short sentence only when it resolves uncertainty.', 'Choose headingLevel from the document outline.', 'Let long and localized text wrap.']} avoid={['Promotional slogans or repeated eyebrow copy.', 'Warnings, status, timestamps, or raw identifiers in the description.', 'Fluid inside a narrow desktop rail.', 'Icons, badges, links, or actions inside the title line.']} />
+        <h3>Valid parent composition</h3><CodeBlock code={TITLE_BLOCK_COMPOSITION} label="TitleBlock with parent-owned siblings" />
+        <p>StatusIndicator communicates current state, MetadataLine communicates supporting facts, and Button initiates action. They may appear beside TitleBlock in a parent-owned header, but none becomes part of this primitive.</p>
       </DocSection>
-      <DocSection id="rationale" title="Design rationale" intro="Identity is created through typography first; surrounding treatment is a controlled exception.">
-        <h3>Hierarchy and typography</h3><p>The title uses the strongest weight and darkest available ink so the eye stops there first. The subtitle is smaller and uses secondary ink, keeping it readable without competing. Their tight vertical spacing makes both lines read as one unit.</p>
-        <h3>Icon and silhouette</h3><p>The horizontal icon-and-copy layout creates a recognizable silhouette for medium and large identities. The icon is optional, fixed in size, and decorative because the title carries the full meaning. TitleBlock does not manufacture an icon well; the supplied icon keeps its own approved treatment.</p>
-        <h3>Surface and depth</h3><p>The default intentionally has no card, border, padding, or shadow. A visible container is justified only when TitleBlock owns a real contained region. Raised and elevated surfaces remain restrained Slate presets; floating elevation is reserved for a genuinely floating parent layer.</p>
-        <h3>Spacing</h3><p>Space between icon and copy is larger than the two-pixel gap within the text stack. That asymmetric grouping distinguishes symbol from meaning while keeping title and subtitle together. Generous page whitespace belongs to the parent layout rather than being baked into the primitive.</p>
-        <Callout title="Why the default is not a white card">The light-card reference is a useful study in hierarchy, but it would introduce a second visual language and make an ordinary heading feel like a dashboard widget. Slate achieves separation through placement and type before adding a surface.</Callout>
+
+      <DocSection id="api" title="React API and safeguards" intro="Five props keep semantics, visual scale, optional information, and integration identity separate.">
+        <CodeBlock code={TITLE_BLOCK_FLUID} label="Full fluid example" />
+        <PropTable caption="TitleBlock props" rows={titleBlockProps} />
+        <ul className="docs-check-list"><li>An empty title renders nothing and reports a development error.</li><li>Unsupported heading levels fall back to <code>h2</code>.</li><li>Unsupported scales warn and fall back to page.</li><li>Whitespace-only heading IDs are ignored.</li><li>Styling and interaction escape hatches are ignored with development warnings.</li><li>Long descriptions warn but remain visible rather than being truncated.</li></ul>
+        <p>Heading level and visual scale stay independent. <code>headingLevel={1}</code> with <code>scale="section"</code> is valid, as is <code>headingLevel={2}</code> with <code>scale="fluid"</code>.</p>
       </DocSection>
-      <DocSection id="variants" title="Variants" intro="Variants express recurring hierarchy and ownership—not arbitrary styling preference.">
-        <div className="docs-variant-list"><article><strong>Page</strong><span>22px heading · 36px icon</span><p>One route or primary document identity.</p></article><article><strong>Section</strong><span>18px heading · 28px icon</span><p>A major area within one route.</p></article><article><strong>Compact</strong><span>14px heading · 20px icon</span><p>Dense panel, popover, or module identity.</p></article></div>
-        <p>Visual size and heading level are independent. A compact visual title can still be an <code>h2</code> when the document outline requires it.</p>
+
+      <DocSection id="accessibility" title="Accessibility and narrow-width behavior" intro="Native headings, complete text, and deliberate hierarchy do the accessibility work.">
+        <ul className="docs-check-list"><li><code>headingLevel</code> renders a native <code>h1</code>, <code>h2</code>, or <code>h3</code>.</li><li>The visible title is the accessible heading name.</li><li><code>headingId</code> lets a parent use <code>aria-labelledby</code> without creating a landmark here.</li><li>The description remains ordinary following text and is not announced twice through forced ARIA.</li><li>Color is reinforced by size, weight, position, and wording rather than carrying meaning alone.</li><li>At exactly 390px, all strings remain visible with no fixed height, line clamp, ellipsis, or horizontal overflow.</li></ul>
+        <p>Fluid responds to viewport width rather than its own container. On a wide screen inside a narrow rail it can resolve near 50px and wrap heavily, so fluid is restricted to broad identity-first placements. Container-aware scaling would be a separate material contract change.</p>
       </DocSection>
-      <DocSection id="content" title="Content guidance" intro="Name the object directly and add context only when it changes understanding.">
-        <DoAvoid doItems={['“Investments” / “Margin account”', '“Connected accounts” / “Manage access to Google and Questrade”', 'One to four words for most titles.']} avoid={['Promotional slogans.', 'Status, timestamps, counts, or actions inside the title string.', 'An eyebrow that merely repeats the title.']} />
-      </DocSection>
-      <DocSection id="responsive" title="Responsive behavior" intro="Text wraps; meaning is never removed merely to preserve a desktop silhouette.">
-        <p>The icon remains fixed. The copy column can shrink and wrap. At exactly 390px, title and subtitle retain readable sizes and break long words safely. Parent actions stack or move independently instead of squeezing the identity into an unreadable strip.</p>
-      </DocSection>
-      <DocSection id="accessibility" title="Accessibility" intro="The caller chooses the heading level from the full page outline.">
-        <ul className="docs-check-list"><li>Use one route <code>h1</code> unless the document truly has independent regions.</li><li>Keep the title meaningful without the icon.</li><li>Use <code>headingId</code> for labelled regions or dialogs.</li><li>Do not truncate essential headings.</li><li>Do not make TitleBlock focusable or clickable.</li></ul>
-      </DocSection>
-      <DocSection id="api" title="API" intro="Content and controlled semantic presets form the public contract.">
-        <CodeBlock code={TITLE_BLOCK_FULL} label="Full example" />
-        <PropTable caption="TitleBlock props" rows={[
-          ['title', 'React phrasing content', 'required', 'Complete text identity.'],
-          ['as', 'h1 | h2 | h3', 'h2', 'Semantic heading level.'],
-          ['size', 'page | section | compact', 'section', 'Controlled visual hierarchy.'],
-          ['icon', 'React element', 'none', 'Optional decorative identity.'],
-          ['subtitle', 'React phrasing content', 'none', 'One useful line of context.'],
-          ['width', 'auto | full', 'auto', 'Component width behavior.'],
-          ['surface', 'none | raised | elevated | floating', 'none', 'Owned Slate surface.'],
-          ['border', 'none | subtle | strong', 'none', 'Controlled boundary.'],
-          ['elevation', 'none | low | floating', 'none', 'Functional depth on a named surface.'],
-          ['padding', 'none | compact | regular', 'none', 'Internal space for contained treatments.'],
-        ]} />
-      </DocSection>
-      <DocSection id="boundary" title="Composition boundary" intro="A PageHeader may compose TitleBlock with siblings. TitleBlock itself stays focused on identity.">
-        <pre className="docs-anatomy"><code>{`PageHeader\n├─ TitleBlock\n├─ MetadataLine?\n├─ StatusIndicator?\n└─ actions?`}</code></pre>
-        <p>Breadcrumbs, tabs, menus, status, and primary actions belong to the parent. Adding them to TitleBlock would make every use inherit responsibilities it does not need.</p>
+
+      <DocSection id="quality" title="Quality, availability, and tradeoffs" intro="The component is available; feature adoption remains a separate decision.">
+        <div className="docs-title-block-quality"><div><strong>Available</strong><span>Public export, contract, focused tests, and this routed page move together.</span></div><div><strong>Adoption</strong><span>No production feature screen consumed the legacy component when V2 replaced it.</span></div><div><strong>Evidence</strong><span>Approved prototype plus production desktop and exact-390 renders are recorded beside the release.</span></div></div>
+        <p>The main tradeoff is strictness. String-only content and no styling escape hatches prevent title lines from becoming miniature layouts, but they also reject legitimate rich text. If repeated real consumers need one narrow capability, it should become a governed prop rather than opening unrestricted children.</p>
+        <p>The second limitation is fluid scaling: <code>vw</code> follows the viewport, not the parent. That simplicity is easy to explain and matches the approved formula, but it makes editorial and placement discipline essential. Page remains the operational default.</p>
       </DocSection>
     </ArticleFrame>
   );
