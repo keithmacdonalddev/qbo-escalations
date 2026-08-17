@@ -2,6 +2,8 @@
 
 Component type: `primitive`
 
+> Source revision, 2026-08-16: the fluid heading measure is now `25ch`. The existing prototype bitmap was intentionally not regenerated and still shows the earlier `18ch` measure.
+
 ## Component definition
 
 Title Block V2 is a static primitive that tells the user what area of work they are looking at and, when needed, gives one short sentence of purpose without turning orientation into a decorative banner. It is appropriate at the start of a page or a meaningful subsection where a consistent heading-and-description relationship improves scanning. It is not justified for every small card, table group, or control cluster; ordinary semantic headings remain the better choice when no reusable spacing or responsive contract is needed.
@@ -83,7 +85,7 @@ Page scale starts from `--text-2xl` (28px) with a proposed 1.16 line height and 
 
 Descriptions use `--text-base` (14px) at page scale, `--text-sm` (13px) at section scale, and `--text-md` (15px) at fluid scale. The internal gap uses `--sp-2` (6px) for page, `--sp-1` (4px) for section, and `--sp-3` (8px) for fluid. The 34px and 50px bounds are provisional component measurements requested by the user; they are not new global tokens and do not authorize changing `App.css` at the prototype stage.
 
-The description measure is capped near 68 characters at page scale, 62 at section scale, and 60 at fluid scale, while the component itself does not impose a fixed outer width. The fluid heading uses an 18-character measure on broad layouts to prevent a 50px sentence from stretching across the screen; that measure releases at narrow width. Both title and description use natural wrapping plus an emergency `overflow-wrap: anywhere` safeguard for unbroken identifiers. No ellipsis is allowed because truncating a title can hide the user's location.
+The description measure is capped near 68 characters at page scale, 62 at section scale, and 60 at fluid scale, while the component itself does not impose a fixed outer width. The fluid heading uses a 25-character measure on broad layouts so concise two-word titles can remain on one line without allowing a 50px sentence to stretch across the screen; that measure releases at narrow width. Both title and description use natural wrapping plus an emergency `overflow-wrap: anywhere` safeguard for unbroken identifiers. No ellipsis is allowed because truncating a title can hide the user's location.
 
 Borders, radii, shadows, and elevation are absent from the component. The prototype's specimen frames are explicitly presentation scaffolding and are not part of V2. This distinction is important: a contained panel may compose the primitive, but Title Block V2 does not own that layer or gain card styling through a `surface` prop.
 
@@ -95,7 +97,7 @@ If surrounding content loads, the parent keeps the known title stable and manage
 
 ## Responsive behavior
 
-The component flexes with its parent and has no fixed outer width. At exactly 390px, page scale steps from `--text-2xl` to `--text-xl` (22px) while preserving title weight, readable line height, and the full text. Section remains 18px. Fluid resolves to its 34px minimum because `4.2vw` is smaller than the lower bound at that viewport. Its 18-character desktop measure releases to the available width so narrow layouts do not become an unnecessarily thin text column.
+The component flexes with its parent and has no fixed outer width. At exactly 390px, page scale steps from `--text-2xl` to `--text-xl` (22px) while preserving title weight, readable line height, and the full text. Section remains 18px. Fluid resolves to its 34px minimum because `4.2vw` is smaller than the lower bound at that viewport. Its 25-character desktop measure releases to the available width so narrow layouts do not become an unnecessarily thin text column.
 
 Long titles wrap at word boundaries and may use multiple lines. Unbroken text can break anywhere as a last resort, preventing horizontal page overflow. Descriptions are never silently truncated or removed at mobile width. The parent controls surrounding horizontal padding; the prototype uses a narrow fluid specimen to prove the primitive itself does not overflow. Localization may expand both strings, so no fixed height, line clamp, or reserved one-line geometry is permitted.
 
