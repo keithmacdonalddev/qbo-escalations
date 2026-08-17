@@ -114,7 +114,7 @@ The primitive is deliberately text-only. It does not become a page header, card,
 
 The canonical default is a transparent page-scale title with no description. The caller supplies `headingLevel` deliberately, while `scale` defaults to `page`. The component owns no outer margin, fixed width, background, border, radius, elevation, icon, or animation.
 
-Page scale is 28px on desktop and 22px below 720px. Section scale is 18px. Fluid uses `clamp(34px, 4.2vw, 50px)` and a 25-character desktop measure. The app's late density stylesheet redefines the similarly named global type tokens and forces headings to 600 weight, so TitleBlock owns its approved measurements and narrowly protects its 660 weight, tracking, and ink without changing the rest of the application.
+Page scale is 28px on desktop and 22px below 720px. Section scale is 18px. Fluid uses `clamp(34px, 4.2vw, 50px)` and a 25-character desktop measure. TitleBlock intentionally uses the app's 600 heading weight without a weight-specific `!important`; it owns its approved measurements and narrowly protects only its tracking and semantic ink from the late density stylesheet.
 
 ## 6. Anatomy
 
@@ -153,11 +153,11 @@ The public API excludes `children`, `className`, `style`, `as`, legacy `subtitle
 | --- | --- | --- | --- | --- |
 | `page` | 28px desktop, 22px below 720px | 14px, max 68ch | 6px | Canonical page or workspace identity |
 | `section` | 18px | 13px, max 62ch | 4px | Meaningful subdivision inside one route |
-| `fluid` | 34px–50px clamp, max 25ch on broad layouts | 15px, max 60ch | 8px | Short identity-first title with deliberate space |
+| `fluid` | 34px–50px clamp, max 25ch on broad layouts | 15px, max 86ch (about 695px) | 8px | Short identity-first title with deliberate space |
 
 Heading level and visual scale are independent. An `h1` may use section scale when the document is visually compact, and an `h2` may use fluid scale inside a larger document. Scale never changes document semantics.
 
-TitleBlock has no fixed outer width. Page and section titles use their parent's available width. Fluid alone has a 25ch desktop measure, released to 100% below 720px. All text remains visible, wraps naturally, and uses emergency breaking for unbroken identifiers rather than ellipsis or line clamping.
+TitleBlock has no fixed outer width. Page and section titles use their parent's available width. Fluid alone has a 25ch desktop heading measure, released to 100% below 720px; its 86ch description measure resolves to approximately the same 695px maximum in the approved typography. All text remains visible, wraps naturally, and uses emergency breaking for unbroken identifiers rather than ellipsis or line clamping.
 
 ## 9. Visual system
 

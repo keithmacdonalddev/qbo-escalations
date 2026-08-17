@@ -741,11 +741,11 @@ function TitleBlockPage({ adjacent, currentItem, currentPath, navigate }) {
           <div className="docs-title-block-scale-table__header" role="row"><span role="columnheader">Scale</span><span role="columnheader">Heading</span><span role="columnheader">Description</span><span role="columnheader">Gap</span></div>
           <div role="row"><strong role="cell">Page</strong><span role="cell">28px · 22px below 720px</span><span role="cell">14px · 68ch</span><span role="cell">6px</span></div>
           <div role="row"><strong role="cell">Section</strong><span role="cell">18px</span><span role="cell">13px · 62ch</span><span role="cell">4px</span></div>
-          <div role="row"><strong role="cell">Fluid</strong><span role="cell">clamp(34px, 4.2vw, 50px) · 25ch</span><span role="cell">15px · 60ch</span><span role="cell">8px</span></div>
+          <div role="row"><strong role="cell">Fluid</strong><span role="cell">clamp(34px, 4.2vw, 50px) · 25ch</span><span role="cell">15px · 86ch</span><span role="cell">8px</span></div>
         </div>
         <div className="docs-title-block-two-column">
           <div><h3>Theme roles</h3><p>The heading uses <code>--ink</code> and the description uses <code>--ink-secondary</code>. Both use <code>--font-sans</code>. There are no color or font-family props, so global theme changes remain coherent.</p></div>
-          <div><h3>Cascade reconciliation</h3><p>The late density stylesheet changes similarly named global type tokens and forces generic headings to 600. TitleBlock owns its exact sizes and uses narrowly scoped rules to preserve 660 weight and scale-specific tracking without changing unrelated screens.</p></div>
+          <div><h3>Cascade reconciliation</h3><p>The late density stylesheet changes similarly named global type tokens and forces generic headings to 600. TitleBlock intentionally uses that 600 weight, owns its exact sizes, and narrowly protects only its scale-specific tracking and semantic ink without changing unrelated screens.</p></div>
         </div>
         <Callout title="The frame is not the component">Borders, padding, radius, background, and outer width shown around specimens belong to this documentation page. The production TitleBlock root remains transparent and has no built-in container.</Callout>
       </DocSection>

@@ -61,3 +61,12 @@ Gate unavailable reason, if any: none.
 - Open design risk or evidence gap: fluid uses viewport width rather than container width, so it remains an opt-in scale for broad identity-first placements. This is documented rather than hidden.
 - Main-agent completion decision: TitleBlock V2 is release-quality and available from the design-system barrel; feature adoption remains a separate approval scope.
 - Adoption status: available; no legacy consumers
+
+## Post-release preference correction — August 17, 2026
+
+- User-approved correction: reduce the TitleBlock heading weight from 660 to 600.
+- Cascade result: TitleBlock now declares `font-weight: 600` without a weight-specific `!important`. Its exact sizes are unchanged; narrowly scoped `!important` declarations remain only where the late global stylesheet would otherwise replace semantic ink or scale-specific tracking.
+- Focused rendered result: the existing live documentation route computed every TitleBlock specimen at weight 600 on both 1440px desktop and exactly 390px mobile. The approved 50px/28px/18px desktop sizes, 34px/22px/18px compact sizes, and zero horizontal overflow were preserved.
+- User-observed measure correction: the fluid description cap increased from 60ch (about 485px at 15px) to 86ch (about 695px), bringing its broad-layout measure into visual alignment with the fluid heading's roughly 694px maximum. Page and section measures are unchanged.
+- Focused measure result: at 1440px the live specimen computed a 693.97px heading maximum and a 695.39px description maximum, with both strings on one line. At 390px both use the available 298px content width, wrap naturally, and produce zero horizontal overflow.
+- Scope result: anatomy, scale sizes, spacing, public props, responsive behavior, and adoption status are unchanged.

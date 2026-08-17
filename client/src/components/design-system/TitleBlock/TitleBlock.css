@@ -14,7 +14,7 @@
   margin: 0;
   color: var(--ink, #e4e4e8) !important;
   font-family: var(--font-sans, Inter, system-ui, sans-serif);
-  font-weight: 660 !important;
+  font-weight: 600;
   text-wrap: balance;
 }
 
@@ -58,7 +58,7 @@
 }
 
 .qds-title-block[data-scale='fluid'] .qds-title-block__description {
-  max-width: 60ch;
+  max-width: 86ch;
   margin-top: var(--sp-3, 8px);
   font-size: 15px;
   line-height: 1.48;
