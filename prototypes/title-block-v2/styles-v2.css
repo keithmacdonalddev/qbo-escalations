@@ -1,0 +1,45 @@
+@import url('./styles.css');
+
+:root {
+  --text-md: 15px;
+}
+
+.specimen--fluid {
+  margin-top: var(--sp-6);
+}
+
+.specimen--stress {
+  width: min(100%, 520px);
+}
+
+.specimen--stress .specimen-stage--narrow {
+  width: 100%;
+}
+
+.specimen-stage--fluid {
+  min-height: 224px;
+}
+
+.qds-TitleBlockV2--fluid .qds-TitleBlockV2-heading {
+  max-width: 18ch;
+  font-size: clamp(34px, 4.2vw, 50px);
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+}
+
+.qds-TitleBlockV2--fluid .qds-TitleBlockV2-description {
+  max-width: 60ch;
+  margin-top: var(--sp-3);
+  font-size: var(--text-md);
+  line-height: 1.48;
+}
+
+@media (max-width: 720px) {
+  .specimen-stage--fluid {
+    min-height: 184px;
+  }
+
+  .qds-TitleBlockV2--fluid .qds-TitleBlockV2-heading {
+    max-width: 100%;
+  }
+}

@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Title Block V2 — Prototype v2</title>
+    <link rel="stylesheet" href="./styles-v2.css" />
+  </head>
+  <body>
+    <main class="prototype" aria-labelledby="prototype-title">
+      <header class="prototype-intro">
+        <p class="prototype-kicker">Design-system proposal · v2</p>
+        <h1 id="prototype-title">Title Block V2</h1>
+        <p>Three governed scales now include a large fluid title. The component itself remains transparent, static, and text-only.</p>
+      </header>
+
+      <section class="specimen specimen--canonical" aria-labelledby="canonical-label">
+        <div class="specimen-label-row">
+          <p class="specimen-label" id="canonical-label">Canonical default</p>
+          <p class="specimen-note">Page · 28px desktop / 22px narrow</p>
+        </div>
+
+        <div class="specimen-stage">
+          <div class="qds-TitleBlockV2 qds-TitleBlockV2--page">
+            <h2 class="qds-TitleBlockV2-heading">Operations workspace</h2>
+          </div>
+        </div>
+      </section>
+
+      <section class="specimen specimen--fluid" aria-labelledby="fluid-label">
+        <div class="specimen-label-row">
+          <p class="specimen-label" id="fluid-label">Fluid scale</p>
+          <p class="specimen-note">clamp(34px, 4.2vw, 50px)</p>
+        </div>
+
+        <div class="specimen-stage specimen-stage--fluid">
+          <div class="qds-TitleBlockV2 qds-TitleBlockV2--fluid">
+            <h2 class="qds-TitleBlockV2-heading">Operational intelligence</h2>
+            <p class="qds-TitleBlockV2-description">Understand the current situation, preserve the evidence, and move the next decision forward.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="specimen-grid">
+        <section class="specimen" aria-labelledby="description-label">
+          <div class="specimen-label-row">
+            <p class="specimen-label" id="description-label">Page with description</p>
+            <p class="specimen-note">Optional text</p>
+          </div>
+
+          <div class="specimen-stage">
+            <div class="qds-TitleBlockV2 qds-TitleBlockV2--page">
+              <h2 class="qds-TitleBlockV2-heading">Evidence review</h2>
+              <p class="qds-TitleBlockV2-description">Compare source quality, resolve conflicts, and preserve the reasoning behind the next decision.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="specimen" aria-labelledby="section-label">
+          <div class="specimen-label-row">
+            <p class="specimen-label" id="section-label">Section scale</p>
+            <p class="specimen-note">18px · title + description</p>
+          </div>
+
+          <div class="specimen-stage">
+            <div class="qds-TitleBlockV2 qds-TitleBlockV2--section">
+              <h2 class="qds-TitleBlockV2-heading">Recent decisions</h2>
+              <p class="qds-TitleBlockV2-description">The latest accepted conclusions and the evidence that supports them.</p>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="specimen specimen--stress" aria-labelledby="stress-label">
+        <div class="specimen-label-row">
+          <p class="specimen-label" id="stress-label">Fluid narrow-width stress case</p>
+          <p class="specimen-note">Narrow container · natural wrap</p>
+        </div>
+
+        <div class="specimen-stage specimen-stage--narrow">
+          <div class="qds-TitleBlockV2 qds-TitleBlockV2--fluid">
+            <h2 class="qds-TitleBlockV2-heading">Evidence continuity across connected providers</h2>
+            <p class="qds-TitleBlockV2-description">Keep the full title readable without truncation or horizontal overflow.</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="prototype-footer">
+        <span>Specimen frames are presentation scaffolding, not component containers.</span>
+        <span>Shared Slate color and font variables · no color props</span>
+      </footer>
+    </main>
+
+    <script src="./script-v2.js"></script>
+  </body>
+</html>
