@@ -1,0 +1,119 @@
+{
+  "name": "Modal",
+  "slug": "modal",
+  "classification": "interactive-control",
+  "status": "available",
+  "props": [
+    {
+      "name": "open",
+      "values": "boolean",
+      "default": "required",
+      "purpose": "Controls whether the focus-contained foreground layer is mounted."
+    },
+    {
+      "name": "title",
+      "values": "non-empty string",
+      "default": "required",
+      "purpose": "Visible heading and accessible name for the bounded task."
+    },
+    {
+      "name": "description",
+      "values": "non-empty string",
+      "default": "none",
+      "purpose": "Optional concise context announced with the title."
+    },
+    {
+      "name": "size",
+      "values": "compact | regular",
+      "allowed": ["compact", "regular"],
+      "default": "regular",
+      "purpose": "Governed 520px or 610px maximum shell width."
+    },
+    {
+      "name": "initialFocusRef",
+      "values": "React ref to a contained focus target",
+      "default": "dialog surface",
+      "purpose": "Optional caller-selected first focus target inside the layer."
+    },
+    {
+      "name": "footer",
+      "values": "ReactElement | ReactElement[]",
+      "default": "none",
+      "purpose": "Optional caller-owned actions, normally governed Button instances."
+    },
+    {
+      "name": "children",
+      "values": "ReactNode",
+      "default": "required",
+      "purpose": "Caller-owned task content within the scrolling body region."
+    },
+    {
+      "name": "onRequestClose",
+      "values": "function(reason: escape | backdrop | close-button)",
+      "default": "required",
+      "purpose": "Sole dismissal request boundary; the parent decides whether closing proceeds."
+    }
+  ],
+  "blockedProps": [
+    "className",
+    "style",
+    "as",
+    "role",
+    "aria-label",
+    "portalTarget",
+    "zIndex",
+    "backdropOpacity",
+    "motionDuration"
+  ],
+  "assertions": [
+    {
+      "id": "required-boundary",
+      "sourceIncludes": "title must be a visible, non-empty string",
+      "testIncludes": "rejects an incomplete accessible boundary",
+      "docsIncludes": "An empty title or missing close callback renders no layer and warns in development.",
+      "explanationIncludes": "invalid empty title renders nothing"
+    },
+    {
+      "id": "dismissal-reasons",
+      "sourceIncludes": "closeHandlerRef.current(reason)",
+      "testIncludes": "reports each governed dismissal reason",
+      "docsIncludes": "Escape, veil click, and the close control report distinct reasons",
+      "explanationIncludes": "escape | backdrop | close-button"
+    },
+    {
+      "id": "veil-gesture",
+      "sourceIncludes": "pointerStartedOnVeil.current",
+      "testIncludes": "requires pointer down and up on the veil",
+      "docsIncludes": "A drag that starts or ends on the surface never becomes a veil dismissal.",
+      "explanationIncludes": "requires pointer down and pointer up on the veil"
+    },
+    {
+      "id": "focus-loop",
+      "sourceIncludes": "event.key !== 'Tab'",
+      "testIncludes": "contains keyboard focus and restores the opener",
+      "docsIncludes": "Tab and Shift+Tab remain inside the open layer; closing restores the opener when it still exists.",
+      "explanationIncludes": "Tab and Shift+Tab loop"
+    },
+    {
+      "id": "background-protection",
+      "sourceIncludes": "element.setAttribute('inert', '')",
+      "testIncludes": "locks page scroll and makes background content inert",
+      "docsIncludes": "While open, the page behind the layer is inert and body scrolling is locked.",
+      "explanationIncludes": "background content becomes inert"
+    },
+    {
+      "id": "single-layer",
+      "sourceIncludes": "activeLayerOwner",
+      "testIncludes": "blocks a second simultaneous layer",
+      "docsIncludes": "A second simultaneous Modal is rejected instead of nesting focus traps.",
+      "explanationIncludes": "second simultaneous Modal is blocked"
+    },
+    {
+      "id": "controlled-size",
+      "sourceIncludes": "choose(size, SIZES",
+      "testIncludes": "falls back from an unsupported size",
+      "docsIncludes": "Unsupported sizes warn and fall back to regular.",
+      "explanationIncludes": "invalid size falls back to regular"
+    }
+  ]
+}

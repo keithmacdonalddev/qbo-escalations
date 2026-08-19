@@ -94,6 +94,14 @@ export const DOC_GROUPS = [
         searchTerms: ['button', 'action', 'primary', 'secondary', 'destructive', 'loading', 'disabled', 'sizes'],
         status: 'Available',
       },
+      {
+        path: '/docs/components/modal',
+        title: 'Modal',
+        description: 'Move one bounded task into a focus-contained foreground layer while preserving context.',
+        lastUpdated: '2026-08-18',
+        searchTerms: ['modal', 'dialog', 'focus trap', 'foreground', 'dismiss', 'escape', 'backdrop', 'portal'],
+        status: 'Available',
+      },
     ],
   },
   {

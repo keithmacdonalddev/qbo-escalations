@@ -5,6 +5,7 @@ import BUTTON_CONTRACT from '../components/design-system/Button/Button.contract.
 import TITLE_BLOCK_CONTRACT from '../components/design-system/TitleBlock/TitleBlock.contract.json';
 import { DOC_GROUPS, DOC_HOME } from './docsNavigation.js';
 import { DocsLink, Icon } from './DocsApp.jsx';
+import ModalPage from './ModalDocsPage.jsx';
 import './button-docs.css';
 import './title-block-docs.css';
 
@@ -118,6 +119,16 @@ const PAGE_TOC = {
     ['usage', 'Usage and content'],
     ['accessibility', 'Accessibility and responsive'],
     ['api', 'API and safeguards'],
+    ['quality', 'Quality and adoption'],
+  ],
+  '/docs/components/modal': [
+    ['overview', 'Overview'],
+    ['anatomy', 'Anatomy and ownership'],
+    ['visual-system', 'Visual system'],
+    ['states', 'States and interaction'],
+    ['usage', 'Usage and content'],
+    ['api', 'API and safeguards'],
+    ['accessibility', 'Accessibility and responsive'],
     ['quality', 'Quality and adoption'],
   ],
   '/docs/quality/release-checklist': [
@@ -1416,6 +1427,7 @@ const PAGE_COMPONENTS = {
   '/docs/components/status-indicator': StatusIndicatorPage,
   '/docs/components/metadata-line': MetadataLinePage,
   '/docs/components/button': ButtonPage,
+  '/docs/components/modal': ModalPage,
   '/docs/quality/release-checklist': ReleaseChecklistPage,
 };
 

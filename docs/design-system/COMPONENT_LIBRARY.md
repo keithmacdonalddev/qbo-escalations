@@ -1077,3 +1077,101 @@ For every component and every integration, ask:
 The acceptable answer is an immediate, evidence-supported, unqualified yes. A technically correct primitive can still fail because it is visually weak, miscomposed, misleading, inaccessible, or used in the wrong context. A beautiful specimen can still fail because the real workflow is incomplete.
 
 The user remains the final acceptance authority.
+
+---
+
+# Component 05 — `Modal`
+
+**Status:** `available`
+
+**Classification:** `interactive-control`
+
+**Approved baseline:** `docs/design-system/assets/modal/Modal-prototype-v1.png`
+
+**Detailed contract:** `client/src/components/design-system/Modal/Modal.md`
+
+**Live documentation:** `/docs/components/modal`
+
+**User approval:** August 18, 2026. The approved prototype freezes the regular and compact silhouette, safely dismissible interaction model, stable header/body/footer frame, and exact-390 responsive intent. Production adoption by existing feature workflows remains separate.
+
+## 59. Purpose and boundary
+
+`Modal` moves one bounded, safely dismissible task into the foreground while preserving the user's place in the underlying workspace. It owns the portal, focus veil, dialog labelling, close control, focus containment, dismissal reasons, scroll lock, stable shell regions, reduced motion, and focus return.
+
+The parent owns the work: open state, content, validation, requests, persistence, actions, permissions, analytics, outcome feedback, and whether a close request proceeds. `Modal` is not a workspace, route, mobile sheet, popover, alert-dialog tone, business-state container, or generic floating card.
+
+## 60. Anatomy and canonical default
+
+```text
+Modal
+├─ portal root
+│  └─ focus veil
+│     └─ dialog surface
+│        ├─ identity header
+│        │  ├─ required title
+│        │  ├─ optional description
+│        │  └─ close control
+│        ├─ scrolling body
+│        └─ optional action footer
+└─ captured opener
+```
+
+The canonical default uses the regular 610px maximum width, natural height up to `100dvh - 24px`, a required title and body, an optional one-sentence description, and no footer unless the parent supplies actions. `compact` changes the maximum width to 520px without changing semantics. Both sizes preserve 12px viewport insets.
+
+The internal `qds-focus-layer` and `qds-focus-veil` vocabulary is deliberate: it prevents the repository's late broad substring selectors for modal, dialog, overlay, and backdrop from mutating the governed production appearance.
+
+## 61. Public API
+
+| Prop | Type / values | Default | Contract |
+| --- | --- | --- | --- |
+| `open` | boolean | required | Controls whether the focus-contained foreground layer is mounted. |
+| `title` | non-empty string | required | Visible heading and accessible name for the bounded task. |
+| `description` | non-empty string | none | Optional concise context announced with the title. |
+| `size` | compact \| regular | regular | Governed 520px or 610px maximum shell width. |
+| `initialFocusRef` | React ref to a contained focus target | dialog surface | Optional caller-selected first focus target inside the layer. |
+| `footer` | ReactElement \| ReactElement[] | none | Optional caller-owned actions, normally governed Button instances. |
+| `children` | ReactNode | required | Caller-owned task content within the scrolling body region. |
+| `onRequestClose` | function(reason: escape \| backdrop \| close-button) | required | Sole dismissal request boundary; the parent decides whether closing proceeds. |
+
+The component rejects styling and semantic escape hatches, portal-target selection, raw stacking or veil values, motion timing, draggable/resizable behavior, automatic form submission, and nested layers. Adding a size, dismissal mode, persistent region, or non-dismissible state is a material contract change.
+
+## 62. Interaction and accessibility
+
+- Opening captures the opener, makes background content inert, locks body scrolling, and focuses a valid contained target or the dialog surface.
+- Tab and Shift+Tab loop through current enabled descendants.
+- Escape, true-veil pointer activation, and the close control request `escape`, `backdrop`, or `close-button` respectively.
+- Veil dismissal requires pointer down and pointer up on the veil; dragging across the surface boundary never closes the task.
+- Closing restores the opener when it still exists.
+- A second simultaneous Modal is blocked instead of nesting focus traps.
+- Reduced motion removes entry animation. Forced colors preserve the shell boundary, close control, and focus location.
+
+Modal has no loading, success, failure, retry, disabled, or destructive presentation. Those belong to the caller's task and composed Button controls.
+
+## 63. Responsive and content rules
+
+At exactly 390px, the shell resolves to 366px with 12px insets, 16px title type, 15px body insets, a 40px close target, fixed identity and action regions, and no horizontal overflow. Only the body scrolls after the natural shell reaches its viewport cap. Long titles, descriptions, content, and localized actions wrap rather than truncate.
+
+Use short sentence-case task titles and decision-specific verbs. Do not add a second header, decorative status strip, raw provider output, dashboard navigation, or implementation explanation to the component shell.
+
+## 64. Acceptance checklist
+
+- [x] The regular canonical shell appears before compact and mobile examples.
+- [x] Required title and body remain present in every supported use.
+- [x] Optional description and footer structurally disappear when omitted.
+- [x] Regular and compact change only governed geometry.
+- [x] Collision-resistant internal classes survive the effective cascade.
+- [x] Opening contains focus, protects the background, and locks page scroll.
+- [x] Every dismissal path reports exactly one governed reason.
+- [x] Dragging across the surface boundary cannot become a veil dismissal.
+- [x] Closing restores the opener when it remains available.
+- [x] A second simultaneous Modal is blocked with a development warning.
+- [x] The body scrolls while identity, close, and actions stay reachable.
+- [x] Exact-390 rendering retains insets, target size, readability, and reachability.
+- [x] Reduced-motion and forced-color behavior preserve meaning and focus.
+- [x] The component performs no feature operation or business-state announcement.
+- [x] Governed Button supplies footer action semantics.
+- [x] Source, contract, explanation, live docs, focused tests, rendered evidence, and release record agree.
+
+## 65. Adoption
+
+`Modal` is available from the public design-system barrel. No legacy consumers were migrated in this release. `ConfirmModal`, reporting, and agent panels remain feature-owned until each workflow receives separate adoption approval and complete rendered review.
